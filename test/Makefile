@@ -25,14 +25,8 @@ MISCFLAGS = -print-flags -show-timestamps -show-version # -steps 100000000000000
 RUNTIMEFLAGS = +RTS -K256M -RTS
 SIMEXE = $(BUILDDIR)/out
 
-# TESTFILE ?= SimDmaHandler.bsv
-# TOP ?= mkTestFixedLenSimDataStreamPipeOut
 TESTFILE ?= TestExtractAndPrependPipeOut.bsv
-# TOP ?= mkTestExtractAndPrependHeader
-TOP ?= mkTestExtractHeaderLongerThanDataStream
-# TOP ?= mkTestHeaderAndDataStreamConversion
-# TESTFILE ?= TestUtils.bsv
-# TOP ?= mkTestSegmentDataStream
+TOP ?= mkTestHeaderAndDataStreamConversion
 
 compile:
 	mkdir -p $(BUILDDIR)

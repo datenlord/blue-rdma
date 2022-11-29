@@ -9,32 +9,32 @@ import ScanFIFO :: *;
 import Settings :: *;
 import Utils :: *;
 
-// interface PipeOut #(type a);
-//     method a first();
+// interface PipeOut #(type anytype);
+//     method anytype first();
 //     method Action deq();
 //     method Bool notEmpty();
 // endinterface
 
 module mkWorkReqHandler#(
-    Controller controller,
+    Controller cntlr,
     FIFOF#(WorkReq) workReqQ
 )(PipeOut#(WorkReq));
     ScanFIFO#(MAX_PENDING_REQ_NUM, WorkReq) pendingQ <- mkScanFIFO;
     Reg#(PendingReqCnt) pendingReqCnt <- mkReg(0);
     Bool isScanMode = !pendingQ.scanDone;
-    Bool retryPulse = controller.getRetryPulse;
+    Bool retryPulse = cntlr.getRetryPulse;
 
     function Bool checkPendingReqNum();
-        return pendingReqCnt < controller.getPendingReqNumLimit;
+        return pendingReqCnt < cntlr.getPendingReqNumLimit;
     endfunction
 
     rule enq if (!isScanMode && checkPendingReqNum);
         let wr = workReqQ.first;
         workReqQ.deq;
-        let startPSN = controller.getNPSN;
+        let startPSN = cntlr.getNPSN;
         wr.startPSN = startPSN;
-        let {nextPSN, endPSN} = calcNextAndEndPSN(startPSN, wr.len, controller.getPMTU);
-        controller.setNPSN(nextPSN);
+        let { isOnlyReqPkt, pktNum, nextPSN, endPSN } = calcPktNumNextAndEndPSN(startPSN, wr.len, cntlr.getPMTU);
+        cntlr.setNPSN(nextPSN);
         wr.endPSN = endPSN;
         pendingQ.enq(wr);
         pendingReqCnt <= pendingReqCnt + 1;
@@ -70,7 +70,7 @@ module mkWorkReqHandler#(
 endmodule
 
 module mkRdmaReqHandler#(
-    Controller controller,
+    Controller cntlr,
     PipeOut#(WorkReq) workReqQ,
     DmaReadSrv dmaReadSrv
 )(PipeOut#(RdmaReq));
@@ -78,14 +78,14 @@ module mkRdmaReqHandler#(
     Vector#(MAX_PENDING_REQ_NUM, Reg#(WorkReq)) wrbuff <- replicateM(mkRegU);
     FIFOF#(RdmaReq) rdmaReqQ <- mkFIFOF;
 
-    rule sendDmaReadReq if (controller.isRTS);
+    rule sendDmaReadReq if (cntlr.isRTS);
         let token <- cbuff.reserve.get;
         let wr = workReqQ.first;
         workReqQ.deq;
         wrbuff[token] <= wr;
         let dmaReadReq = DmaReadReq {
-            initiator: SQ_RD,
-            sqpn: controller.getSQPN,
+            initiator: PAYLOAD_INIT_SQ_RD,
+            sqpn: cntlr.getSQPN,
             startAddr: wr.startAddr,
             len: wr.len,
             token: token
@@ -93,7 +93,7 @@ module mkRdmaReqHandler#(
         dmaReadSrv.request.put(dmaReadReq);
     endrule
 
-    rule recvDmaReadResp if (controller.isRTS);
+    rule recvDmaReadResp if (cntlr.isRTS);
         let dmaReadResp <- dmaReadSrv.response.get;
         let token = dmaReadResp.token;
         let wr = wrbuff[token];
@@ -105,18 +105,18 @@ module mkRdmaReqHandler#(
         cbuff.complete.put(tuple2(token, rdmaReq));
     endrule
 
-    rule seqOutRdmaReq if (controller.isRTS);
+    rule seqOutRdmaReq if (cntlr.isRTS);
         let rdmaReq <- cbuff.drain.get;
         rdmaReqQ.enq(rdmaReq);
     endrule
 
-    method RdmaReq first() if (controller.isRTS) = rdmaReqQ.first;
-    method Action deq() if (controller.isRTS) = rdmaReqQ.deq;
-    method Bool notEmpty() if (controller.isRTS) = rdmaReqQ.notEmpty;
+    method RdmaReq first() if (cntlr.isRTS) = rdmaReqQ.first;
+    method Action deq() if (cntlr.isRTS) = rdmaReqQ.deq;
+    method Bool notEmpty() if (cntlr.isRTS) = rdmaReqQ.notEmpty;
 endmodule
 
 module mkRdmaRespHandler#(
-    Controller controller,
+    Controller cntlr,
     PipeOut#(WorkReq) workReqQ,
     PipeOut#(RdmaResp) rdmaRespQ,
     DmaWriteSrv dmaWriteSrv
@@ -143,7 +143,7 @@ module mkRdmaRespHandler#(
             rdmaRespQ.deq;
         end
         else begin
-            controller.setRetryPulse;
+            cntlr.setRetryPulse;
             validRdmaRespQ.clear;
             status <= RESP_NORMAL;
         end
@@ -157,10 +157,10 @@ module mkRdmaRespHandler#(
         let wr = workReqQ.first;
         workReqQ.deq;
         if (wr.ackreq) begin
-            let t <- cbuff.reserve.get;
+            let token <- cbuff.reserve.get;
             let wc = WorkComp { id: wr.id, status: WR_FLUSH_ERR };
             let needWaitForDmaWriteResp = False;
-            pendingWorkCompQ.enq(tuple3(t, wc, needWaitForDmaWriteResp));
+            pendingWorkCompQ.enq(tuple3(token, wc, needWaitForDmaWriteResp));
         end
     endrule
 
@@ -197,7 +197,7 @@ module mkRdmaRespHandler#(
                 canDeqWR = errRdmaResp || (normalRdmaResp && respMatchWorkReqEnd)
                 canDeqResp = True;
 
-                // TODO: for read WR, it's error NAK if response is regular response not read response 
+                // TODO: for read WR, it's error NAK if regular response not read response
                 if (retryRdmaResp) begin
                     status <= RESP_EXPLICIT_RETRY;
                 end
@@ -230,7 +230,7 @@ module mkRdmaRespHandler#(
             //         status <= RESP_ERR;
             //     end
             // end
-            else if (psnInRangeExclusive(resp.psn, wr.endPSN, controller.getNPSN)) begin
+            else if (psnInRangeExclusive(resp.psn, wr.endPSN, cntlr.getNPSN)) begin
                 coalesce = True;
                 if (mustExplicitAck) begin
                     // Implicit retry
@@ -244,7 +244,7 @@ module mkRdmaRespHandler#(
             else begin
                 $display(
                     "Ghost ACK received: PSN=%h, nPSN=%h",
-                    resp.psn, controller.getNPSN
+                    resp.psn, cntlr.getNPSN
                 );
             end
 
@@ -287,8 +287,8 @@ module mkRdmaRespHandler#(
         let { resp, wr, maybeToken } = dmaWriteReqQ.first;
         dmaWriteReqQ.deq;
         let dmaWriteReq = DmaWriteReq {
-            initiator: SQ_WR,
-            sqpn: controller.getSQPN,
+            initiator: PAYLOAD_INIT_SQ_WR,
+            sqpn: cntlr.getSQPN,
             // TODO: set startAddr and len according to RDMA response
             startAddr: wr.startAddr,
             len: wr.len,
@@ -316,7 +316,7 @@ module mkRdmaRespHandler#(
             cbuff.complete.put(tuple2(token, wc));
         end
     endrule
-    
+
     rule seqOutWorkComp;
         let wc <- cbuff.drain.get;
         workCompQ.enq(wc);

@@ -1,5 +1,6 @@
 import FIFOF :: *;
 import PAClib :: *;
+import Vector :: *;
 
 import Assertions :: *;
 import DataTypes :: *;
@@ -7,59 +8,31 @@ import Headers :: *;
 import Settings :: *;
 import Utils :: *;
 
-function Tuple2#(HeaderFragNum, ByteEnBitNum) calcHeaderFragNumAndLastFragByeEnBitNum(
-    HeaderByteNum headerLen
-);
-    BusByteWidthMask busByteWidthMask = maxBound;
-    HeaderFragNum headerFragNum = truncate(headerLen >> valueOf(DATA_BUS_BYTE_NUM_WIDTH));
-    ByteEnBitNum headerLastFragByteEnBitNum = zeroExtend(truncate(headerLen) & busByteWidthMask);
-    if (!isZero(headerLen)) begin
-        if (isZero(headerLastFragByteEnBitNum)) begin
-            headerLastFragByteEnBitNum = fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
-        end
-        else begin
-            headerFragNum = headerFragNum + 1;
-        end
-    end
-    return tuple2(headerFragNum, headerLastFragByteEnBitNum);
-endfunction
-
-function HeaderAndByteEn leftAlignHeaderData(
-    HeaderAndByteEn rightAlignedHeaderAndByteEn
-);
-    Integer leftShiftByteAmt = 0;
-    for (Integer idx = 1; idx < valueOf(MAX_HEADER_FRAG_NUM); idx = idx + 1) begin
-        if (rightAlignedHeaderAndByteEn.headerFragNum == fromInteger(idx)) begin
-            leftShiftByteAmt = (valueOf(MAX_HEADER_FRAG_NUM) - idx) * valueOf(DATA_BUS_BYTE_WIDTH);
-        end
-    end
-    Integer leftShiftBitAmt = leftShiftByteAmt * 8;
-
-    ByteEnBitNum lastFragInvalidByteNum =
-        fromInteger(valueOf(DATA_BUS_BYTE_NUM_WIDTH)) - rightAlignedHeaderAndByteEn.lastFragValidByteNum;
-    BusBitNum lastFragInvalidBitNum = zeroExtend(lastFragInvalidByteNum) << 3;
-    
-    return HeaderAndByteEn {
-        headerData: truncate(rightAlignedHeaderAndByteEn.headerData << leftShiftBitAmt),
-        headerByteEn: truncate(rightAlignedHeaderAndByteEn.headerByteEn << leftShiftByteAmt),
-        headerFragNum: rightAlignedHeaderAndByteEn.headerFragNum,
-        lastFragValidByteNum: rightAlignedHeaderAndByteEn.lastFragValidByteNum
-    };
-endfunction
+interface HeaderDataStreamAndMetaDataPipeOut;
+    interface DataStreamPipeOut headerDataStream;
+    interface PipeOut#(HeaderMetaData) headerMetaData;
+endinterface
 
 module mkHeader2DataStream#(
-    PipeOut#(HeaderAndByteEn) headerPipeIn
-)(PipeOut#(DataStream));
-    FIFOF#(DataStream) dataOutQ <- mkFIFOF;
-    Reg#(HeaderAndByteEn) headerAndByteEnReg <- mkRegU;
+    PipeOut#(RdmaHeader) headerPipeIn
+)(HeaderDataStreamAndMetaDataPipeOut);
+    FIFOF#(DataStream) headerDataStreamOutQ <- mkFIFOF;
+    FIFOF#(HeaderMetaData) headerMetaDataOutQ <- mkFIFOF;
+    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
     Reg#(Bool) headerValidReg <- mkReg(False);
 
     rule outputHeader;
-        let curHeader = headerValidReg ? headerAndByteEnReg : headerPipeIn.first;
-        let remainingHeaderFragNum = curHeader.headerFragNum - 1;
+        let curHeader = headerValidReg ? rdmaHeaderReg : headerPipeIn.first;
+        if (!headerValidReg) begin
+            headerMetaDataOutQ.enq(curHeader.headerMetaData);
+        end
+        let remainingHeaderLen =
+            curHeader.headerMetaData.headerLen - fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
+        let remainingHeaderFragNum = curHeader.headerMetaData.headerFragNum - 1;
 
         HeaderData leftShiftHeaderData = truncate(curHeader.headerData << valueOf(DATA_BUS_WIDTH));
-        HeaderByteEn leftShiftHeaderByteEn = truncate(curHeader.headerByteEn << valueOf(DATA_BUS_BYTE_WIDTH));
+        HeaderByteEn leftShiftHeaderByteEn =
+            truncate(curHeader.headerByteEn << valueOf(DATA_BUS_BYTE_WIDTH));
 
         Bool isFirst = !headerValidReg;
         Bool isLast = False;
@@ -71,11 +44,15 @@ module mkHeader2DataStream#(
         else begin
             headerValidReg <= True;
 
-            headerAndByteEnReg <= HeaderAndByteEn {
+            rdmaHeaderReg <= RdmaHeader {
                 headerData: leftShiftHeaderData,
                 headerByteEn: leftShiftHeaderByteEn,
-                headerFragNum: remainingHeaderFragNum,
-                lastFragValidByteNum: curHeader.lastFragValidByteNum
+                headerMetaData: HeaderMetaData {
+                    headerLen: remainingHeaderLen,
+                    headerFragNum: remainingHeaderFragNum,
+                    lastFragValidByteNum: curHeader.headerMetaData.lastFragValidByteNum,
+                    hasPayload: curHeader.headerMetaData.hasPayload
+                }
             };
         end
 
@@ -86,90 +63,97 @@ module mkHeader2DataStream#(
             isLast: isLast
         };
         // $display(
-        //     "dataStream.data=%h, dataStream.byteEn=%h, leftShiftHeaderData=%h, leftShiftHeaderByteEn=%h",
-        //     dataStream.data, dataStream.byteEn, leftShiftHeaderData, leftShiftHeaderByteEn
+        //     "time=%0d: dataStream.data=%h, dataStream.byteEn=%h, leftShiftHeaderData=%h, leftShiftHeaderByteEn=%h",
+        //     $time, dataStream.data, dataStream.byteEn, leftShiftHeaderData, leftShiftHeaderByteEn
         // );
-        dataOutQ.enq(dataStream);
+        headerDataStreamOutQ.enq(dataStream);
     endrule
 
-    return convertFifo2PipeOut(dataOutQ);
-    // method DataStream first() = dataOutQ.first;
-    // method Action deq() = dataOutQ.deq;
-    // method Bool notEmpty() = dataOutQ.notEmpty;
+    interface headerDataStream = convertFifo2PipeOut(headerDataStreamOutQ);
+    interface headerMetaData = convertFifo2PipeOut(headerMetaDataOutQ);
 endmodule
 
 // dataPipeIn must have multi-fragment data no more than HeaderByteNum
 module mkDataStream2Header#(
-    PipeOut#(DataStream) dataPipeIn, PipeOut#(HeaderByteNum) headerLenPipeIn
-)(PipeOut#(HeaderAndByteEn));
-    FIFOF#(HeaderAndByteEn) headerOutQ <- mkFIFOF;
-    Reg#(HeaderAndByteEn) headerAndByteEnReg <- mkRegU;
-    Reg#(HeaderByteNum) headerLenReg <- mkRegU;
-    Reg#(HeaderFragNum) headerFragCntReg <- mkRegU;
-    Reg#(ByteEnBitNum) headerLastFragValidByteNumReg <- mkRegU;
+    DataStreamPipeOut dataPipeIn, PipeOut#(HeaderMetaData) headerMetaDataPipeIn
+)(PipeOut#(RdmaHeader));
+    FIFOF#(RdmaHeader) headerOutQ <- mkFIFOF;
+    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(HeaderMetaData) headerMetaDataReg <- mkRegU;
+    Reg#(HeaderByteNum) headerInvalidFragByteNumReg <- mkRegU;
+    Reg#(HeaderBitNum) headerInvalidFragBitNumReg <- mkRegU;
     Reg#(Bool) busyReg <- mkReg(False);
 
-    rule headerLenPop if (!busyReg);
+    rule headerMetaDataPop if (!busyReg);
         busyReg <= True;
-        let headerLen = headerLenPipeIn.first;
-        headerLenPipeIn.deq;
-        headerLenReg <= headerLen;
+        let headerMetaData = headerMetaDataPipeIn.first;
+        headerMetaDataPipeIn.deq;
+        headerMetaDataReg <= headerMetaData;
+        // $display("time=%0d: headerMetaData=", $time, fshow(headerMetaData));
 
         dynAssert(
-            !isZero(headerLen),
-            "headerLen non-zero assertion @ mkDataStream2Header",
-            $format("headerLen=%h should not be zero", headerLen)
+            !isZero(headerMetaData.headerLen),
+            "headerMetaData.headerLen non-zero assertion @ mkDataStream2Header",
+            $format(
+                "headerMetaData.headerLen=%h should not be zero",
+                headerMetaData.headerLen
+            )
         );
 
-        let { headerFragNum, headerLastFragValidByteNum } =
-            calcHeaderFragNumAndLastFragByeEnBitNum(headerLen);
-
-        headerFragCntReg <= headerFragNum - 1;
-        headerLastFragValidByteNumReg <= headerLastFragValidByteNum;
+        let { headerInvalidFragByteNum, headerInvalidFragBitNum } =
+            calcHeaderInvalidFragByteAndBitNum(headerMetaData.headerFragNum);
+        headerInvalidFragByteNumReg <= headerInvalidFragByteNum;
+        headerInvalidFragBitNumReg <= headerInvalidFragBitNum;
     endrule
 
     rule cumulate if (busyReg);
         let curDataStreamFrag = dataPipeIn.first;
         dataPipeIn.deq;
+        // $display(
+        //     "time=%0d: curDataStreamFrag.data=%h, curDataStreamFrag.byteEn=%h, headerMetaDataReg=",
+        //     $time, curDataStreamFrag.data, curDataStreamFrag.byteEn, fshow(headerMetaDataReg)
+        // );
 
-        let headerAndByteEn = headerAndByteEnReg;
-        let headerFragNum = headerAndByteEnReg.headerFragNum;
+        let rdmaHeader = rdmaHeaderReg;
+        let headerFragNum = rdmaHeaderReg.headerMetaData.headerFragNum;
         if (curDataStreamFrag.isFirst) begin
-            headerAndByteEn.headerData = zeroExtend(curDataStreamFrag.data);
-            headerAndByteEn.headerByteEn = zeroExtend(curDataStreamFrag.byteEn);
-            headerAndByteEn.headerFragNum = 1;
+            rdmaHeader.headerData = zeroExtend(curDataStreamFrag.data);
+            rdmaHeader.headerByteEn = zeroExtend(curDataStreamFrag.byteEn);
+            rdmaHeader.headerMetaData = headerMetaDataReg;
+            rdmaHeader.headerMetaData.headerFragNum = 1;
         end
         else begin
-            headerAndByteEn.headerData = truncate({ headerAndByteEn.headerData, curDataStreamFrag.data });
-            headerAndByteEn.headerByteEn = truncate({ headerAndByteEn.headerByteEn, curDataStreamFrag.byteEn });
-            headerAndByteEn.headerFragNum = headerAndByteEnReg.headerFragNum + 1;
+            rdmaHeader.headerData = truncate({ rdmaHeader.headerData, curDataStreamFrag.data });
+            rdmaHeader.headerByteEn = truncate({ rdmaHeader.headerByteEn, curDataStreamFrag.byteEn });
+            rdmaHeader.headerMetaData.headerFragNum = rdmaHeaderReg.headerMetaData.headerFragNum + 1;
         end
 
         if (curDataStreamFrag.isLast) begin
-            ByteEn headerLastFragByteEn = (1 << headerLastFragValidByteNumReg) - 1;
-            headerLastFragByteEn = reverseBits(headerLastFragByteEn);
-            headerAndByteEn.lastFragValidByteNum = headerLastFragValidByteNumReg;
-            headerOutQ.enq(headerAndByteEn);
+            rdmaHeader.headerData = rdmaHeader.headerData << headerInvalidFragBitNumReg;
+            rdmaHeader.headerByteEn = rdmaHeader.headerByteEn << headerInvalidFragByteNumReg;
+            ByteEn headerLastFragByteEn = genByteEn(rdmaHeader.headerMetaData.lastFragValidByteNum);
+            headerOutQ.enq(rdmaHeader);
+            busyReg <= False;
+            // $display("time=%0d: rdmaHeader=", $time, fshow(rdmaHeader));
 
             dynAssert(
                 headerLastFragByteEn == curDataStreamFrag.byteEn,
                 "headerLastFragByteEn assertion @ mkDataStream2Header",
                 $format(
-                    "headerLastFragByteEn=%h should == curDataStreamFrag.byteEn=%h",
-                    headerLastFragByteEn, curDataStreamFrag.byteEn
+                    "headerLastFragByteEn=%h should == curDataStreamFrag.byteEn=%h, headerLen=%0d",
+                    headerLastFragByteEn, curDataStreamFrag.byteEn, rdmaHeader.headerMetaData.headerLen
                 )
             );
             dynAssert(
-                isZero(headerFragCntReg),
-                "headerFragCntReg assertion @ mkDataStream2Header",
+                rdmaHeader.headerMetaData.headerFragNum == headerMetaDataReg.headerFragNum,
+                "headerMetaData.headerFragNum assertion @ mkDataStream2Header",
                 $format(
-                    "headerFragCntReg=%h should be zero when curDataStreamFrag.isLast=%b",
-                    headerFragCntReg, curDataStreamFrag.isLast
+                    "rdmaHeader.headerMetaData.headerFragNum=%h should == headerMetaDataReg.headerFragNum=%h when curDataStreamFrag.isLast=%b",
+                    rdmaHeader.headerMetaData.headerFragNum, headerMetaDataReg.headerFragNum, curDataStreamFrag.isLast
                 )
             );
         end
         else begin
-            headerFragCntReg <= headerFragCntReg - 1;
             dynAssert(
                 isAllOnes(curDataStreamFrag.byteEn),
                 "curDataStreamFrag.byteEn assertion @ mkDataStream2Header",
@@ -177,25 +161,28 @@ module mkDataStream2Header#(
             );
         end
 
-        // $display(
-        //     "headerAndByteEn.headerData=%h, headerAndByteEn.headerByteEn=%h",
-        //     headerAndByteEn.headerData, headerAndByteEn.headerByteEn
-        // );  
-        headerAndByteEnReg <= headerAndByteEn;
+        rdmaHeaderReg <= rdmaHeader;
     endrule
 
     return convertFifo2PipeOut(headerOutQ);
-    // method HeaderAndByteEn first() = headerOutQ.first;
-    // method Action deq() = headerOutQ.deq;
-    // method Bool notEmpty() = headerOutQ.notEmpty;
 endmodule
 
-typedef enum { HeaderLenPop, HeaderOut, DataOut, ExtraLastFrag } PrependHeader2PipeOutStage deriving(Bits, Eq);
+typedef enum {
+    HeaderMetaDataPop,
+    HeaderOut,
+    DataOut,
+    ExtraLastFrag
+} PrependHeader2PipeOutStage deriving(Bits, Eq);
+
+// Neither headerPipeIn nor dataPipeIn can be empty, otherwise deadlock.
+// headerLen cannot be zero, but dataPipeIn can have empty DataStream.
+// If header has no payload, then it will not dequeue dataPipeIn.
 module mkPrependHeader2PipeOut#(
-    // Neither headerPipeIn nor dataPipeIn can be empty, headerLen cannot be zero
-    PipeOut#(DataStream) headerPipeIn, PipeOut#(HeaderByteNum) headerLenPipeIn, PipeOut#(DataStream) dataPipeIn
-)(PipeOut#(DataStream));
-    FIFOF#(DataStream) outQ <- mkFIFOF;
+    DataStreamPipeOut headerPipeIn,
+    PipeOut#(HeaderMetaData) headerMetaDataPipeIn,
+    DataStreamPipeOut dataPipeIn
+)(DataStreamPipeOut);
+    FIFOF#(DataStream) dataStreamOutQ <- mkFIFOF;
 
     // preDataStreamReg is right aligned
     Reg#(DataStream) preDataStreamReg <- mkRegU;
@@ -204,24 +191,28 @@ module mkPrependHeader2PipeOut#(
     Reg#(ByteEnBitNum) headerLastFragInvalidByteNumReg <- mkRegU;
     Reg#(BusBitNum) headerLastFragValidBitNumReg <- mkRegU;
     Reg#(ByteEnBitNum) headerLastFragValidByteNumReg <- mkRegU;
+    Reg#(Bool) headerHasPayloadReg <- mkRegU;
     Reg#(Bool) isFirstReg <- mkRegU;
 
-    Reg#(PrependHeader2PipeOutStage) stageReg <- mkReg(HeaderLenPop);
+    Reg#(PrependHeader2PipeOutStage) stageReg <- mkReg(HeaderMetaDataPop);
 
-    rule popHeaderLen if (stageReg == HeaderLenPop);
-        let headerLen = headerLenPipeIn.first;
-        headerLenPipeIn.deq;
-        // $display("time=%0d: headerLen=%0d", $time, headerLen);
+    rule popHeaderMetaData if (stageReg == HeaderMetaDataPop);
+        let headerMetaData = headerMetaDataPipeIn.first;
+        headerMetaDataPipeIn.deq;
+        // $display("time=%0d: headerMetaData", $time, fshow(headerMetaData));
         dynAssert(
-            !isZero(headerLen),
-            "headerLen non-zero assertion @ mkPrependHeader2PipeOut",
-            $format("headerLen=%h should not be zero", headerLen)
+            !isZero(headerMetaData.headerLen),
+            "headerMetaData.headerLen non-zero assertion @ mkPrependHeader2PipeOut",
+            $format(
+                "headerMetaData.headerLen=%h should not be zero",
+                headerMetaData.headerLen
+            )
         );
 
-        let { headerFragNum, headerLastFragValidByteNum } =
-            calcHeaderFragNumAndLastFragByeEnBitNum(headerLen);
+        let headerFragNum = headerMetaData.headerFragNum;
+        let headerLastFragValidByteNum = headerMetaData.lastFragValidByteNum;
         let { headerLastFragValidBitNum, headerLastFragInvalidByteNum, headerLastFragInvalidBitNum } =
-            calcFragBitByteNum(headerLastFragValidByteNum);
+            calcFragBitNumAndByteNum(headerLastFragValidByteNum);
 
         headerLastFragValidByteNumReg <= headerLastFragValidByteNum;
         headerLastFragValidBitNumReg <= headerLastFragValidBitNum;
@@ -229,47 +220,53 @@ module mkPrependHeader2PipeOut#(
         headerLastFragInvalidBitNumReg <= headerLastFragInvalidBitNum;
 
         headerFragCntReg <= headerFragNum - 1;
+        headerHasPayloadReg <= headerMetaData.hasPayload;
         isFirstReg <= True;
         stageReg <= HeaderOut;
     endrule
 
     rule outputHeader if (stageReg == HeaderOut);
-        let curDataStreamFrag = headerPipeIn.first;
+        let curHeaderDataStreamFrag = headerPipeIn.first;
         headerPipeIn.deq;
-        // $display("time=%0d", $time, ": headerDataStream=", fshow(curDataStreamFrag));
+        // $display("time=%0d", $time, ": headerDataStream=", fshow(curHeaderDataStreamFrag));
 
         // One cycle delay when output the last fragment of header
-        if (curDataStreamFrag.isLast) begin
+        if (curHeaderDataStreamFrag.isLast) begin
             dynAssert(
                 isZero(headerFragCntReg),
                 "headerFragCntReg zero assertion @ mkPrependHeader2PipeOut",
                 $format(
-                    "headerFragCntReg=%h should be zero when curDataStreamFrag.isLast=%b",
-                    headerFragCntReg, curDataStreamFrag.isLast
+                    "headerFragCntReg=%h should be zero when curHeaderDataStreamFrag.isLast=%b",
+                    headerFragCntReg, curHeaderDataStreamFrag.isLast
                 )
             );
 
-            let rightShiftHeaderLastFragData = curDataStreamFrag.data >> headerLastFragInvalidBitNumReg;
-            let rightShiftHeaderLastFragByteEn = curDataStreamFrag.byteEn >> headerLastFragInvalidByteNumReg;
+            let rightShiftHeaderLastFragData = curHeaderDataStreamFrag.data >> headerLastFragInvalidBitNumReg;
+            let rightShiftHeaderLastFragByteEn = curHeaderDataStreamFrag.byteEn >> headerLastFragInvalidByteNumReg;
             let headerLastFragDataStream = DataStream {
                 data: rightShiftHeaderLastFragData,
                 byteEn: rightShiftHeaderLastFragByteEn,
-                isFirst: curDataStreamFrag.isFirst,
-                isLast: False
+                isFirst: curHeaderDataStreamFrag.isFirst,
+                isLast: !headerHasPayloadReg
             };
             preDataStreamReg <= headerLastFragDataStream;
             // $display(
             //     "time=%0d", $time,
-            //     ":, headerLastFragValidByteNum=%0d, headerLastFragValidBitNum=%0d, headerLastFragInvalidBitNum=%0d, headerLastFragInvalidByteNum=%0d, headerLastFragDataStream=",
-            //     headerLastFragValidByteNumReg, headerLastFragValidBitNumReg, headerLastFragInvalidBitNumReg, headerLastFragInvalidByteNumReg, fshow(headerLastFragDataStream)
+            //     ": headerHasPayloadReg=%b, headerLastFragValidByteNum=%0d, headerLastFragValidBitNum=%0d, headerLastFragInvalidByteNum=%0d, headerLastFragInvalidBitNum=%0d, headerLastFragDataStream=",
+            //     headerHasPayloadReg, headerLastFragValidByteNumReg, headerLastFragValidBitNumReg,
+            //     headerLastFragInvalidByteNumReg, headerLastFragInvalidBitNumReg, fshow(headerLastFragDataStream)
             // );
 
-            stageReg <= DataOut;
+            stageReg <= headerHasPayloadReg ? DataOut : HeaderMetaDataPop;
+            if (!headerHasPayloadReg) begin
+                // Output headerLastFragDataStream if header has no payload
+                dataStreamOutQ.enq(curHeaderDataStreamFrag);
+            end
         end
         else begin
             isFirstReg <= False;
             headerFragCntReg <= headerFragCntReg - 1;
-            outQ.enq(curDataStreamFrag);
+            dataStreamOutQ.enq(curHeaderDataStreamFrag);
         end
     endrule
 
@@ -284,7 +281,7 @@ module mkPrependHeader2PipeOut#(
         // If no, then extra last fragment, otherwise none.
         ByteEn lastFragByteEn = truncate(curDataStreamFrag.byteEn << headerLastFragInvalidByteNumReg);
         Bool noExtraLastFrag = isZero(lastFragByteEn);
-        
+
         let tmpData = { preDataStreamReg.data, curDataStreamFrag.data } >> headerLastFragValidBitNumReg;
         let tmpByteEn = { preDataStreamReg.byteEn, curDataStreamFrag.byteEn } >> headerLastFragValidByteNumReg;
 
@@ -302,11 +299,11 @@ module mkPrependHeader2PipeOut#(
         //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
         //     ", outDataStream=", fshow(outDataStream)
         // );
-        outQ.enq(outDataStream);
+        dataStreamOutQ.enq(outDataStream);
 
         if (curDataStreamFrag.isLast) begin
             if (noExtraLastFrag) begin
-                stageReg <= HeaderLenPop;
+                stageReg <= HeaderMetaDataPop;
             end
             else begin
                 stageReg <= ExtraLastFrag;
@@ -324,31 +321,35 @@ module mkPrependHeader2PipeOut#(
             isLast: True
         };
 
-        outQ.enq(extraLastDataStream);
-        stageReg <= HeaderLenPop;
+        dataStreamOutQ.enq(extraLastDataStream);
+        stageReg <= HeaderMetaDataPop;
     endrule
 
-    method DataStream first() = outQ.first;
-    method Action deq() = outQ.deq;
-    method Bool notEmpty() = outQ.notEmpty;
+    return convertFifo2PipeOut(dataStreamOutQ);
 endmodule
 
-interface SeperatePipeOut;
-    interface PipeOut#(DataStream) header;
-    interface PipeOut#(DataStream) data;
+interface HeaderAndPayloadSeperateDataStreamPipeOut;
+    interface DataStreamPipeOut header;
+    interface DataStreamPipeOut payload;
 endinterface
 
-typedef enum { HeaderLenPop, HeaderOut, DataOut, ExtraLastFrag } ExtractHeader4PipeOutStage deriving(Bits, Eq);
-module mkExtractHeader4PipeOut#(
-    // Neither dataPipeIn nor headerLenPipeIn can be empty, headerLen cannot be zero
-    // dataPipeIn could have data less than requested length from headerLenPipeIn
-    PipeOut#(DataStream) dataPipeIn, PipeOut#(HeaderByteNum) headerLenPipeIn
-)(SeperatePipeOut);
-    FIFOF#(DataStream) headerOutQ <- mkFIFOF;
-    FIFOF#(DataStream) dataOutQ <- mkFIFOF;
+typedef enum {
+    HeaderMetaDataPop,
+    HeaderOut,
+    DataOut,
+    ExtraLastFrag
+} ExtractHeader4PipeOutStage deriving(Bits, Eq, FShow);
+
+// Neither dataPipeIn nor headerMetaDataPipeIn can be empty, headerLen cannot be zero
+// dataPipeIn could have data less than requested length from headerMetaDataPipeIn.
+module mkExtractHeaderFromDataStreamPipeOut#(
+    DataStreamPipeOut dataPipeIn, PipeOut#(HeaderMetaData) headerMetaDataPipeIn
+)(HeaderAndPayloadSeperateDataStreamPipeOut);
+    FIFOF#(DataStream) headerDataStreamOutQ <- mkFIFOF;
+    FIFOF#(DataStream) payloadDataStreamOutQ <- mkFIFOF;
 
     Reg#(DataStream) preDataStreamReg <- mkRegU;
-    Reg#(HeaderFragNum) headerFragCntReg <- mkRegU;
+    Reg#(HeaderMetaData) headerMetaDataReg <- mkRegU;
     Reg#(ByteEn) headerLastFragByteEnReg <- mkRegU;
     Reg#(BusBitNum) headerLastFragInvalidBitNumReg <- mkRegU;
     Reg#(ByteEnBitNum) headerLastFragInvalidByteNumReg <- mkRegU;
@@ -356,35 +357,39 @@ module mkExtractHeader4PipeOut#(
     Reg#(ByteEnBitNum) headerLastFragValidByteNumReg <- mkRegU;
     Reg#(Bool) isFirstDataFragReg <- mkRegU;
 
-    Reg#(ExtractHeader4PipeOutStage) stageReg <- mkReg(HeaderLenPop);
+    Reg#(ExtractHeader4PipeOutStage) stageReg <- mkReg(HeaderMetaDataPop);
 
-    rule popHeaderLen if (stageReg == HeaderLenPop);
-        let headerLen = headerLenPipeIn.first;
-        headerLenPipeIn.deq;
-        // $display("time=%0d: headerLen=%0d", $time, headerLen);
+    rule popHeaderMetaData if (stageReg == HeaderMetaDataPop);
+        let headerMetaData = headerMetaDataPipeIn.first;
+        headerMetaDataPipeIn.deq;
+        // $display("time=%0d: headerMetaData=", $time, fshow(headerMetaData));
         dynAssert(
-            !isZero(headerLen),
-            "headerLen non-zero assertion @ mkExtractHeader4PipeOut",
-            $format("headerLen=%h should not be zero", headerLen)
+            !isZero(headerMetaData.headerLen),
+            "headerMetaData.headerLen non-zero assertion @ mkExtractHeaderFromDataStreamPipeOut",
+            $format(
+                "headerMetaData.headerLen=%h should not be zero, headerMetaData=",
+                headerMetaData.headerLen, fshow(headerMetaData)
+            )
         );
 
-        let { headerFragNum, headerLastFragValidByteNum } =
-            calcHeaderFragNumAndLastFragByeEnBitNum(headerLen);
+        let headerFragNum = headerMetaData.headerFragNum;
+        let headerLastFragValidByteNum = headerMetaData.lastFragValidByteNum;
         let { headerLastFragValidBitNum, headerLastFragInvalidByteNum, headerLastFragInvalidBitNum } =
-            calcFragBitByteNum(headerLastFragValidByteNum);
+            calcFragBitNumAndByteNum(headerLastFragValidByteNum);
 
         headerLastFragValidByteNumReg <= headerLastFragValidByteNum;
         headerLastFragValidBitNumReg <= headerLastFragValidBitNum;
         headerLastFragInvalidByteNumReg <= headerLastFragInvalidByteNum;
         headerLastFragInvalidBitNumReg <= headerLastFragInvalidBitNum;
 
-        headerFragCntReg <= headerFragNum - 1;
-
-        ByteEn headerLastFragByteEn = (1 << headerLastFragValidByteNum) - 1;
-        headerLastFragByteEnReg <= reverseBits(headerLastFragByteEn);
+        ByteEn headerLastFragByteEn = genByteEn(headerLastFragValidByteNum);
+        headerLastFragByteEnReg <= headerLastFragByteEn;
+        headerMetaData.headerFragNum = headerFragNum - 1;
+        headerMetaDataReg <= headerMetaData;
         // $display(
-        //     "time=%0d: headerLen=%0d, headerFragNum=%0d, headerLastFragByteEn=%h, headerLastFragValidByteNum=%0d, headerLastFragValidBitNum=%0d, headerLastFragInvalidByteNum=%0d, headerLastFragInvalidBitNum=%0d",
-        //     $time, headerLen, headerFragNum, reverseBits(headerLastFragByteEn), headerLastFragValidByteNum, headerLastFragValidBitNum, headerLastFragInvalidByteNum, headerLastFragInvalidBitNum
+        //     "time=%0d: headerMetaData=", $time, fshow(headerMetaData),
+        //     ", headerLastFragByteEn=%h, headerLastFragValidByteNum=%0d, headerLastFragValidBitNum=%0d, headerLastFragInvalidByteNum=%0d, headerLastFragInvalidBitNum=%0d",
+        //     reverseBits(headerLastFragByteEn), headerLastFragValidByteNum, headerLastFragValidBitNum, headerLastFragInvalidByteNum, headerLastFragInvalidBitNum
         // );
         stageReg <= HeaderOut;
     endrule
@@ -393,19 +398,42 @@ module mkExtractHeader4PipeOut#(
         let curDataStreamFrag = dataPipeIn.first;
         dataPipeIn.deq;
 
+        let headerMetaData = headerMetaDataReg;
+        let headerFragNum = headerMetaData.headerFragNum;
+
         // Check dataPipeIn has more data after header
+        Bool isHeaderLastFrag = isZero(headerFragNum);
         ByteEn tmpByteEn = truncate(curDataStreamFrag.byteEn << headerLastFragValidByteNumReg);
-        Bool isHeaderLastFrag = isZero(headerFragCntReg);
         Bool hasDataFragAfterHeader = !isZero(tmpByteEn) && isHeaderLastFrag;
         let outDataStream = curDataStreamFrag;
 
-        if (curDataStreamFrag.isLast) begin // Might not enough data for header
-            outDataStream.byteEn = hasDataFragAfterHeader ? headerLastFragByteEnReg : curDataStreamFrag.byteEn;
+        if (curDataStreamFrag.isLast) begin // Might not have enough data for header
+            outDataStream.byteEn = hasDataFragAfterHeader ?
+                headerLastFragByteEnReg : curDataStreamFrag.byteEn;
             outDataStream.isLast = True;
 
             preDataStreamReg <= curDataStreamFrag;
             isFirstDataFragReg <= hasDataFragAfterHeader;
-            stageReg <= hasDataFragAfterHeader ? DataOut : HeaderLenPop;
+            stageReg <= (
+                hasDataFragAfterHeader ? (
+                    isHeaderLastFrag ?
+                        ExtraLastFrag : // One one fragment of payload data
+                        DataOut         // More than one fragments of payload data
+                ) : HeaderMetaDataPop   // No payload data
+            );
+
+            if (!hasDataFragAfterHeader) begin
+                // Put an empty DataStream into payloadDataStreamOutQ,
+                // even if header has no payload or no enough data for header,
+                // this is to align header and data, for easy handling.
+                let emptyDataStream = DataStream {
+                    data: 0,
+                    byteEn: 0,
+                    isFirst: True,
+                    isLast: True
+                };
+                payloadDataStreamOutQ.enq(emptyDataStream);
+            end
         end
         else if (isHeaderLastFrag) begin // Finish extracting header
             outDataStream.byteEn = headerLastFragByteEnReg;
@@ -413,14 +441,29 @@ module mkExtractHeader4PipeOut#(
 
             preDataStreamReg <= curDataStreamFrag;
             isFirstDataFragReg <= True;
+            // No matter header has payload or not, since there exists data fragment
+            // after header, so it must switch to DataOut stage.
             stageReg <= DataOut;
         end
         else begin
-            headerFragCntReg <= headerFragCntReg - 1;
+            headerMetaData.headerFragNum = headerFragNum - 1;
+            headerMetaDataReg <= headerMetaData;
         end
 
-        // $display("time=%0d: ", $time, "header outDataStream=", fshow(outDataStream), ", curDataStreamFrag=", fshow(curDataStreamFrag));
-        headerOutQ.enq(outDataStream);
+        // $display(
+        //     "time=%0d: ", $time,
+        //     "header outDataStream=", fshow(outDataStream),
+        //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
+        //     ", headerMetaData=", fshow(headerMetaData),
+        //     ", stageReg=", fshow(stageReg)
+        // );
+        headerDataStreamOutQ.enq(outDataStream);
+
+        // For debug only
+        // if (curDataStreamFrag.isFirst) begin
+        //     let bth = extractBTH2(curDataStreamFrag.data);
+        //     $display("time=%0d: BTH=", $time, fshow(bth));
+        // end
     endrule
 
     rule outputData if (stageReg == DataOut);
@@ -441,18 +484,18 @@ module mkExtractHeader4PipeOut#(
             isLast: curDataStreamFrag.isLast && noExtraLastFrag
         };
         // $display(
-        //     "time=%0d", $time,
-        //     ", Extract: headerLastFragValidByteNumReg=%0d, headerLastFragInvalidByteNumReg=%0d, noExtraLastFrag=%b",
+        //     "time=%0d:", $time,
+        //     " Extract: headerLastFragValidByteNumReg=%0d, headerLastFragInvalidByteNumReg=%0d, noExtraLastFrag=%b",
         //     headerLastFragValidByteNumReg, headerLastFragInvalidByteNumReg, noExtraLastFrag,
         //     ", preDataStreamReg=", fshow(preDataStreamReg),
         //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
         //     ", outDataStream=", fshow(outDataStream)
         // );
-        dataOutQ.enq(outDataStream);
+        payloadDataStreamOutQ.enq(outDataStream);
 
         if (curDataStreamFrag.isLast) begin
             if (noExtraLastFrag) begin
-                stageReg <= HeaderLenPop;
+                stageReg <= HeaderMetaDataPop;
             end
             else begin
                 stageReg <= ExtraLastFrag;
@@ -466,22 +509,16 @@ module mkExtractHeader4PipeOut#(
         let extraLastDataStream = DataStream {
             data: leftShiftData,
             byteEn: leftShiftByteEn,
-            isFirst: False,
+            isFirst: isFirstDataFragReg,
             isLast: True
         };
+        isFirstDataFragReg <= False;
 
-        dataOutQ.enq(extraLastDataStream);
-        stageReg <= HeaderLenPop;
+        // $display("time=%0d: extraLastDataStream=", $time, fshow(extraLastDataStream));
+        payloadDataStreamOutQ.enq(extraLastDataStream);
+        stageReg <= HeaderMetaDataPop;
     endrule
 
-    interface header = interface PipeOut#(DataStream);
-        method DataStream first() = headerOutQ.first;
-        method Action deq() = headerOutQ.deq;
-        method Bool notEmpty() = headerOutQ.notEmpty;
-    endinterface;
-    interface data = interface PipeOut#(DataStream);
-        method DataStream first() = dataOutQ.first;
-        method Action deq() = dataOutQ.deq;
-        method Bool notEmpty() = dataOutQ.notEmpty;
-    endinterface;
+    interface header = convertFifo2PipeOut(headerDataStreamOutQ);
+    interface payload = convertFifo2PipeOut(payloadDataStreamOutQ);
 endmodule

@@ -1,0 +1,33 @@
+#! /usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o xtrace
+
+BASH_PROFILE=$HOME/.bash_profile
+if [ -f "$BASH_PROFILE" ]; then
+    source $BASH_PROFILE
+fi
+
+TEST_LOG=run.log
+TEST_DIR=test
+cd $TEST_DIR
+echo "" > $TEST_LOG
+FILES=`ls ./*.bsv`
+for FILE in $FILES; do
+    # echo $FILE
+    TESTCASES=`grep -Phzo 'synthesize.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`
+    for TESTCASE in $TESTCASES; do
+        make -j8 TESTFILE=$FILE TOP=$TESTCASE 2>&1 | tee -a $TEST_LOG
+    done
+done
+
+FAIL_KEYWORKS='Error\|DynAssert'
+grep -w $FAIL_KEYWORKS $TEST_LOG | cat
+ERR_NUM=`grep -c -w $FAIL_KEYWORKS $TEST_LOG | cat`
+if [ $ERR_NUM -gt 0 ]; then
+    echo "FAIL"
+    false
+else
+    echo "PASS"
+fi

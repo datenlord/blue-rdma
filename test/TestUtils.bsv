@@ -3,27 +3,26 @@ import GetPut :: *;
 import PAClib :: *;
 import Randomizable :: *;
 import Vector :: *;
-// import SVA :: *;
 
 import Assertions :: *;
 import Headers :: *;
 import DataTypes :: *;
 import Settings :: *;
-import SimDmaHandler :: *;
-import TestSettings :: *;
+import SimDma :: *;
+import Utils4Test :: *;
 import Utils :: *;
 
 (* synthesize *)
 module mkTestSegmentDataStream(Empty);
-    let minDmaLen = 0;
+    let minDmaLen = 1;
     let maxDmaLen = 10000;
-    let pmtu = MTU_256;
+    let pmtu = IBV_MTU_256;
 
-    Vector#(2, PipeOut#(DataStream)) dataStreamPipeOutVec <-
+    Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
         mkRandomLenSimDataStreamPipeOut(minDmaLen, maxDmaLen);
     let pmtuSegPipeOut <- mkSegmentDataStreamByPmtu(dataStreamPipeOutVec[0], pmtu);
     let refDataStreamPipeOut <- mkBuffer_n(2, dataStreamPipeOutVec[1]);
-    Reg#(FragNum) pmtuFragCntReg <- mkRegU;
+    Reg#(PmtuFragNum) pmtuFragCntReg <- mkRegU;
 
     rule segment;
         let refDataStream = refDataStreamPipeOut.first;
@@ -77,13 +76,16 @@ module mkTestPsnFunc(Empty);
     Randomize#(PSN) randomPSN <- mkGenericRandomizer;
     Randomize#(Length) randomLength <- mkGenericRandomizer;
     Reg#(Bool) initializedReg <- mkReg(False);
-    let countDown <- mkCountDown;
+
+    // Finish simulation after MAX_CMP_CNT comparisons
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     function Action testPSN(PSN startPSN, Length len, PMTU pmtu);
         action
-            let { pktNum, nextPSN, endPSN } = calcNextAndEndPSN(startPSN, len, pmtu);
+            let { isOnlyPkt, pktNum, nextPSN, endPSN } =
+                calcPktNumNextAndEndPSN(startPSN, len, pmtu);
             PktNum halfPktNum = pktNum >> 1;
-            PSN midPSN = startPSN + zeroExtend(halfPktNum);
+            PSN midPSN = truncate(zeroExtend(startPSN) + halfPktNum);
             let psnInRangeExcl = psnInRangeExclusive(midPSN, startPSN, endPSN);
             $info(
                 "time=%0d: startPSN=%h, len=%h, pktNum=%h, endPSN=%h, nextPSN=%h, midPSN=%h",
@@ -131,16 +133,18 @@ module mkTestPsnFunc(Empty);
     endrule
 
     rule testRandomPSN if (initializedReg);
-        let pmtu = MTU_1024;
+        let pmtu = IBV_MTU_1024;
 
         PSN startPSN <- randomPSN.next;
         Length len <- randomLength.next;
 
         testPSN(startPSN, len, pmtu);
+
+        countDown.dec;
     endrule
 
     rule testZeroLen if (initializedReg);
-        let pmtu = MTU_4096;
+        let pmtu = IBV_MTU_4096;
 
         PSN startPSN <- randomPSN.next;
         Length len = 0;
@@ -149,7 +153,7 @@ module mkTestPsnFunc(Empty);
     endrule
 
     rule testMaxLen if (initializedReg);
-        let pmtu = MTU_256;
+        let pmtu = IBV_MTU_256;
 
         PSN startPSN <- randomPSN.next;
         Length len = fromInteger(valueOf(RDMA_MAX_LEN));
@@ -158,7 +162,7 @@ module mkTestPsnFunc(Empty);
     endrule
 
     rule testMaxPSN if (initializedReg);
-        let pmtu = MTU_256;
+        let pmtu = IBV_MTU_256;
 
         PSN startPSN = maxBound;
         Length len <- randomLength.next;
