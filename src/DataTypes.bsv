@@ -3,7 +3,7 @@ import CompletionBuffer :: *;
 import PAClib :: *;
 
 import Headers :: *;
-import ScanFIFO :: *;
+import ScanFIFOF :: *;
 import Settings :: *;
 
 // Protocol settings
@@ -78,7 +78,8 @@ typedef PipeOut#(DataStream)          DataStreamPipeOut;
 typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
 typedef Server#(DmaWriteReq, DmaWriteResp) DmaWriteSrv;
 
-typedef ScanFIFO#(MAX_PENDING_REQ_NUM, PendingWorkReq) PendingWorkReqBuf;
+typedef ScanFIFOF#(MAX_PENDING_REQ_NUM, PendingWorkReq) PendingWorkReqBuf;
+typedef ScanFIFOF#(MAX_PENDING_REQ_NUM, RecvReq)        RecvReqBuf;
 
 // RDMA related requests and responses
 
@@ -97,17 +98,6 @@ typedef enum {
     RETRY_REASON_TIME_OUT
 } RetryReason deriving(Bits, Eq);
 
-// typedef struct {
-//     RdmaOpCode opcode;
-//     PSN psn;
-// } RdmaReq deriving(Bits);
-
-// typedef struct {
-//     RdmaOpCode opcode;
-//     PSN psn;
-//     // AETH
-// } RdmaResp deriving(Bits);
-
 // DATA and ByteEn are left algined
 typedef struct {
     DATA data;
@@ -115,15 +105,6 @@ typedef struct {
     Bool isFirst;
     Bool isLast;
 } DataStream deriving(Bits, Bounded, Eq, FShow);
-
-// instance FShow#(DataStream);
-//     function Fmt fshow(DataStream ds);
-//         return $format(
-//             "DataStream { data=%h, byteEn=%h, isFirst=%b, isLast=%b }",
-//             ds.data, ds.byteEn, ds.isFirst, ds.isLast
-//         );
-//     endfunction
-// endinstance
 
 typedef struct {
     HeaderByteNum headerLen;
@@ -175,11 +156,11 @@ typedef enum {
     PAYLOAD_INIT_RQ_ATOMIC,
     PAYLOAD_INIT_SQ_RD,
     PAYLOAD_INIT_SQ_WR,
-    PAYLOAD_INIT_SQ_ATOMIC
+    PAYLOAD_INIT_SQ_ATOMIC,
+    PAYLOAD_INIT_SQ_DISCARD
 } PayloadInitiator deriving(Bits, Eq);
 
 typedef struct {
-    PayloadInitiator initiator;
     QPN sqpn;
     ADDR startAddr;
     Length len;
@@ -187,45 +168,51 @@ typedef struct {
 } DmaReadReq deriving(Bits);
 
 typedef struct {
-    PayloadInitiator initiator;
     QPN sqpn;
     WorkReqID wrID;
     DataStream data;
 } DmaReadResp deriving(Bits);
 
 typedef struct {
-    PayloadInitiator initiator;
     QPN sqpn;
     ADDR startAddr;
     PktLen len;
     Maybe#(Long) inlineData;
     PSN psn;
+} DmaWriteMetaData deriving(Bits);
+
+typedef struct {
+    DmaWriteMetaData metaData;
+    DataStream dataStream;
 } DmaWriteReq deriving(Bits);
 
 typedef struct {
-    PayloadInitiator initiator;
     QPN sqpn;
     PSN psn;
 } DmaWriteResp deriving(Bits);
 
 typedef struct {
-    DmaReadReq dmaReadReq;
+    PayloadInitiator initiator;
     Bool addPadding;
+    DmaReadReq dmaReadReq;
 } PayloadGenReq deriving(Bits);
 
 typedef struct {
-    DmaReadResp dmaReadResp;
+    PayloadInitiator initiator;
     Bool addPadding;
+    DmaReadResp dmaReadResp;
 } PayloadGenResp deriving(Bits);
 
 typedef struct {
+    PayloadInitiator initiator;
     PmtuFragNum fragNum;
-    Maybe#(DmaWriteReq) dmaWriteReq;
-} PayloadConsumeReq deriving(Bits);
+    Maybe#(DmaWriteMetaData) dmaWriteMetaData;
+} PayloadConReq deriving(Bits);
 
 typedef struct {
+    PayloadInitiator initiator;
     DmaWriteResp dmaWriteResp;
-} PayloadConsumeResp deriving(Bits);
+} PayloadConResp deriving(Bits);
 
 // QP related types
 
@@ -381,7 +368,7 @@ typedef enum {
     IBV_WC_DRIVER1 = 135,
     IBV_WC_DRIVER2 = 136,
     IBV_WC_DRIVER3 = 137
-} WorkCompOpCode deriving(Bits, Eq);
+} WorkCompOpCode deriving(Bits, Eq, FShow);
 
 typedef enum {
     IBV_WC_SUCCESS = 0,
@@ -419,7 +406,7 @@ typedef enum {
     IBV_WC_TM_SYNC_REQ = 16,
     IBV_WC_TM_MATCH = 32,
     IBV_WC_TM_DATA_VALID = 64
-} WorkCompFlags deriving(Bits, Eq);
+} WorkCompFlags deriving(Bits, Eq, FShow);
 
 typedef struct {
     WorkReqID id;
@@ -432,4 +419,29 @@ typedef struct {
     QPN sqpn;
     Maybe#(IMM) immDt;
     Maybe#(RKEY) rkey2Inv;
-} WorkComp deriving(Bits);
+} WorkComp deriving(Bits, FShow);
+
+// Async event related
+
+typedef enum {
+	IBV_EVENT_CQ_ERR,
+	IBV_EVENT_QP_FATAL,
+	IBV_EVENT_QP_REQ_ERR,
+	IBV_EVENT_QP_ACCESS_ERR,
+	IBV_EVENT_COMM_EST,
+	IBV_EVENT_SQ_DRAINED,
+	IBV_EVENT_PATH_MIG,
+	IBV_EVENT_PATH_MIG_ERR,
+	IBV_EVENT_DEVICE_FATAL,
+	IBV_EVENT_PORT_ACTIVE,
+	IBV_EVENT_PORT_ERR,
+	IBV_EVENT_LID_CHANGE,
+	IBV_EVENT_PKEY_CHANGE,
+	IBV_EVENT_SM_CHANGE,
+	IBV_EVENT_SRQ_ERR,
+	IBV_EVENT_SRQ_LIMIT_REACHED,
+	IBV_EVENT_QP_LAST_WQE_REACHED,
+	IBV_EVENT_CLIENT_REREGISTER,
+	IBV_EVENT_GID_CHANGE,
+	IBV_EVENT_WQ_FATAL
+} AsyncEventType deriving(Bits, Eq);

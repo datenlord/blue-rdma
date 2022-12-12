@@ -22,9 +22,10 @@ interface Controller;
         PSN           epsn
     );
 
-    method Bool isErr();
+    method Bool isERR();
     method Bool isInit();
     method Bool isRTR();
+    method Bool isRTS();
     method Bool isRTRorRTS();
 
     method QpState getQPS();
@@ -50,7 +51,7 @@ interface Controller;
         ADDR retryWorkReqAddr,
         RetryReason retryReason
     );
-    method Action setErrFlushDone();
+    method Action errFlushDone();
 
     method PendingReqCnt getPendingWorkReqNum();
     // method Action setPendingWorkReqNum(PendingReqCnt cnt);
@@ -154,9 +155,10 @@ module mkController(Controller);
         epsnReg              <= epsn;
     endmethod
 
-    method Bool isErr()      if (qpInitialized) = stateReg == IBV_QPS_ERR;
+    method Bool isERR()      if (qpInitialized) = stateReg == IBV_QPS_ERR;
     method Bool isInit()     if (qpInitialized) = stateReg == IBV_QPS_INIT;
     method Bool isRTR()      if (qpInitialized) = stateReg == IBV_QPS_RTR;
+    method Bool isRTS()      if (qpInitialized) = stateReg == IBV_QPS_RTS;
     method Bool isRTRorRTS() if (qpInitialized) = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS;
 
     method QpState getQPS() = stateReg;
@@ -233,7 +235,7 @@ module mkController(Controller);
         retryWorkReqAddrReg <= retryWorkReqAddr;
         retryReasonReg      <= retryReason;
     endmethod
-    method Action setErrFlushDone if (qpInitialized && stateReg == IBV_QPS_ERR && !errFlushDoneReg);
+    method Action errFlushDone if (qpInitialized && stateReg == IBV_QPS_ERR && !errFlushDoneReg);
         errFlushDoneReg <= True;
     endmethod
 

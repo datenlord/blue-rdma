@@ -1,6 +1,4 @@
-// import ClientServer :: *;
 import FIFOF :: *;
-// import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
 

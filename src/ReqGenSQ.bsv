@@ -7,7 +7,7 @@ import Assertions :: *;
 import Controller :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
-import PayloadConsumerAndGenerator :: *;
+import PayloadConAndGen :: *;
 import Headers :: *;
 import Utils :: *;
 
@@ -20,9 +20,9 @@ import Utils :: *;
 //     endcase;
 // endfunction
 
-function Maybe#(QPN) getMaybeDQPN(WorkReq wr, Controller cntlr);
-    return case (cntlr.getQpType)
-        IBV_QPT_RC, IBV_QPT_XRC_SEND: tagged Valid cntlr.getDQPN;
+function Maybe#(QPN) getMaybeDQPN(WorkReq wr, Controller cntrl);
+    return case (cntrl.getQpType)
+        IBV_QPT_RC, IBV_QPT_XRC_SEND: tagged Valid cntrl.getDQPN;
         IBV_QPT_UD: wr.dqpn;
         default: tagged Invalid;
     endcase;
@@ -53,8 +53,8 @@ function Maybe#(RdmaOpCode) genMiddleOrLastRdmaOpCode(WorkReqOpCode wrOpCode, Bo
     endcase;
 endfunction
 
-function Maybe#(XRCETH) genXRCETH(WorkReq wr, Controller cntlr);
-    return case (cntlr.getQpType)
+function Maybe#(XRCETH) genXRCETH(WorkReq wr, Controller cntrl);
+    return case (cntrl.getQpType)
         IBV_QPT_XRC_SEND: tagged Valid XRCETH {
             srqn: fromMaybe(?, wr.srqn),
             rsvd: unpack(0)
@@ -63,11 +63,11 @@ function Maybe#(XRCETH) genXRCETH(WorkReq wr, Controller cntlr);
     endcase;
 endfunction
 
-function Maybe#(DETH) genDETH(WorkReq wr, Controller cntlr);
-    return case (cntlr.getQpType)
+function Maybe#(DETH) genDETH(WorkReq wr, Controller cntrl);
+    return case (cntrl.getQpType)
         IBV_QPT_UD: tagged Valid DETH {
             qkey: fromMaybe(?, wr.qkey),
-            sqpn: cntlr.getSQPN,
+            sqpn: cntrl.getSQPN,
             rsvd: unpack(0)
         };
         default: tagged Invalid;
@@ -120,10 +120,10 @@ function Maybe#(IETH) genIETH(WorkReq wr);
     endcase;
 endfunction
 
-function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr, Bool isOnlyReqPkt);
-    let maybeTrans  = qpType2TransType(cntlr.getQpType);
+function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntrl, Bool isOnlyReqPkt);
+    let maybeTrans  = qpType2TransType(cntrl.getQpType);
     let maybeOpCode = genFirstOrOnlyRdmaOpCode(wr.opcode, isOnlyReqPkt);
-    let maybeDQPN   = getMaybeDQPN(wr, cntlr);
+    let maybeDQPN   = getMaybeDQPN(wr, cntrl);
 
     if (
         maybeTrans matches tagged Valid .trans &&&
@@ -137,18 +137,18 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
             migReq   : unpack(0),
             padCnt   : isOnlyReqPkt ? calcPadCnt(wr.len) : 0,
             tver     : unpack(0),
-            pkey     : cntlr.getPKEY,
+            pkey     : cntrl.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
             dqpn     : dqpn,
-            ackReq   : cntlr.getSigAll || (isOnlyReqPkt && workReqRequireAck(wr)),
+            ackReq   : cntrl.getSigAll || (isOnlyReqPkt && workReqRequireAck(wr)),
             resv7    : unpack(0),
-            psn      : cntlr.getNPSN
+            psn      : cntrl.getNPSN
         };
 
-        let xrcEth = genXRCETH(wr, cntlr);
-        let deth = genDETH(wr, cntlr);
+        let xrcEth = genXRCETH(wr, cntrl);
+        let deth = genDETH(wr, cntrl);
         let reth = genRETH(wr);
         let atomicEth = genAtomicEth(wr);
         let immDt = genImmDt(wr);
@@ -158,7 +158,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
         let hasPayload = workReqHasPayload(wr);
         case (wr.opcode)
             IBV_WR_RDMA_WRITE: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB({ pack(bth), pack(fromMaybe(?, reth)) }),
                         fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
@@ -173,7 +173,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_RDMA_WRITE_WITH_IMM: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isOnlyReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, reth)), pack(fromMaybe(?, immDt))}) :
@@ -196,7 +196,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_SEND: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB(pack(bth)),
                         fromInteger(valueOf(BTH_BYTE_WIDTH)),
@@ -216,7 +216,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_SEND_WITH_IMM: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isOnlyReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, immDt)) }) :
@@ -245,7 +245,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_SEND_WITH_INV: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isOnlyReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, ieth)) }) :
@@ -268,7 +268,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_RDMA_READ: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB({ pack(bth), pack(fromMaybe(?, reth)) }),
                         fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
@@ -283,7 +283,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
                 endcase;
             end
             IBV_WR_ATOMIC_CMP_AND_SWP, IBV_WR_ATOMIC_FETCH_AND_ADD: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB({ pack(bth), pack(fromMaybe(?, atomicEth)) }),
                         fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH)),
@@ -305,10 +305,10 @@ function Maybe#(RdmaHeader) genFirstOrOnlyPktHeader(WorkReq wr, Controller cntlr
     end
 endfunction
 
-function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntlr, PSN psn, Bool isLastReqPkt);
-    let maybeTrans  = qpType2TransType(cntlr.getQpType);
+function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntrl, PSN psn, Bool isLastReqPkt);
+    let maybeTrans  = qpType2TransType(cntrl.getQpType);
     let maybeOpCode = genMiddleOrLastRdmaOpCode(wr.opcode, isLastReqPkt);
-    let maybeDQPN   = getMaybeDQPN(wr, cntlr);
+    let maybeDQPN   = getMaybeDQPN(wr, cntrl);
 
     if (
         maybeTrans matches tagged Valid .trans &&&
@@ -322,24 +322,24 @@ function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntl
             migReq   : unpack(0),
             padCnt   : isLastReqPkt ? calcPadCnt(wr.len) : 0,
             tver     : unpack(0),
-            pkey     : cntlr.getPKEY,
+            pkey     : cntrl.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
             dqpn     : dqpn,
-            ackReq   : cntlr.getSigAll || (isLastReqPkt && workReqRequireAck(wr)),
+            ackReq   : cntrl.getSigAll || (isLastReqPkt && workReqRequireAck(wr)),
             resv7    : unpack(0),
             psn      : psn
         };
 
-        let xrcEth = genXRCETH(wr, cntlr);
+        let xrcEth = genXRCETH(wr, cntrl);
         let immDt = genImmDt(wr);
         let ieth = genIETH(wr);
 
         let hasPayload = True;
         case (wr.opcode)
             IBV_WR_RDMA_WRITE:begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB(pack(bth)),
                         fromInteger(valueOf(BTH_BYTE_WIDTH)),
@@ -354,7 +354,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntl
                 endcase;
             end
             IBV_WR_RDMA_WRITE_WITH_IMM: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isLastReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, immDt))}) :
@@ -377,7 +377,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntl
                 endcase;
             end
             IBV_WR_SEND: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         zeroExtendLSB(pack(bth)),
                         fromInteger(valueOf(BTH_BYTE_WIDTH)),
@@ -392,7 +392,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntl
                 endcase;
             end
             IBV_WR_SEND_WITH_IMM: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isLastReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, immDt)) }) :
@@ -415,7 +415,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastPktHeader(WorkReq wr, Controller cntl
                 endcase;
             end
             IBV_WR_SEND_WITH_INV: begin
-                return case (cntlr.getQpType)
+                return case (cntrl.getQpType)
                     IBV_QPT_RC: tagged Valid genRdmaHeader(
                         isLastReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(fromMaybe(?, ieth)) }) :
@@ -451,14 +451,10 @@ interface PendingWorkReqAndDataStreamPipeOut;
 endinterface
 
 module mkWorkReq2RdmaReq#(
-    Controller cntlr,
+    Controller cntrl,
     DmaReadSrv dmaReadSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
 )(PendingWorkReqAndDataStreamPipeOut);
-    // function DataStream getDataStreamFromPayloadGenRespPipeOut(
-    //     PayloadGenResp resp
-    // ) = resp.dmaReadResp.data;
-
     FIFOF#(PendingWorkReq) pendingWorkReqOutQ <- mkFIFOF;
     FIFOF#(RdmaHeader) headerQ <- mkFIFOF;
 
@@ -467,14 +463,14 @@ module mkWorkReq2RdmaReq#(
     Reg#(PSN)    curPsnReg <- mkRegU;
     Reg#(Bool)     busyReg <- mkReg(False);
 
-    let payloadGenerator <- mkPayloadGenerator(cntlr, dmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(cntrl, dmaReadSrv);
     let payloadDataStreamPipeOut <- mkFunc2Pipe(
         getDataStreamFromPayloadGenRespPipeOut,
         payloadGenerator.respPipeOut
     );
     let segDataStreamPipeOut <- mkSegmentDataStreamByPmtu(
         payloadDataStreamPipeOut,
-        cntlr.getPMTU
+        cntrl.getPMTU
     );
     let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
         convertFifo2PipeOut(headerQ)
@@ -485,8 +481,8 @@ module mkWorkReq2RdmaReq#(
         segDataStreamPipeOut
     );
 
-    rule deqWorkReqPipeOut if (!busyReg);
-        let qpType = cntlr.getQpType;
+    rule deqWorkReqPipeOut if (cntrl.isRTS && !busyReg);
+        let qpType = cntrl.getQpType;
         dynAssert(
             qpType == IBV_QPT_RC || qpType == IBV_QPT_XRC_SEND || qpType == IBV_QPT_UD,
             "qpType assertion @ mkReqGenSQ",
@@ -500,11 +496,11 @@ module mkWorkReq2RdmaReq#(
         // $display("time=%0d: received PendingWorkReq=", $time, fshow(curPendingWR));
 
         dynAssert(
-            curPendingWR.wr.sqpn == cntlr.getSQPN,
+            curPendingWR.wr.sqpn == cntrl.getSQPN,
             "curPendingWR.wr.sqpn assertion @ mkWorkReq2RdmaReq",
             $format(
-                "curPendingWR.wr.sqpn=%h should == cntlr.getSQPN=%h",
-                curPendingWR.wr.sqpn, cntlr.getSQPN
+                "curPendingWR.wr.sqpn=%h should == cntrl.getSQPN=%h",
+                curPendingWR.wr.sqpn, cntrl.getSQPN
             )
         );
 
@@ -524,8 +520,8 @@ module mkWorkReq2RdmaReq#(
             // Should be retry WorkReq
             dynAssert(
                 isValid(curPendingWR.startPSN) &&
-                isValid(curPendingWR.endPSN) &&
-                isValid(curPendingWR.pktNum) &&
+                isValid(curPendingWR.endPSN)   &&
+                isValid(curPendingWR.pktNum)   &&
                 isValid(curPendingWR.isOnlyReqPkt),
                 "curPendingWR assertion @ mkWorkReq2Headers",
                 $format(
@@ -535,11 +531,11 @@ module mkWorkReq2RdmaReq#(
             );
         end
         else begin
-            let startPktSeqNum = cntlr.getNPSN;
+            let startPktSeqNum = cntrl.getNPSN;
             let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } = calcPktNumNextAndEndPSN(
                 startPktSeqNum,
                 curPendingWR.wr.len,
-                cntlr.getPMTU
+                cntrl.getPMTU
             );
             dynAssert(
                 startPktSeqNum <= endPktSeqNum && (endPktSeqNum + 1 == nextPktSeqNum),
@@ -550,7 +546,7 @@ module mkWorkReq2RdmaReq#(
                 )
             );
 
-            cntlr.setNPSN(nextPktSeqNum);
+            cntrl.setNPSN(nextPktSeqNum);
             let hasOnlyReqPkt = isOnlyPkt || isReadWorkReq(curPendingWR.wr.opcode);
 
             curPendingWR.startPSN = tagged Valid startPktSeqNum;
@@ -573,7 +569,7 @@ module mkWorkReq2RdmaReq#(
         // so the remaining pktNum = totalPktNum - 2
         pktNumReg <= pktNum - 2;
 
-        let maybeFirstOrOnlyHeader = genFirstOrOnlyPktHeader(curPendingWR.wr, cntlr, isOnlyReqPkt);
+        let maybeFirstOrOnlyHeader = genFirstOrOnlyPktHeader(curPendingWR.wr, cntrl, isOnlyReqPkt);
         dynAssert(
             isValid(maybeFirstOrOnlyHeader),
             "maybeFirstOrOnlyHeader assertion @ mkReqGenSQ",
@@ -582,25 +578,26 @@ module mkWorkReq2RdmaReq#(
                 " is not valid, and current WR=", fshow(curPendingWR)
             )
         );
-        if (maybeFirstOrOnlyHeader matches tagged Valid .firstOrOnlyHeader) begin
-            // Only for RC and XRC output new WR as pending WR, not retry WR
-            if (isNewWorkReq && (qpType == IBV_QPT_RC || qpType == IBV_QPT_XRC_SEND)) begin
-                pendingWorkReqOutQ.enq(curPendingWR);
-            end
 
+        // Only for RC and XRC output new WR as pending WR, not retry WR
+        if (isNewWorkReq && (qpType == IBV_QPT_RC || qpType == IBV_QPT_XRC_SEND)) begin
+            pendingWorkReqOutQ.enq(curPendingWR);
+        end
+
+        if (maybeFirstOrOnlyHeader matches tagged Valid .firstOrOnlyHeader) begin
             // TODO: check WR length cannot be larger than PMTU for UD
             if (workReqNeedDmaRead(curPendingWR.wr)) begin
-                let payloadGenerateReq = PayloadGenReq {
-                    dmaReadReq: DmaReadReq {
-                        initiator: PAYLOAD_INIT_SQ_RD,
-                        sqpn: cntlr.getSQPN,
+                let payloadGenReq = PayloadGenReq {
+                    initiator    : PAYLOAD_INIT_SQ_RD,
+                    addPadding   : True,
+                    dmaReadReq   : DmaReadReq {
+                        sqpn     : cntrl.getSQPN,
                         startAddr: curPendingWR.wr.laddr,
-                        len: curPendingWR.wr.len,
-                        wrID: curPendingWR.wr.id
-                    },
-                    addPadding: True
+                        len      : curPendingWR.wr.len,
+                        wrID     : curPendingWR.wr.id
+                    }
                 };
-                payloadGenerator.request(payloadGenerateReq);
+                payloadGenerator.request(payloadGenReq);
             end
 
             headerQ.enq(firstOrOnlyHeader);
@@ -616,8 +613,8 @@ module mkWorkReq2RdmaReq#(
         end
     endrule
 
-    rule genHeaders if (busyReg);
-        let qpType = cntlr.getQpType;
+    rule genHeaders if (cntrl.isRTS && busyReg);
+        let qpType = cntrl.getQpType;
         dynAssert(
             qpType == IBV_QPT_RC || qpType == IBV_QPT_XRC_SEND,
             "qpType assertion @ mkReqGenSQ",
@@ -633,7 +630,7 @@ module mkWorkReq2RdmaReq#(
         let isLastReqPkt = isZero(pktNumReg);
 
         let maybeMiddleOrLastHeader = genMiddleOrLastPktHeader(
-            curPendingWorkReqReg.wr, cntlr, curPsnReg, isLastReqPkt
+            curPendingWorkReqReg.wr, cntrl, curPsnReg, isLastReqPkt
         );
         dynAssert(
             isValid(maybeMiddleOrLastHeader),

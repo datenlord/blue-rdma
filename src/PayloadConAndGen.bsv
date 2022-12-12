@@ -14,8 +14,6 @@ import Utils :: *;
 //     interface Get#(resp_type) response;
 // endinterface: Server
 
-typedef Server#(PayloadConsumeReq, PayloadConsumeResp) PayloadConsumer;
-
 function DataStream getDataStreamFromPayloadGenRespPipeOut(
     PayloadGenResp resp
 ) = resp.dmaReadResp.data;
@@ -26,43 +24,38 @@ interface PayloadGenerator;
 endinterface
 
 module mkPayloadGenerator#(
-    Controller cntlr,
+    Controller cntrl,
     DmaReadSrv dmaReadSrv
 )(PayloadGenerator);
-    // FIFOF#(PayloadGenReq)   generateReqQ <- mkFIFOF;
-    FIFOF#(PayloadGenResp) generateRespQ <- mkFIFOF;
-    FIFOF#(Tuple2#(Bool, ByteEn)) paddingQ <- mkFIFOF;
-    // Reg#(Bool)                  addPaddingReg <- mkRegU;
-    // Reg#(ByteEn) lastFragByteEnWithPaddingReg <- mkRegU;
+    FIFOF#(PayloadGenResp)                generateRespQ <- mkFIFOF;
+    FIFOF#(Tuple2#(PayloadGenReq, ByteEn)) generateReqQ <- mkFIFOF;
 
-    // Reg#(Bool) busyReg <- mkReg(False);
-
-    rule generatePayload if (cntlr.isRTRorRTS);
+    rule generatePayload if (cntrl.isRTRorRTS);
         let dmaReadResp <- dmaReadSrv.response.get;
-        let { addPaddingReg, lastFragByteEnWithPadding } = paddingQ.first;
+        let { generateReq, lastFragByteEnWithPadding } = generateReqQ.first;
 
         if (dmaReadResp.data.isLast) begin
-            paddingQ.deq;
+            generateReqQ.deq;
 
-            if (addPaddingReg) begin
+            if (generateReq.addPadding) begin
                 dmaReadResp.data.byteEn = lastFragByteEnWithPadding;
             end
         end
 
         let generateResp = PayloadGenResp {
-            dmaReadResp: dmaReadResp,
-            addPadding: addPaddingReg
+            initiator  : generateReq.initiator,
+            addPadding : generateReq.addPadding,
+            dmaReadResp: dmaReadResp
         };
         generateRespQ.enq(generateResp);
     endrule
 
-    rule flushResp if (cntlr.isErr);
+    rule flushPayloadGenResp if (cntrl.isERR);
+        // TODO: clean generateReqQ and generateRespQ
         let dmaReadResp <- dmaReadSrv.response.get;
     endrule
 
-    method Action request(PayloadGenReq generateReq) if (cntlr.isRTRorRTS);
-        // let generateReq = generateReqQ.first;
-        // generateReqQ.deq;
+    method Action request(PayloadGenReq generateReq) if (cntrl.isRTRorRTS);
         dynAssert(
             !isZero(generateReq.dmaReadReq.len),
             "generateReq.dmaReadReq.len assertion @ mkPayloadGenerator",
@@ -80,37 +73,38 @@ module mkPayloadGenerator#(
             !isZero(lastFragValidByteNumWithPadding),
             "lastFragValidByteNumWithPadding assertion @ mkPayloadGenerator",
             $format(
-                "lastFragValidByteNumWithPadding=%0d should not be zero, dmaLen=%0d, lastFragValidByteNum=%0d, padCnt=%0d",
-                lastFragValidByteNumWithPadding, dmaLen, lastFragValidByteNum, padCnt
+                "lastFragValidByteNumWithPadding=%0d should not be zero",
+                lastFragValidByteNumWithPadding,
+                ", dmaLen=%0d, lastFragValidByteNum=%0d, padCnt=%0d",
+                dmaLen, lastFragValidByteNum, padCnt
             )
         );
-        // addPaddingReg <= generateReq.addPadding;
-        // if (generateReq.addPadding) begin
-        //     lastFragByteEnWithPaddingReg <= lastFragByteEnWithPadding
-        // end
-        paddingQ.enq(tuple2(generateReq.addPadding, lastFragByteEnWithPadding));
+
+        generateReqQ.enq(tuple2(generateReq, lastFragByteEnWithPadding));
         dmaReadSrv.request.put(generateReq.dmaReadReq);
-        // busyReg <= True;
     endmethod
 
     interface respPipeOut = convertFifo2PipeOut(generateRespQ);
-    // interface request = toPut(consumeReqQ);
-    // interface response = toGet(consumeRespQ);
 endmodule
 
-// Cannel payload DMA write request when in error state
+interface PayloadConsumer;
+    method Action request(PayloadConReq req);
+    interface PipeOut#(PayloadConResp) respPipeOut;
+endinterface
+
 module mkPayloadConsumer#(
-    Controller cntlr,
+    Controller cntrl,
     DataStreamPipeOut payloadPipeIn,
     DmaWriteSrv dmaWriteSrv
 )(PayloadConsumer);
-    FIFOF#(PayloadConsumeReq) consumeReqQ <- mkFIFOF;
-    FIFOF#(PayloadConsumeResp) consumeRespQ <- mkFIFOF;
+    FIFOF#(PayloadConReq)   consumeReqQ <- mkFIFOF;
+    FIFOF#(PayloadConResp) consumeRespQ <- mkFIFOF;
 
     Reg#(PmtuFragNum) remainingFragNumReg <- mkRegU;
-    Reg#(Bool) busyReg <- mkReg(False);
+    // Reg#(PayloadConReq)     curReqReg <- mkRegU;
+    // Reg#(Bool) busyReg <- mkReg(False);
 
-    function Action respPayloadConsume(PayloadConsumeReq consumeReq, DataStream payload);
+    function Action respPayloadConsume(PayloadConReq consumeReq, DataStream payload);
         action
             dynAssert(
                 payload.isLast,
@@ -121,13 +115,12 @@ module mkPayloadConsumer#(
                 )
             );
 
-            consumeReqQ.deq;
-            if (consumeReq.dmaWriteReq matches tagged Valid .dmaWriteReq) begin
-                let consumeResp = PayloadConsumeResp {
+            if (consumeReq.dmaWriteMetaData matches tagged Valid .dmaWriteMetaData) begin
+                let consumeResp = PayloadConResp {
+                    initiator   : consumeReq.initiator,
                     dmaWriteResp: DmaWriteResp {
-                        initiator: dmaWriteReq.initiator,
-                        sqpn     : dmaWriteReq.sqpn,
-                        psn      : dmaWriteReq.psn
+                        sqpn    : dmaWriteMetaData.sqpn,
+                        psn     : dmaWriteMetaData.psn
                     }
                 };
                 consumeRespQ.enq(consumeResp);
@@ -135,8 +128,28 @@ module mkPayloadConsumer#(
         endaction
     endfunction
 
-    rule recvReq if (cntlr.isRTRorRTS && !busyReg);
+    rule consumePayload if (cntrl.isRTRorRTS);
         let consumeReq = consumeReqQ.first;
+        let payload = payloadPipeIn.first;
+        payloadPipeIn.deq;
+        remainingFragNumReg <= remainingFragNumReg - 1;
+        if (isZero(remainingFragNumReg)) begin
+            consumeReqQ.deq;
+            // busyReg <= False;
+            respPayloadConsume(consumeReq, payload);
+        end
+    endrule
+
+    rule flushPayload if (cntrl.isERR);
+        if (!consumeReqQ.notEmpty && payloadPipeIn.notEmpty) begin
+            payloadPipeIn.deq;
+        end
+        if (consumeRespQ.notEmpty) begin
+            consumeRespQ.deq;
+        end
+    endrule
+
+    method Action request(PayloadConReq consumeReq) if (cntrl.isRTRorRTS);
         let payload = payloadPipeIn.first;
         payloadPipeIn.deq;
         dynAssert(
@@ -150,30 +163,17 @@ module mkPayloadConsumer#(
 
         if (isLargerThanOne(consumeReq.fragNum)) begin
             remainingFragNumReg <= consumeReq.fragNum - 2;
-            busyReg <= True;
+            consumeReqQ.enq(consumeReq);
+            // busyReg <= True;
         end
         else begin
             respPayloadConsume(consumeReq, payload);
         end
-    endrule
+    endmethod
 
-    rule consumePayload if (cntlr.isRTRorRTS && busyReg);
-        let consumeReq = consumeReqQ.first;
-        let payload = payloadPipeIn.first;
-        payloadPipeIn.deq;
-        remainingFragNumReg <= remainingFragNumReg - 1;
-        if (isZero(remainingFragNumReg)) begin
-            busyReg <= False;
-            respPayloadConsume(consumeReq, payload);
-        end
-    endrule
-
-    rule flushPayload if (cntlr.isErr);
-        payloadPipeIn.deq;
-    endrule
-
-    interface request = toPut(consumeReqQ);
-    interface response = toGet(consumeRespQ);
+    interface respPipeOut = convertFifo2PipeOut(consumeRespQ);
+    // interface request = toPut(consumeReqQ);
+    // interface response = toGet(consumeRespQ);
 endmodule
 
 /*

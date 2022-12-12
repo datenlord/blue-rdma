@@ -5,7 +5,7 @@ import Printf :: *;
 import Vector :: *;
 
 import Controller :: *;
-import ScanFIFO :: *;
+import ScanFIFOF :: *;
 import Settings :: *;
 import Utils :: *;
 
@@ -16,25 +16,25 @@ import Utils :: *;
 // endinterface
 
 module mkWorkReqHandler#(
-    Controller cntlr,
+    Controller cntrl,
     FIFOF#(WorkReq) workReqQ
 )(PipeOut#(WorkReq));
-    ScanFIFO#(MAX_PENDING_REQ_NUM, WorkReq) pendingQ <- mkScanFIFO;
+    ScanFIFOF#(MAX_PENDING_REQ_NUM, WorkReq) pendingQ <- mkScanFIFOF;
     Reg#(PendingReqCnt) pendingReqCnt <- mkReg(0);
     Bool isScanMode = !pendingQ.scanDone;
-    Bool retryPulse = cntlr.getRetryPulse;
+    Bool retryPulse = cntrl.getRetryPulse;
 
     function Bool checkPendingReqNum();
-        return pendingReqCnt < cntlr.getPendingReqNumLimit;
+        return pendingReqCnt < cntrl.getPendingReqNumLimit;
     endfunction
 
     rule enq if (!isScanMode && checkPendingReqNum);
         let wr = workReqQ.first;
         workReqQ.deq;
-        let startPSN = cntlr.getNPSN;
+        let startPSN = cntrl.getNPSN;
         wr.startPSN = startPSN;
-        let { isOnlyReqPkt, pktNum, nextPSN, endPSN } = calcPktNumNextAndEndPSN(startPSN, wr.len, cntlr.getPMTU);
-        cntlr.setNPSN(nextPSN);
+        let { isOnlyReqPkt, pktNum, nextPSN, endPSN } = calcPktNumNextAndEndPSN(startPSN, wr.len, cntrl.getPMTU);
+        cntrl.setNPSN(nextPSN);
         wr.endPSN = endPSN;
         pendingQ.enq(wr);
         pendingReqCnt <= pendingReqCnt + 1;
@@ -70,7 +70,7 @@ module mkWorkReqHandler#(
 endmodule
 
 module mkRdmaReqHandler#(
-    Controller cntlr,
+    Controller cntrl,
     PipeOut#(WorkReq) workReqQ,
     DmaReadSrv dmaReadSrv
 )(PipeOut#(RdmaReq));
@@ -78,14 +78,14 @@ module mkRdmaReqHandler#(
     Vector#(MAX_PENDING_REQ_NUM, Reg#(WorkReq)) wrbuff <- replicateM(mkRegU);
     FIFOF#(RdmaReq) rdmaReqQ <- mkFIFOF;
 
-    rule sendDmaReadReq if (cntlr.isRTS);
+    rule sendDmaReadReq if (cntrl.isRTS);
         let token <- cbuff.reserve.get;
         let wr = workReqQ.first;
         workReqQ.deq;
         wrbuff[token] <= wr;
         let dmaReadReq = DmaReadReq {
             initiator: PAYLOAD_INIT_SQ_RD,
-            sqpn: cntlr.getSQPN,
+            sqpn: cntrl.getSQPN,
             startAddr: wr.startAddr,
             len: wr.len,
             token: token
@@ -93,7 +93,7 @@ module mkRdmaReqHandler#(
         dmaReadSrv.request.put(dmaReadReq);
     endrule
 
-    rule recvDmaReadResp if (cntlr.isRTS);
+    rule recvDmaReadResp if (cntrl.isRTS);
         let dmaReadResp <- dmaReadSrv.response.get;
         let token = dmaReadResp.token;
         let wr = wrbuff[token];
@@ -105,18 +105,18 @@ module mkRdmaReqHandler#(
         cbuff.complete.put(tuple2(token, rdmaReq));
     endrule
 
-    rule seqOutRdmaReq if (cntlr.isRTS);
+    rule seqOutRdmaReq if (cntrl.isRTS);
         let rdmaReq <- cbuff.drain.get;
         rdmaReqQ.enq(rdmaReq);
     endrule
 
-    method RdmaReq first() if (cntlr.isRTS) = rdmaReqQ.first;
-    method Action deq() if (cntlr.isRTS) = rdmaReqQ.deq;
-    method Bool notEmpty() if (cntlr.isRTS) = rdmaReqQ.notEmpty;
+    method RdmaReq first() if (cntrl.isRTS) = rdmaReqQ.first;
+    method Action deq() if (cntrl.isRTS) = rdmaReqQ.deq;
+    method Bool notEmpty() if (cntrl.isRTS) = rdmaReqQ.notEmpty;
 endmodule
 
 module mkRdmaRespHandler#(
-    Controller cntlr,
+    Controller cntrl,
     PipeOut#(WorkReq) workReqQ,
     PipeOut#(RdmaResp) rdmaRespQ,
     DmaWriteSrv dmaWriteSrv
@@ -143,7 +143,7 @@ module mkRdmaRespHandler#(
             rdmaRespQ.deq;
         end
         else begin
-            cntlr.setRetryPulse;
+            cntrl.setRetryPulse;
             validRdmaRespQ.clear;
             status <= RESP_NORMAL;
         end
@@ -230,7 +230,7 @@ module mkRdmaRespHandler#(
             //         status <= RESP_ERR;
             //     end
             // end
-            else if (psnInRangeExclusive(resp.psn, wr.endPSN, cntlr.getNPSN)) begin
+            else if (psnInRangeExclusive(resp.psn, wr.endPSN, cntrl.getNPSN)) begin
                 coalesce = True;
                 if (mustExplicitAck) begin
                     // Implicit retry
@@ -244,7 +244,7 @@ module mkRdmaRespHandler#(
             else begin
                 $display(
                     "Ghost ACK received: PSN=%h, nPSN=%h",
-                    resp.psn, cntlr.getNPSN
+                    resp.psn, cntrl.getNPSN
                 );
             end
 
@@ -288,7 +288,7 @@ module mkRdmaRespHandler#(
         dmaWriteReqQ.deq;
         let dmaWriteReq = DmaWriteReq {
             initiator: PAYLOAD_INIT_SQ_WR,
-            sqpn: cntlr.getSQPN,
+            sqpn: cntrl.getSQPN,
             // TODO: set startAddr and len according to RDMA response
             startAddr: wr.startAddr,
             len: wr.len,
@@ -327,7 +327,7 @@ module mkRdmaRespHandler#(
     method Bool notEmpty() = workCompQ.notEmpty;
 endmodule
 
-module mkSQ#(FIFOF#(WorkReq) workReqQ, Bool isRetry, Bool isErr)(PipeOut#(WorkComp));
+module mkSQ#(FIFOF#(WorkReq) workReqQ, Bool isRetry, Bool isERR)(PipeOut#(WorkComp));
 
     method Action deq() = workCompQ.deq;
     method WorkComp first() = workCompQ.first;

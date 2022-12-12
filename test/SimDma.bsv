@@ -126,7 +126,7 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
         end
 
         let resp = DmaReadResp {
-            initiator: curReqReg.initiator,
+            // initiator: curReqReg.initiator,
             sqpn: curReqReg.sqpn,
             wrID: curReqReg.wrID,
             data: dataStream
@@ -162,6 +162,35 @@ module mkSimDmaReadSrv(DmaReadSrv);
     return simDmaReadSrv.dmaReadSrv;
 endmodule
 
+module mkSimDmaWriteSrv(DmaWriteSrv);
+    FIFOF#(DmaWriteReq) dmaWriteReqQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaWriteRespQ <- mkFIFOF;
+
+    function Action genDmaWriteResp(DmaWriteMetaData metaData);
+        action
+            let dmaWriteResp = DmaWriteResp {
+                sqpn: metaData.sqpn,
+                psn : metaData.psn
+            };
+            dmaWriteRespQ.enq(dmaWriteResp);
+        endaction
+    endfunction
+
+    rule write;
+        let dmaWriteReq = dmaWriteReqQ.first;
+        dmaWriteReqQ.deq;
+
+        if (dmaWriteReq.metaData.inlineData matches tagged Valid .inlineData) begin
+            genDmaWriteResp(dmaWriteReq.metaData);
+        end
+        else if (dmaWriteReq.dataStream.isLast) begin
+            genDmaWriteResp(dmaWriteReq.metaData);
+        end
+    endrule
+
+    interface request = toPut(dmaWriteReqQ);
+    interface response = toGet(dmaWriteRespQ);
+endmodule
 /*
 module mkSimDmaReadSrv(DmaReadSrv);
     FIFOF#(DmaReadReq) dmaReadReqQ <- mkFIFOF;
@@ -262,7 +291,7 @@ module mkFixedLenSimDataStreamPipeOut#(
         dmaLenPipeOut.deq;
 
         let dmaReq = DmaReadReq {
-            initiator: ?,
+            // initiator: ?,
             sqpn: ?,
             startAddr: ?,
             len: dmaLength,

@@ -20,11 +20,11 @@ module mkGenRdmaReqGivenWorkReq#(
     QpType qpType,
     PMTU pmtu
 )(PendingWorkReqAndDataStreamPipeOut);
-    let cntlr <- mkSimController(qpType, pmtu);
+    let cntrl <- mkSimController(qpType, pmtu);
     let simDmaReadSrv <- mkSimDmaReadSrv;
 
     let resultPipeOut <- mkWorkReq2RdmaReq(
-        cntlr, simDmaReadSrv, pendingWorkReqPipeIn
+        cntrl, simDmaReadSrv, pendingWorkReqPipeIn
     );
     return resultPipeOut;
 endmodule

@@ -12,6 +12,7 @@ import SimDma :: *;
 import Utils4Test :: *;
 import Utils :: *;
 
+// TODO: test zero length WR case
 (* synthesize *)
 module mkTestReqGenSQ(Empty);
     let minDmaLength = 128;
@@ -19,7 +20,7 @@ module mkTestReqGenSQ(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let cntlr <- mkSimController(qpType, pmtu);
+    let cntrl <- mkSimController(qpType, pmtu);
 
     // WorkReq generation
     Vector#(2, PipeOut#(WorkReq)) workReqPipeOutVec <-
@@ -33,16 +34,16 @@ module mkTestReqGenSQ(Empty);
     let segDataStreamPipeOut <- mkSegmentDataStreamByPmtu(
         simDmaReadSrv.dataStreamPipeOut, pmtu
     );
-    let segDataStreamPipeOut4Ref <- mkBufferN(8, segDataStreamPipeOut);
+    let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
     // DUT
     let workReq2RdmaReq <- mkWorkReq2RdmaReq(
-        cntlr, simDmaReadSrv.dmaReadSrv, newPendingWorkReqPipeOut
+        cntrl, simDmaReadSrv.dmaReadSrv, newPendingWorkReqPipeOut
     );
     Vector#(2, PipeOut#(PendingWorkReq)) pendingWorkReqPipeOutVec <-
         mkForkVector(workReq2RdmaReq.pendingWorkReq);
     let pendingWorkReqPipeOut4Comp = pendingWorkReqPipeOutVec[0];
-    let pendingWorkReqPipeOut4Ref <- mkBufferN(4, pendingWorkReqPipeOutVec[1]);
+    let pendingWorkReqPipeOut4Ref <- mkBufferN(2, pendingWorkReqPipeOutVec[1]);
     let rdmaReqPipeOut = workReq2RdmaReq.rdmaReq;
 
     // Extract header DataStream, HeaderMetaData and payload DataStream

@@ -1,7 +1,5 @@
 import Reserved :: *;
 
-// import DataTypes :: *;
-
 // Fixed settings
 typedef 64 ADDR_WIDTH;
 typedef 64 LONG_WIDTH;

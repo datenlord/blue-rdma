@@ -5,7 +5,7 @@ import Assertions :: *;
 import DataTypes :: *;
 import Headers :: *;
 import InputBuffer :: *;
-import ScanFIFO :: *;
+import ScanFIFOF :: *;
 
 typedef enum {
     SQ_HANDLE_RESP_HEADER,
@@ -15,29 +15,28 @@ typedef enum {
     SQ_ERROR_FLUSH
 } RespHandleState deriving(Bits, Eq);
 
-// TODO: move this function to Utils
-function WorkComp genWorkCompFromWorkReq(
-    Controller cntlr,
-    WorkReq wr,
-    WorkCompStatus wcStatus
-);
-    let wcOpCode = workReqOpCode2WorkCompOpCode4SQ(wr.opcode);
-    let wcFlags = workReqOpCode2WorkCompFlags(wr.opcode);
+// function WorkComp genWorkCompFromWorkReq(
+//     Controller cntrl,
+//     WorkReq wr,
+//     WorkCompStatus wcStatus
+// );
+//     let wcOpCode = workReqOpCode2WorkCompOpCode4SQ(wr.opcode);
+//     let wcFlags = workReqOpCode2WorkCompFlags(wr.opcode);
 
-    let wc = WorkComp {
-        id      : wr.id,
-        opcode  : fromMaybe(?, wcOpCode),
-        flags   : wcFlags,
-        status  : wcStatus,
-        len     : wr.len,
-        pkey    : cntlr.pkey,
-        dqpn    : cntlr.dqpn,
-        sqpn    : cntlr.sqpn,
-        immDt   : wr.immDt,
-        rkey2Inv: wr.rkey2Inv
-    };
-    return wc;
-endfunction
+//     let wc = WorkComp {
+//         id      : wr.id,
+//         opcode  : fromMaybe(?, wcOpCode),
+//         flags   : wcFlags,
+//         status  : wcStatus,
+//         len     : wr.len,
+//         pkey    : cntrl.pkey,
+//         dqpn    : cntrl.dqpn,
+//         sqpn    : cntrl.sqpn,
+//         immDt   : wr.immDt,
+//         rkey2Inv: wr.rkey2Inv
+//     };
+//     return wc;
+// endfunction
 
 typedef enum {
     WR_ACK_TYPE_EXPLICIT_WHOLE,
@@ -49,21 +48,22 @@ typedef enum {
 } WorkReqAckType deriving(Bits, Eq, FShow);
 
 module mkRespHandleSQ#(
-    Controller cntlr,
+    Controller cntrl,
     PendingWorkReqBuf pendingWorkReqBuf,
     PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn,
     // RdmaPktMetaDataAndPayloadPipeOut rdmaPktMetaDataAndPayloadPipeIn,
-    PayloadConsumer payloadConsumer
+    PayloadConsumer payloadConsumer,
+    WorkCompHandler workCompHandler
 )(PipeOut#(WorkComp));
-    FIFOF#(WorkComp) workCompOutQ <- mkFIFOF;
+    // FIFOF#(WorkComp) workCompOutQ <- mkFIFOF;
     FIFOF#(Tuple5#(
         PendingWorkReq, RdmaPktMetaData, RdmaRespType, RetryReason, WorkReqAckType
     )) pendingRespQ <- mkFIFOF;
     FIFOF#(Tuple4#(
         PendingWorkReq, RdmaPktMetaData, Bool, Maybe#(WorkCompStatus)
     )) pendingDmaReqQ <- mkFIFOF;
-    FIFOF#(Tuple3#(PendingWorkReq, Bool, WorkCompFlags)) pendingWorkCompQ <-
-        mkSizedFIFOF(valueOf(MAX_PENDING_REQ_NUM));
+    // FIFOF#(Tuple3#(PendingWorkReq, Bool, WorkCompFlags)) pendingWorkCompQ <-
+    //     mkSizedFIFOF(valueOf(MAX_PENDING_REQ_NUM));
 
     Reg#(PSN)               retryStartPsnReg <- mkRegU;
     Reg#(WorkReqID)        retryWorkReqIdReg <- mkRegU;
@@ -79,9 +79,10 @@ module mkRespHandleSQ#(
     function Action discardPayloadReq(PmtuFragNum fragNum);
         action
             if (!isZero(fragNum)) begin
-                let discardReq = PayloadConsumeReq {
-                    fragNum    : fragNum,
-                    dmaWriteReq: tagged Invalid
+                let discardReq = PayloadConReq {
+                    initiator       : PAYLOAD_INIT_SQ_DISCARD,
+                    fragNum         : fragNum,
+                    dmaWriteMetaData: tagged Invalid
                 };
                 payloadConsumer.request.put(discardReq);
             end
@@ -90,12 +91,12 @@ module mkRespHandleSQ#(
 
     // Response handle pipeline first stage
     rule recvRespHeader if (
-        cntlr.isRTRorRTS           &&
-        pendingWorkReqBuf.notEmpty &&
+        cntrl.isRTRorRTS           &&
+        pendingWorkReqBuf.fifoF.notEmpty &&
         respHandleStateReg == SQ_HANDLE_RESP_HEADER
     );
         let curPktMetaData = pktMetaDataPipeIn.first;
-        let curPendingWR   = pendingWorkReqBuf.first;
+        let curPendingWR   = pendingWorkReqBuf.fifoF.first;
         let curRdmaHeader  = curPktMetaData.pktHeader;
 
         BTH bth         = extractBTH(curRdmaHeader.headerData);
@@ -109,7 +110,7 @@ module mkRespHandleSQ#(
             )
         );
 
-        PSN nextPSN   = cntlr.getNPSN;
+        PSN nextPSN   = cntrl.getNPSN;
         PSN startPSN  = fromMaybe(?, curPendingWR.startPSN);
         PSN endPSN    = fromMaybe(?, curPendingWR.endPSN);
         PktNum pktNum = fromMaybe(?, curPendingWR.pktNum);
@@ -211,14 +212,14 @@ module mkRespHandleSQ#(
                 pktMetaDataPipeIn.deq;
             end
             if (deqPendingWorkReqWithNormalResp) begin
-                pendingWorkReqBuf.deq;
-                cntlr.resetRetryCnt;
+                pendingWorkReqBuf.fifoF.deq;
+                cntrl.resetRetryCnt;
             end
         end
     endrule
 
     // Response handle pipeline second stage
-    rule handleRespByType if (cntlr.isRTRorRTS); // This rule still runs at retry state
+    rule handleRespByType if (cntrl.isRTRorRTS); // This rule still runs at retry state
         let { curPendingWR, curPktMetaData, rdmaRespType, retryReason, wrAckType } = pendingRespQ.first;
         pendingRespQ.deq;
 
@@ -251,8 +252,8 @@ module mkRespHandleSQ#(
             WR_ACK_TYPE_EXPLICIT_WHOLE, WR_ACK_TYPE_EXPLICIT_PARTIAL: begin
                 case (rdmaRespType)
                     RDMA_RESP_RETRY: begin
-                        Bool isRetryExceed  = cntlr.retryExceedLimit(retryReason);
-                        cntlr.decRetryCnt(retryReason);
+                        Bool isRetryExceed  = cntrl.retryExceedLimit(retryReason);
+                        cntrl.decRetryCnt(retryReason);
                         if (isRetryExceed) begin
                             hasWorkComp = True;
                             deqPendingWorkReqWhenErr = True;
@@ -287,8 +288,8 @@ module mkRespHandleSQ#(
             end
             WR_ACK_TYPE_COALESCE_RETRY: begin
                 retryReason = RETRY_REASON_IMPLICIT;
-                Bool isRetryExceed  = cntlr.retryExceedLimit(retryReason);
-                cntlr.decRetryCnt(retryReason);
+                Bool isRetryExceed  = cntrl.retryExceedLimit(retryReason);
+                cntrl.decRetryCnt(retryReason);
                 if (isRetryExceed) begin
                     hasWorkComp = True;
                     wcStatus = tagged Valid IBV_WC_RETRY_EXC_ERR;
@@ -308,7 +309,7 @@ module mkRespHandleSQ#(
     endrule
 
     // Response handle pipeline third stage
-    rule genWorkCompAndInitDmaWrite if (cntlr.isRTRorRTS); // This rule still runs at retry state
+    rule genWorkCompAndInitDmaWrite if (cntrl.isRTRorRTS); // This rule still runs at retry state
         let { pendingWR, pktMetaData, isFinalRespNormal, wcStatus } = pendingDmaReqQ.first;
         pendingDmaReqQ.deq;
 
@@ -341,8 +342,8 @@ module mkRespHandleSQ#(
                         readRespPktNum        = 1;
                     end
                     4'b0100, 4'b0010: begin // isFirstOrMiddleRdmaOpCode(bth.opcode)
-                        remainingReadRespLen  = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntlr.getPMTU);
-                        nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntlr.getPMTU);
+                        remainingReadRespLen  = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
+                        nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntrl.getPMTU);
                         readRespPktNum        = readRespPktNumReg + 1;
                     end
                     4'b0001: begin // isLastRdmaOpCode(bth.opcode)
@@ -375,15 +376,15 @@ module mkRespHandleSQ#(
                     end
                 end
 
-                let payloadConsumeReq = PayloadConsumeReq {
-                    fragNum       : pktMetaData.pktFragNum,
-                    dmaWriteReq   : DmaWriteReq {
-                        initiator : PAYLOAD_INIT_SQ_WR,
-                        sqpn      : cntrl.getSQPN,
-                        startAddr : nextReadRespWriteAddr,
-                        len       : pktPayloadLen,
-                        inlineData: tagged Invalid,
-                        psn       : bth.opcode
+                let payloadConsumeReq = PayloadConReq {
+                    initiator       : PAYLOAD_INIT_SQ_WR,
+                    fragNum         : pktMetaData.pktFragNum,
+                    dmaWriteMetaData: DmaWriteReq {
+                        sqpn        : cntrl.getSQPN,
+                        startAddr   : nextReadRespWriteAddr,
+                        len         : pktPayloadLen,
+                        inlineData  : tagged Invalid,
+                        psn         : bth.opcode
                     }
                 };
                 if (initReadRespDmaWrite) begin
@@ -393,15 +394,15 @@ module mkRespHandleSQ#(
             end
             else if (isAtomicWR) begin
                 let initiator = isAtomicWR ? PAYLOAD_INIT_SQ_ATOMIC : PAYLOAD_INIT_SQ_WR;
-                let atomicWriteReq = PayloadConsumeReq {
-                    fragNum      : 0,
-                    dmaWriteReq  : tagged Valid DmaWriteReq {
-                        initiator: initiator,
-                        sqpn     : cntrl.getSQPN,
-                        startAddr: pendingWR.wr.laddr,
-                        len      : pendingWR.wr.len,
-                        data     : tagged Valid atomicAckAeth.orig,
-                        psn      : bth.opcode
+                let atomicWriteReq = PayloadConReq {
+                    initiator         : initiator,
+                    fragNum           : 0,
+                    dmaWriteMetaData  : tagged Valid DmaWriteReq {
+                        sqpn          : cntrl.getSQPN,
+                        startAddr     : pendingWR.wr.laddr,
+                        len           : pendingWR.wr.len,
+                        data          : tagged Valid atomicAckAeth.orig,
+                        psn           : bth.opcode
                     }
                 };
                 payloadConsumer.request.put(atomicWriteReq);
@@ -419,18 +420,19 @@ module mkRespHandleSQ#(
                 )
             );
             let wcs = fromMaybe(?, wcStatus);
-            pendingWorkCompQ.enq(tuple3(pendingWR, wcWaitDmaResp, wcs));
+            workCompHandler.submitFromRespHandleInSQ(pendingWR, wcWaitDmaResp, wcs);
+            // pendingWorkCompQ.enq(tuple3(pendingWR, wcWaitDmaResp, wcs));
         end
     endrule
-
+/*
     // Response handle pipeline fourth stage
-    rule outputWorkComp if (cntlr.isRTRorRTS); // This rule still runs at retry state
+    rule outputWorkComp if (cntrl.isRTRorRTS); // This rule still runs at retry state
         let { pendingWR, wcWaitDmaResp, wcStatus } = pendingWorkCompQ.first;
-        let workComp = genWorkCompFromWorkReq(cntlr, pendingWR.wr, wcStatus);
+        let workComp = genWorkCompFromWorkReq(cntrl, pendingWR.wr, wcStatus);
 
         // Change to error state if error WC or CQ full
         if (wcStatus != IBV_WC_SUCCESS || !workCompOutQ.notFull) begin
-            cntlr.setStateErr;
+            cntrl.setStateErr;
 
             if (!workCompOutQ.notFull) begin
                 // TODO: async event to report CQ full
@@ -461,9 +463,9 @@ module mkRespHandleSQ#(
         end
     endrule
 
-    rule flushPendingWorkReq if (cntlr.isERR);
-        let pendingWR = pendingWorkReqBuf.first;
-        pendingWorkReqBuf.deq;
+    rule flushPendingWorkReq if (cntrl.isERR);
+        let pendingWR = pendingWorkReqBuf.fifoF.first;
+        pendingWorkReqBuf.fifoF.deq;
 
         let wcWaitDmaResp = False;
         pendingWorkCompQ.enq(tuple3(pendingWR, wcWaitDmaResp, IBV_WC_WR_FLUSH_ERR));
@@ -471,22 +473,32 @@ module mkRespHandleSQ#(
         respHandleStateReg <= RecvRespHeader;
         respHeaderQ.clear;
     endrule
-
+*/
     rule flushPktMetaData if (
-        cntlr.isERR || respHandleStateReg == SQ_ERROR_FLUSH || // Error flush
+        cntrl.isERR || respHandleStateReg == SQ_ERROR_FLUSH || // Error flush
         respHandleStateReg == SQ_RETRY_FLUSH                || // Retry flush
-        !pendingWorkReqBuf.notEmpty                            // Discard ghost responses
+        !pendingWorkReqBuf.fifoF.notEmpty                      // Discard ghost responses
     );
         if (pktMetaDataPipeIn.notEmpty) begin
             pktMetaDataPipeIn.deq;
         end
 
+        let allPipeEmpty = !(
+            pktMetaDataPipeIn.notEmpty ||
+            pendingRespQ.notEmpty ||
+            pendingDmaReqQ.notEmpty
+            // pendingWorkCompQ.notEmpty
+        );
+        if (cntrl.isERR && allPipeEmpty) begin
+            workCompHandler.respHandlePipeEmptyInSQ;
+        end
+
         // TODO: handle RNR waiting
         if (
-            cntlr.isRTRorRTS &&
+            cntrl.isRTRorRTS &&
             respHandleStateReg == SQ_RETRY_FLUSH
         ) begin
-            let curPendingWR = pendingWorkReqBuf.first;
+            let curPendingWR = pendingWorkReqBuf.fifoF.first;
             dynAssert(
                 retryWorkReqIdReg == curPendingWR.wr.id,
                 "retryWorkReqIdReg assertion @ mkRespHandleSQ",
@@ -500,18 +512,13 @@ module mkRespHandleSQ#(
             let wrLen = curPendingWR.wr.len;
             let laddr = curPendingWR.wr.laddr;
             let psnDiff = psnDiff(retryStartPsnReg, startPSN);
-            let retryWorkReqLen = lenSubtractPsnMultiplyPMTU(wrLen, psnDiff, cntlr.getPMTU);
-            let retryWorkReqAddr = addrAddPsnMultiplyPMTU(laddr, psnDiff, cntlr.getPMTU);
+            let retryWorkReqLen = lenSubtractPsnMultiplyPMTU(wrLen, psnDiff, cntrl.getPMTU);
+            let retryWorkReqAddr = addrAddPsnMultiplyPMTU(laddr, psnDiff, cntrl.getPMTU);
 
             // All pending responses handled, then retry flush finishes,
             // change state to normal handling
-            if (!(
-                headerPipeIn.notEmpty   ||
-                pendingRespQ.notEmpty   ||
-                pendingDmaReqQ.notEmpty ||
-                pendingWorkCompQ.notEmpty
-            )) begin
-                cntlr.setRetryPulse(
+            if (allPipeEmpty) begin
+                cntrl.setRetryPulse(
                     retryWorkReqIdReg,
                     retryStartPsnReg,
                     retryWorkReqLen,

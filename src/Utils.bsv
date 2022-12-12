@@ -625,6 +625,13 @@ endfunction
 
 // WorkReq related
 
+// TODO: support multiple WR flags
+function Bool compareWorkReqFlags(
+    WorkReqSendFlags flag1, WorkReqSendFlags flag2
+);
+    return flag1 == flag2;
+endfunction
+
 function Tuple2#(Bool, PktNum) calcPktNumByLength(Length len, PMTU pmtu);
     let zeroLength = isZero(len);
     let pmtuValueWidth = getPmtuLogValue(pmtu);
@@ -676,22 +683,14 @@ function Bool workReqNeedDmaRead(WorkReq wr);
     endcase;
 endfunction
 
-// function Bool workReqNeedDmaWrite(WorkReq wr);
-//     return case (wr.opcode)
-//         IBV_WR_RDMA_READ           : !isZero(wr.len);
-//         IBV_WR_ATOMIC_CMP_AND_SWP  ,
-//         IBV_WR_ATOMIC_FETCH_AND_ADD: True;
-//         default                    : False;
-//     endcase;
-// endfunction
-
 function Bool workReqHasPayload(WorkReq wr);
     return !(isZero(wr.len) || isReadOrAtomicWorkReq(wr.opcode));
 endfunction
 
-// TODO: support multiple WR flags
 function Bool workReqNeedWorkComp(WorkReq wr);
-    return wr.flags == IBV_SEND_SIGNALED || isReadOrAtomicWorkReq(wr.opcode);
+    return
+        compareWorkReqFlags(wr.flags, IBV_SEND_SIGNALED) ||
+        isReadOrAtomicWorkReq(wr.opcode);
 endfunction
 
 function Bool workReqHasComp(WorkReqOpCode opcode);
@@ -737,6 +736,13 @@ endfunction
 
 // WorkComp related
 
+// TODO: support multiple WC flags
+function Bool compareWorkCompFlags(
+    WorkCompFlags flag1, WorkCompFlags flag2
+);
+    return flag1 == flag2;
+endfunction
+
 function Maybe#(WorkCompOpCode) workReqOpCode2WorkCompOpCode4SQ(WorkReqOpCode wrOpCode);
     return case (wrOpCode)
         IBV_WR_RDMA_WRITE          : tagged Valid IBV_WC_RDMA_WRITE;
@@ -749,7 +755,8 @@ function Maybe#(WorkCompOpCode) workReqOpCode2WorkCompOpCode4SQ(WorkReqOpCode wr
         IBV_WR_LOCAL_INV           : tagged Valid IBV_WC_LOCAL_INV;
         IBV_WR_BIND_MW             : tagged Valid IBV_WC_BIND_MW;
         IBV_WR_SEND_WITH_INV       : tagged Valid IBV_WC_SEND;
-
+        IBV_WR_TSO                 : tagged Valid IBV_WC_TSO;
+        // IBV_WR_DRIVER1             : tagged Valid IBV_WC_DRIVER1;
         default                    : tagged Invalid;
     endcase;
 endfunction
