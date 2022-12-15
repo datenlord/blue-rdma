@@ -143,7 +143,7 @@ module mkRdmaRespHandler#(
             rdmaRespQ.deq;
         end
         else begin
-            cntrl.setRetryPulse;
+            cntrl.notifyRetry;
             validRdmaRespQ.clear;
             status <= RESP_NORMAL;
         end

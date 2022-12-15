@@ -29,9 +29,12 @@ make -j8 TESTFILE=TestInputPktHandle.bsv TOP=mkTestCalculateZeroPktLen 2>&1 | te
 
 make -j8 TESTFILE=TestReqGenSQ.bsv TOP=mkTestReqGenSQ 2>&1 | tee -a $RUN_LOG
 
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOP=mkTestRespHandleNormalCase 2>&1 | tee -a $RUN_LOG
+
 make -j8 TESTFILE=TestScanFIFOF.bsv TOP=mkTestScanFIFOF 2>&1 | tee -a $RUN_LOG
 
-make -j8 TESTFILE=TestWorkCompHandler.bsv TOP=mkTestWorkCompHandlerNormalCase 2>&1 | tee -a $RUN_LOG
+make -j8 TESTFILE=TestWorkCompGen.bsv TOP=mkTestWorkCompGenErrorCaseSQ 2>&1 | tee -a $RUN_LOG
+make -j8 TESTFILE=TestWorkCompGen.bsv TOP=mkTestWorkCompGenNormalCaseSQ 2>&1 | tee -a $RUN_LOG
 
 make -j8 TESTFILE=TestUtils.bsv TOP=mkTestSegmentDataStream 2>&1 | tee -a $RUN_LOG
 make -j8 TESTFILE=TestUtils.bsv TOP=mkTestPsnFunc 2>&1 | tee -a $RUN_LOG

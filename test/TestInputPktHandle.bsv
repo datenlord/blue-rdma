@@ -67,7 +67,7 @@ module mkTestCalculatePktLen#(
     );
 
     // DUT
-    let dut <- mkInputRdmaPktBufAndCalcPktLen(
+    let dut <- mkInputRdmaPktBufAndHeaderValidation(
         headerAndMetaDataAndPayloadPipeOut, pmtu
     );
     let pktMetaDataPipeOut = dut.pktMetaData;

@@ -10,12 +10,13 @@ import Settings :: *;
 typedef TExp#(31) RDMA_MAX_LEN;
 typedef 8         ATOMIC_WORK_REQ_LEN;
 typedef 3         RETRY_CNT_WIDTH;
-typedef 5         TIMER_WIDTH;
 
 typedef 7 INFINITE_RETRY;
 typedef 0 INFINITE_TIMEOUT;
 
 // Derived settings
+typedef AETH_VALUE_WIDTH TIMER_WIDTH;
+
 typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
 
 typedef TDiv#(DATA_BUS_WIDTH, 8)   DATA_BUS_BYTE_WIDTH;
@@ -37,7 +38,7 @@ typedef TDiv#(MIN_PMTU, DATA_BUS_BYTE_WIDTH) PMTU_MIN_FRAG_NUM;
 
 typedef TExp#(PAD_WIDTH) FRAG_MIN_VALID_BYTE_NUM;
 
-typedef TMul#(MIN_PKT_NUM_IN_BUF, PMTU_MAX_FRAG_NUM) DATA_STREAM_FRAG_BUF_SIZE;
+typedef TMul#(MIN_PKT_NUM_IN_RECV_BUF, PMTU_MAX_FRAG_NUM)   DATA_STREAM_FRAG_BUF_SIZE;
 typedef TDiv#(DATA_STREAM_FRAG_BUF_SIZE, PMTU_MIN_FRAG_NUM) PKT_META_DATA_BUF_SIZE;
 
 // Derived types
@@ -79,7 +80,7 @@ typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
 typedef Server#(DmaWriteReq, DmaWriteResp) DmaWriteSrv;
 
 typedef ScanFIFOF#(MAX_PENDING_REQ_NUM, PendingWorkReq) PendingWorkReqBuf;
-typedef ScanFIFOF#(MAX_PENDING_REQ_NUM, RecvReq)        RecvReqBuf;
+typedef PipeOut#(RecvReq)                               RecvReqBuf;
 
 // RDMA related requests and responses
 
@@ -129,11 +130,19 @@ typedef struct {
     HeaderMetaData headerMetaData;
 } RdmaHeader deriving(Bits, Bounded, FShow);
 
+typedef enum {
+    PKT_ST_VALID,
+    PKT_ST_LEN_ERR,
+    PKT_ST_ACC_ERR
+    // PKT_ST_INVALID
+} PktVeriStatus deriving(Bits, Bounded, Eq);
+
 typedef struct {
     PktLen pktPayloadLen;
     PmtuFragNum pktFragNum;
     RdmaHeader pktHeader;
     Bool pktValid;
+    PktVeriStatus pktStatus;
 } RdmaPktMetaData deriving(Bits, Bounded);
 
 instance FShow#(RdmaPktMetaData);
@@ -177,13 +186,12 @@ typedef struct {
     QPN sqpn;
     ADDR startAddr;
     PktLen len;
-    Maybe#(Long) inlineData;
     PSN psn;
-} DmaWriteMetaData deriving(Bits);
+} DmaWriteMetaData deriving(Bits, Eq, FShow);
 
 typedef struct {
     DmaWriteMetaData metaData;
-    DataStream dataStream;
+    DataStream data;
 } DmaWriteReq deriving(Bits);
 
 typedef struct {
@@ -203,10 +211,16 @@ typedef struct {
     DmaReadResp dmaReadResp;
 } PayloadGenResp deriving(Bits);
 
+typedef union tagged {
+    void DiscardPayload;
+    Tuple2#(DmaWriteMetaData, Long) AtomicRespInfoAndPayload;
+    DmaWriteMetaData ReadRespInfo;
+} PayloadConInfo deriving(Bits, Eq, FShow);
+
 typedef struct {
     PayloadInitiator initiator;
     PmtuFragNum fragNum;
-    Maybe#(DmaWriteMetaData) dmaWriteMetaData;
+    PayloadConInfo consumeInfo;
 } PayloadConReq deriving(Bits);
 
 typedef struct {
@@ -420,6 +434,34 @@ typedef struct {
     Maybe#(IMM) immDt;
     Maybe#(RKEY) rkey2Inv;
 } WorkComp deriving(Bits, FShow);
+
+typedef enum {
+    WC_REQ_TYPE_SUC_FULL_ACK,
+    WC_REQ_TYPE_SUC_PARTIAL_ACK,
+    WC_REQ_TYPE_ERR_FULL_ACK,
+    WC_REQ_TYPE_ERR_PARTIAL_ACK,
+    WC_REQ_TYPE_NO_WC,
+    WC_REQ_TYPE_UNKNOWN
+} WorkCompReqType deriving(Bits, Eq, FShow);
+
+typedef struct {
+    RecvReq recvReq;
+    Bool wcWaitDmaResp;
+    WorkCompReqType wcReqType;
+    PSN reqPSN;
+    WorkCompStatus wcStatus;
+    RdmaOpCode reqOpCode;
+    Maybe#(IMM) immDt;
+    Maybe#(RKEY) rkey2Inv;
+} WorkCompGenReqRQ deriving(Bits);
+
+typedef struct {
+    PendingWorkReq pendingWR;
+    Bool wcWaitDmaResp;
+    WorkCompReqType wcReqType;
+    PSN respPSN;
+    WorkCompStatus wcStatus;
+} WorkCompGenReqSQ deriving(Bits, FShow);
 
 // Async event related
 

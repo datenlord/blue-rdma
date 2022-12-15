@@ -35,6 +35,10 @@ module mkTestScanFIFOF(Empty);
             qElemPipeOut4Q.deq;
 
             scanQ.fifoF.enq(curEnqData);
+            // $display(
+            //     "time=%0d: curEnqData=%h when in fill mode",
+            //     $time, curEnqData
+            // );
         end
         else begin
             scanTestStateReg <= Q_SCAN;

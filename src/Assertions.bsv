@@ -11,11 +11,11 @@ function Action dynAssert(Bool condition, String assertName, Fmt assertFmtMsg);
     endaction
 endfunction
 
-function anytype staticReport(String reportMsg);
-    return message(reportMsg, ?);
-    // let pos = getStringPosition(reportMsg);
-    // return primMessage(pos, "StaticReport: " + reportMsg, ?);
-endfunction
+// function anytype staticReport(String reportMsg);
+//     return message(reportMsg, ?);
+//     // let pos = getStringPosition(reportMsg);
+//     // return primMessage(pos, "StaticReport: " + reportMsg, ?);
+// endfunction
 
 /*
 nullModule :: (IsModule m c) => m Empty

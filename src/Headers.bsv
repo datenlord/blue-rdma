@@ -131,7 +131,7 @@ typedef enum {
     AETH_CODE_RNR  = 2'b01,
     AETH_CODE_RSVD = 2'b10,
     AETH_CODE_NAK  = 2'b11
-} AethCode deriving(Bits, Bounded, Eq);
+} AethCode deriving(Bits, Bounded, Eq, FShow);
 
 typedef enum {
     AETH_ACK_VALUE_INVALID_CREDIT_CNT = 5'b11111
@@ -176,7 +176,7 @@ typedef struct {
     AethCode code;
     AethValue value;
     MSN msn;
-} AETH deriving(Bits, Bounded);
+} AETH deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(AETH)        AETH_WIDTH;
 typedef TDiv#(AETH_WIDTH, 8) AETH_BYTE_WIDTH;

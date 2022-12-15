@@ -4,6 +4,22 @@ import Vector :: *;
 
 import Assertions :: *;
 
+function Bit#(1) getMSB(Bit#(nSz) bits) provisos(Add#(1, kSz, nSz));
+    return (reverseBits(bits))[0];
+endfunction
+
+function Bit#(TSub#(nSz, 1)) removeMSB(Bit#(nSz) bits) provisos(Add#(1, kSz, nSz));
+    return truncateLSB(bits << 1);
+endfunction
+
+// function PipeOut#(anytype) scanQ2PipeOut(ScanIfc scanQ);
+//     return interface PipeOut;
+//         method anytype first() = scanQ.current;
+//         method Action deq() = scanQ.scanNext;
+//         method Bool notEmpty() = !scanQ.scanDone;
+//     endinterface;
+// endfunction
+
 interface ScanIfc#(numeric type qSz, type anytype);
     method Action scanStart();
     method anytype current();
@@ -15,30 +31,106 @@ endinterface
 interface ScanFIFOF#(numeric type qSz, type anytype);
     interface FIFOF#(anytype) fifoF;
     interface ScanIfc#(qSz, anytype) scanIfc;
-    // method Action enq(anytype inputVal);
-    // method Action deq();
-    // method anytype first();
-
-    // method Bool notFull;
-    // method Bool notEmpty;
-
-    // method Action clear();
 endinterface
 
 // (* descending_urgency="clear, deq, enq" *)
 module mkScanFIFOF(ScanFIFOF#(vSz, anytype)) provisos(
     Bits#(anytype, tSz),
-    NumAlias#(TLog#(TAdd#(vSz, 1)), cntSz)
+    NumAlias#(TLog#(vSz), vLogSz),
+    NumAlias#(TAdd#(vLogSz, 1), cntSz),
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // vSz must be power of 2
 );
     Vector#(vSz, Reg#(anytype)) dataVec <- replicateM(mkRegU());
-    Reg#(Bit#(TLog#(vSz)))    enqPtrReg <- mkReg(0);
-    Reg#(Bit#(TLog#(vSz)))    deqPtrReg <- mkReg(0);
+    Reg#(Bit#(cntSz))         enqPtrReg <- mkReg(0);
+    Reg#(Bit#(cntSz))         deqPtrReg <- mkReg(0);
     Reg#(Bool)                 emptyReg <- mkReg(True);
     Reg#(Bool)                  fullReg <- mkReg(False);
     Reg#(UInt#(cntSz))           cntReg <- mkReg(0);
-    Reg#(Bit#(TLog#(vSz)))   scanPtrReg <- mkRegU;
+    Reg#(Bit#(cntSz))        scanPtrReg <- mkRegU;
     Reg#(Bool)              scanModeReg <- mkReg(False);
-    Bit#(TLog#(vSz))        maxIndex  = fromInteger(valueOf(vSz) - 1);
+
+    // Bit#(TLog#(vSz))        maxIndex  = fromInteger(valueOf(vSz) - 1);
+
+    Reg#(Maybe#(anytype)) pushReg[2] <- mkCReg(2, tagged Invalid);
+    Reg#(Bool)             popReg[2] <- mkCReg(2, False);
+    Reg#(Bool)           clearReg[2] <- mkCReg(2, False);
+
+    function Bool isFull(Bit#(cntSz) nextEnqPtr);
+        return (getMSB(nextEnqPtr) != getMSB(deqPtrReg)) &&
+            (removeMSB(nextEnqPtr) == removeMSB(deqPtrReg));
+    endfunction
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule canonicalize;
+        if (clearReg[1]) begin
+            cntReg    <= 0;
+            enqPtrReg <= 0;
+            deqPtrReg <= 0;
+            emptyReg  <= True;
+            fullReg   <= False;
+        end
+        else begin
+            let nextEnqPtr = enqPtrReg;
+            let nextDeqPtr = deqPtrReg;
+
+            if (pushReg[1] matches tagged Valid .pushVal) begin
+                dataVec[removeMSB(enqPtrReg)] <= pushVal;
+                nextEnqPtr = enqPtrReg + 1;
+                // $display("time=%0d: push into ScanFIFOF, enqPtrReg=%h", $time, enqPtrReg);
+            end
+
+            if (popReg[1]) begin
+                nextDeqPtr = deqPtrReg + 1;
+                // $display(
+                //     "time=%0d: pop from ScanFIFOF, deqPtrReg=%h, emptyReg=",
+                //     $time, deqPtrReg, fshow(emptyReg)
+                // );
+            end
+
+            if (isValid(pushReg[1]) && !popReg[1]) begin
+                cntReg <= cntReg + 1;
+            end
+            else if (!isValid(pushReg[1]) && popReg[1]) begin
+                cntReg <= cntReg - 1;
+            end
+
+            fullReg  <= isFull(nextEnqPtr);
+            emptyReg <= nextDeqPtr == enqPtrReg;
+
+            enqPtrReg <= nextEnqPtr;
+            deqPtrReg <= nextDeqPtr;
+
+            // $display(
+            //     "time=%0d: enqPtrReg=%0d, deqPtrReg=%0d", $time, enqPtrReg, deqPtrReg,
+            //     ", fullReg=", fshow(fullReg), ", emptyReg=", fshow(emptyReg)
+            // );
+        end
+
+        clearReg[1] <= False;
+        pushReg[1]  <= tagged Invalid;
+        popReg[1]   <= False;
+    endrule
+
+    interface fifoF = interface FIFOF#(vSz, anytype);
+        method anytype first if (!emptyReg && !scanModeReg);
+            return dataVec[removeMSB(deqPtrReg)];
+        endmethod
+
+        method Bool notEmpty = !emptyReg;
+        method Bool notFull  = !fullReg;
+
+        method Action enq(anytype inputVal) if (!fullReg && !scanModeReg);
+            pushReg[0] <= tagged Valid inputVal;
+        endmethod
+
+        method Action deq if (!emptyReg && !scanModeReg);
+            popReg[0] <= True;
+        endmethod
+
+        method Action clear() if (!scanModeReg);
+            clearReg[0] <= True;
+        endmethod
+    endinterface;
 
     interface scanIfc = interface ScanIfc#(vSz, anytype);
         method Action scanStart() if (!scanModeReg);
@@ -48,64 +140,33 @@ module mkScanFIFOF(ScanFIFOF#(vSz, anytype)) provisos(
                 $format("cannot start scan when emptyReg=", fshow(emptyReg))
             );
 
-            if (!emptyReg) begin
-                scanModeReg <= True;
-                scanPtrReg <= deqPtrReg;
-            end
+            scanModeReg <= !emptyReg;
+            scanPtrReg <= deqPtrReg;
+
+            // $display(
+            //     "time=%0d: scanStart(), scanPtrReg=%0d, deqPtrReg=%0d, enqPtrReg=%0d",
+            //     $time, scanPtrReg, deqPtrReg, enqPtrReg,
+            //     ", scanModeReg=", fshow(scanModeReg),
+            //     ", emptyReg=", fshow(emptyReg)
+            // );
         endmethod
 
         method anytype current() if (scanModeReg);
-            return dataVec[scanPtrReg];
+            return dataVec[removeMSB(scanPtrReg)];
         endmethod
 
         method Action scanNext if (scanModeReg);
-            let nextScanP = scanPtrReg + 1;
-            if (nextScanP == enqPtrReg) begin
-                scanModeReg <= False;
-            end
-            scanPtrReg <= nextScanP;
+            let nextScanPtr = scanPtrReg + 1;
+            let scanFinish = nextScanPtr == enqPtrReg;
+            scanPtrReg  <= nextScanPtr;
+            scanModeReg <= !scanFinish;
+            // $display(
+            //     "time=%0d: scanPtrReg=%0d, nextScanPtr=%0d, enqPtrReg=%0d, deqPtrReg=%0d, scanModeReg=",
+            //     $time, scanPtrReg, nextScanPtr, enqPtrReg, deqPtrReg, fshow(scanModeReg)
+            // );
         endmethod
 
         method Bool scanDone() = !scanModeReg;
         method UInt#(cntSz) count = cntReg;
-    endinterface;
-
-    interface fifoF = interface FIFOF#(vSz, anytype);
-        method Action enq(anytype inputVal) if (!fullReg && !scanModeReg);
-            cntReg <= cntReg + 1;
-            dataVec[enqPtrReg] <= inputVal;
-            emptyReg <= False;
-            let nextEnqPtr = (enqPtrReg == maxIndex) ? 0 : enqPtrReg + 1;
-            if (nextEnqPtr == deqPtrReg) begin
-                fullReg <= True;
-            end
-            enqPtrReg <= nextEnqPtr;
-        endmethod
-
-        method Action deq if (!emptyReg && !scanModeReg);
-            cntReg <= cntReg - 1;
-            // Tell later stages a dequeue was requested
-            fullReg <= False;
-            let nextDeqPtr = (deqPtrReg == maxIndex) ? 0 : deqPtrReg + 1;
-            if (nextDeqPtr == enqPtrReg) begin
-                emptyReg <= True;
-            end
-            deqPtrReg <= nextDeqPtr;
-        endmethod
-
-        method anytype first if (!emptyReg && !scanModeReg);
-            return dataVec[deqPtrReg];
-        endmethod
-
-        method Bool notEmpty = !emptyReg;
-        method Bool notFull  = !fullReg;
-
-        method Action clear;
-            cntReg    <= 0;
-            enqPtrReg <= 0;
-            deqPtrReg <= 0;
-            emptyReg  <= True;
-            fullReg   <= False;
-        endmethod
     endinterface;
 endmodule

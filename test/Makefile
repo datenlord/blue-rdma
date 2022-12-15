@@ -14,8 +14,8 @@ DEBUGFLAGS = -check-assert \
 	-warn-action-shadowing \
 	-warn-method-urgency \
 	-promote-warnings ALL
-VERILOGFLAGS = -verilog -remove-dollar -remove-unused-modules # -use-dpi
-BLUESIMFLAGS = -parallel-sim-link 8 # -systemc
+VERILOGFLAGS = -verilog -remove-dollar -remove-unused-modules # -use-dpi -verilog-filter cmd
+BLUESIMFLAGS = -parallel-sim-link 16 # -systemc
 BUILDDIR = build
 OUTDIR = -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -simdir $(BUILDDIR) -vdir $(BUILDDIR)
 WORKDIR = -fdir $(abspath .)
@@ -37,6 +37,9 @@ link: compile
 
 simulate: link
 	$(SIMEXE)
+
+verilog: link
+	bsc $(VERILOGFLAGS) $(RECOMPILEFLAGS) -e $(TOP)
 
 clean:
 	rm -rf $(BUILDDIR)

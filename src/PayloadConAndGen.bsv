@@ -50,9 +50,13 @@ module mkPayloadGenerator#(
         generateRespQ.enq(generateResp);
     endrule
 
-    rule flushPayloadGenResp if (cntrl.isERR);
-        // TODO: clean generateReqQ and generateRespQ
+    rule flushDmaReadResp if (cntrl.isERR);
         let dmaReadResp <- dmaReadSrv.response.get;
+    endrule
+
+    rule flushReqRespQ if (cntrl.isERR);
+        generateReqQ.clear;
+        generateRespQ.clear;
     endrule
 
     method Action request(PayloadGenReq generateReq) if (cntrl.isRTRorRTS);
@@ -88,92 +92,239 @@ module mkPayloadGenerator#(
 endmodule
 
 interface PayloadConsumer;
-    method Action request(PayloadConReq req);
+    // method Action request(PayloadConReq req);
     interface PipeOut#(PayloadConResp) respPipeOut;
 endinterface
 
+// Flush DMA write responses when error
 module mkPayloadConsumer#(
     Controller cntrl,
     DataStreamPipeOut payloadPipeIn,
-    DmaWriteSrv dmaWriteSrv
+    DmaWriteSrv dmaWriteSrv,
+    PipeOut#(PayloadConReq) payloadConReqPipeIn
 )(PayloadConsumer);
-    FIFOF#(PayloadConReq)   consumeReqQ <- mkFIFOF;
-    FIFOF#(PayloadConResp) consumeRespQ <- mkFIFOF;
+    FIFOF#(PayloadConReq)    consumeReqQ <- mkFIFOF;
+    FIFOF#(PayloadConResp)  consumeRespQ <- mkFIFOF;
+    FIFOF#(PayloadConReq) pendingConReqQ <- mkFIFOF;
 
     Reg#(PmtuFragNum) remainingFragNumReg <- mkRegU;
-    // Reg#(PayloadConReq)     curReqReg <- mkRegU;
-    // Reg#(Bool) busyReg <- mkReg(False);
+    Reg#(Bool) busyReg <- mkReg(False);
 
-    function Action respPayloadConsume(PayloadConReq consumeReq, DataStream payload);
+    function Action checkIsFirstPayloadDataStream(
+        DataStream payload, PayloadConInfo consumeInfo
+    );
         action
             dynAssert(
-                payload.isLast,
-                "payload.isLast assertion @ mkPayloadConsumer",
+                payload.isFirst,
+                "only payload assertion @ mkPayloadConsumer",
                 $format(
-                    "payload.isLast=%b should be true when remainingFragNumReg=%0d",
-                    payload.isLast, remainingFragNumReg
+                    "payload.isFirst=", fshow(payload.isFirst),
+                    " should be true when consumeInfo=",
+                    fshow(consumeInfo)
                 )
             );
-
-            if (consumeReq.dmaWriteMetaData matches tagged Valid .dmaWriteMetaData) begin
-                let consumeResp = PayloadConResp {
-                    initiator   : consumeReq.initiator,
-                    dmaWriteResp: DmaWriteResp {
-                        sqpn    : dmaWriteMetaData.sqpn,
-                        psn     : dmaWriteMetaData.psn
-                    }
-                };
-                consumeRespQ.enq(consumeResp);
-            end
         endaction
     endfunction
 
-    rule consumePayload if (cntrl.isRTRorRTS);
+    function Action checkIsOnlyPayloadDataStream(
+        DataStream payload, PayloadConInfo consumeInfo
+    );
+        action
+            dynAssert(
+                payload.isFirst && payload.isLast,
+                "only payload assertion @ mkPayloadConsumer",
+                $format(
+                    "payload.isFirst=", fshow(payload.isFirst),
+                    "and payload.isLast=", fshow(payload.isLast),
+                    " should be true when consumeInfo=",
+                    fshow(consumeInfo)
+                )
+            );
+        endaction
+    endfunction
+
+    function Action sendDmaWriteReq(
+        PayloadConReq consumeReq, DataStream payload
+    );
+        action
+            case (consumeReq.consumeInfo) matches
+                tagged ReadRespInfo .readRespInfo: begin
+                    let dmaWriteReq = DmaWriteReq {
+                        metaData: readRespInfo,
+                        data    : payload
+                    };
+                    dmaWriteSrv.request.put(dmaWriteReq);
+                end
+                tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                    let { atomicRespDmaWriteMetaData, atomicRespPayload } = atomicRespInfo;
+                    let dmaWriteReq = DmaWriteReq {
+                        metaData: atomicRespDmaWriteMetaData,
+                        data: DataStream {
+                            data   : zeroExtendLSB(atomicRespPayload),
+                            byteEn : genByteEn(fromInteger(valueOf(ATOMIC_WORK_REQ_LEN))),
+                            isFirst: True,
+                            isLast : True
+                        }
+                    };
+                    dmaWriteSrv.request.put(dmaWriteReq);
+                end
+                default: begin end
+            endcase
+        endaction
+    endfunction
+
+    rule recvReq if (cntrl.isRTRorRTS);
+        let consumeReq = payloadConReqPipeIn.first;
+        payloadConReqPipeIn.deq;
+
+        case (consumeReq.consumeInfo) matches
+            tagged DiscardPayload: begin
+                dynAssert(
+                    !isZero(consumeReq.fragNum),
+                    "consumeReq.fragNum assertion @ mkPayloadConsumer",
+                    $format(
+                        "consumeReq.fragNum=%h should not be zero when consumeInfo is DiscardPayload",
+                        consumeReq.fragNum
+                    )
+                );
+            end
+            tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                let { atomicRespDmaWriteMetaData, atomicRespPayload } = atomicRespInfo;
+                dynAssert(
+                    atomicRespDmaWriteMetaData.len == fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)),
+                    "atomicRespDmaWriteMetaData.len assertion @ mkPayloadConsumer",
+                    $format(
+                        "atomicRespDmaWriteMetaData.len=%h should be %h when consumeInfo is AtomicRespInfoAndPayload",
+                        atomicRespDmaWriteMetaData.len, valueOf(ATOMIC_WORK_REQ_LEN)
+                    )
+                );
+            end
+            tagged ReadRespInfo .readRespInfo: begin
+                dynAssert(
+                    !isZero(consumeReq.fragNum),
+                    "consumeReq.fragNum assertion @ mkPayloadConsumer",
+                    $format(
+                        "consumeReq.fragNum=%h should not be zero when consumeInfo is ReadRespPayload",
+                        consumeReq.fragNum
+                    )
+                );
+            end
+            default: begin end
+        endcase
+
+        consumeReqQ.enq(consumeReq);
+    endrule
+
+    rule processReq if (cntrl.isRTRorRTS && !busyReg);
+        let consumeReq = consumeReqQ.first;
+        case (consumeReq.consumeInfo) matches
+            tagged DiscardPayload: begin
+                let payload = payloadPipeIn.first;
+                payloadPipeIn.deq;
+
+                if (isLessOrEqOne(consumeReq.fragNum)) begin
+                    checkIsOnlyPayloadDataStream(payload, consumeReq.consumeInfo);
+                    consumeReqQ.deq;
+                    pendingConReqQ.enq(consumeReq);
+                end
+                else begin
+                    remainingFragNumReg <= consumeReq.fragNum - 2;
+                    busyReg <= True;
+                end
+            end
+            tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                consumeReqQ.deq;
+                sendDmaWriteReq(consumeReq, dontCareValue);
+            end
+            tagged ReadRespInfo .readRespInfo: begin
+                let payload = payloadPipeIn.first;
+                payloadPipeIn.deq;
+                if (isLessOrEqOne(consumeReq.fragNum)) begin
+                    checkIsOnlyPayloadDataStream(payload, consumeReq.consumeInfo);
+                    consumeReqQ.deq;
+                    pendingConReqQ.enq(consumeReq);
+                end
+                else begin
+                    checkIsFirstPayloadDataStream(payload, consumeReq.consumeInfo);
+                    remainingFragNumReg <= consumeReq.fragNum - 2;
+                    busyReg <= True;
+                end
+
+                sendDmaWriteReq(consumeReq, payload);
+            end
+            default: begin end
+        endcase
+    endrule
+
+    rule consumePayload if (cntrl.isRTRorRTS && busyReg);
         let consumeReq = consumeReqQ.first;
         let payload = payloadPipeIn.first;
         payloadPipeIn.deq;
         remainingFragNumReg <= remainingFragNumReg - 1;
         if (isZero(remainingFragNumReg)) begin
+            dynAssert(
+                payload.isLast,
+                "payload.isLast assertion @ mkPayloadConsumer",
+                $format(
+                    "payload.isLast=", fshow(payload.isLast),
+                    " should be true when remainingFragNumReg=%h is zero",
+                    remainingFragNumReg
+                )
+            );
+
             consumeReqQ.deq;
-            // busyReg <= False;
-            respPayloadConsume(consumeReq, payload);
+            if (consumeReq.consumeInfo matches tagged ReadRespInfo .r) begin
+                pendingConReqQ.enq(consumeReq);
+            end
+            busyReg <= False;
         end
+
+        sendDmaWriteReq(consumeReq, payload);
+    endrule
+
+    rule genResp if (cntrl.isRTRorRTS);
+        let dmaWriteResp <- dmaWriteSrv.response.get;
+        let consumeReq = pendingConReqQ.first;
+        pendingConReqQ.deq;
+
+        case (consumeReq.consumeInfo) matches
+            tagged ReadRespInfo .readRespInfo: begin
+                let consumeResp = PayloadConResp {
+                    initiator   : consumeReq.initiator,
+                    dmaWriteResp: DmaWriteResp {
+                        sqpn    : readRespInfo.sqpn,
+                        psn     : readRespInfo.psn
+                    }
+                };
+                consumeRespQ.enq(consumeResp);
+            end
+            tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                let { atomicRespDmaWriteMetaData, atomicRespPayload } = atomicRespInfo;
+                let consumeResp = PayloadConResp {
+                    initiator   : consumeReq.initiator,
+                    dmaWriteResp: DmaWriteResp {
+                        sqpn    : atomicRespDmaWriteMetaData.sqpn,
+                        psn     : atomicRespDmaWriteMetaData.psn
+                    }
+                };
+                consumeRespQ.enq(consumeResp);
+            end
+            default: begin end
+        endcase
     endrule
 
     rule flushPayload if (cntrl.isERR);
+        // When error, continue send DMA write requests,
+        // so as to flush payload data properly laster.
+        // But discard DMA write responses when error.
         if (!consumeReqQ.notEmpty && payloadPipeIn.notEmpty) begin
             payloadPipeIn.deq;
         end
-        if (consumeRespQ.notEmpty) begin
-            consumeRespQ.deq;
-        end
+
+        consumeRespQ.clear;
     endrule
 
-    method Action request(PayloadConReq consumeReq) if (cntrl.isRTRorRTS);
-        let payload = payloadPipeIn.first;
-        payloadPipeIn.deq;
-        dynAssert(
-            !isZero(consumeReq.fragNum),
-            "consumeReq.fragNum assertion @ mkPayloadConsumer",
-            $format(
-                "consumeReq.fragNum=%0d should not be zero",
-                consumeReq.fragNum
-            )
-        );
-
-        if (isLargerThanOne(consumeReq.fragNum)) begin
-            remainingFragNumReg <= consumeReq.fragNum - 2;
-            consumeReqQ.enq(consumeReq);
-            // busyReg <= True;
-        end
-        else begin
-            respPayloadConsume(consumeReq, payload);
-        end
-    endmethod
-
     interface respPipeOut = convertFifo2PipeOut(consumeRespQ);
-    // interface request = toPut(consumeReqQ);
-    // interface response = toGet(consumeRespQ);
 endmodule
 
 /*

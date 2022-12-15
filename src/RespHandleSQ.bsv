@@ -2,72 +2,88 @@ import FIFOF :: *;
 import PAClib :: *;
 
 import Assertions :: *;
+import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
-import InputBuffer :: *;
+import InputPktHandle :: *;
+// import PayloadConAndGen :: *;
+import RetryHandleSQ :: *;
 import ScanFIFOF :: *;
+import Utils :: *;
+// import WorkCompGen :: *;
 
 typedef enum {
     SQ_HANDLE_RESP_HEADER,
-    // SQ_READ_RESP_DMA_WRITE,
     SQ_RETRY_FLUSH,
-    // SQ_RETRY_NOTIFY,
-    SQ_ERROR_FLUSH
+    SQ_ERROR_FLUSH,
+    SQ_RETRY_FLUSH_AND_WAIT
 } RespHandleState deriving(Bits, Eq);
 
-// function WorkComp genWorkCompFromWorkReq(
-//     Controller cntrl,
-//     WorkReq wr,
-//     WorkCompStatus wcStatus
-// );
-//     let wcOpCode = workReqOpCode2WorkCompOpCode4SQ(wr.opcode);
-//     let wcFlags = workReqOpCode2WorkCompFlags(wr.opcode);
-
-//     let wc = WorkComp {
-//         id      : wr.id,
-//         opcode  : fromMaybe(?, wcOpCode),
-//         flags   : wcFlags,
-//         status  : wcStatus,
-//         len     : wr.len,
-//         pkey    : cntrl.pkey,
-//         dqpn    : cntrl.dqpn,
-//         sqpn    : cntrl.sqpn,
-//         immDt   : wr.immDt,
-//         rkey2Inv: wr.rkey2Inv
-//     };
-//     return wc;
-// endfunction
+typedef enum {
+    WR_ACK_EXPLICIT_WHOLE,
+    WR_ACK_EXPLICIT_PARTIAL,
+    WR_ACK_COALESCE_NORMAL,
+    WR_ACK_COALESCE_RETRY,
+    WR_ACK_DUPLICATE,
+    WR_ACK_GHOST,
+    WR_ACK_ILLEGAL,
+    WR_ACK_FLUSH
+} WorkReqAckType deriving(Bits, Eq, FShow);
 
 typedef enum {
-    WR_ACK_TYPE_EXPLICIT_WHOLE,
-    WR_ACK_TYPE_EXPLICIT_PARTIAL,
-    WR_ACK_TYPE_COALESCE_NORMAL,
-    WR_ACK_TYPE_COALESCE_RETRY,
-    WR_ACK_TYPE_DUPLICATE,
-    WR_ACK_TYPE_UNKNOWN
-} WorkReqAckType deriving(Bits, Eq, FShow);
+    WR_ACT_BAD_RESP,
+    WR_ACT_ERROR_RESP,
+    WR_ACT_EXPLICIT_RESP,
+    WR_ACT_COALESCE_RESP,
+    WR_ACT_DUPLICATE_RESP,
+    WR_ACT_GHOST_RESP,
+    WR_ACT_ILLEGAL_RESP,
+    WR_ACT_FLUSH_RESP,
+    WR_ACT_EXPLICIT_RETRY,
+    WR_ACT_IMPLICIT_RETRY,
+    WR_ACT_RETRY_EXC,
+    WR_ACT_UNKNOWN
+} WorkReqAction deriving(Bits, Eq, FShow);
+
+module mkConnectPendingWorkReqPipeOut2PendingWorkReqQ#(
+    Controller cntrl, PipeOut#(PendingWorkReq) pipe, FIFOF#(PendingWorkReq) fifo
+)(Empty);
+    rule connect if (cntrl.isRTS);
+        fifo.enq(pipe.first);
+        pipe.deq;
+    endrule
+endmodule
+
+interface RespHandleSQ;
+    interface PipeOut#(PayloadConReq) payloadConReqPipeOut;
+    interface PipeOut#(WorkCompGenReqSQ) workCompGenReqPipeOut;
+    // method RespHandleState curState();
+endinterface
 
 module mkRespHandleSQ#(
     Controller cntrl,
     PendingWorkReqBuf pendingWorkReqBuf,
     PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn,
-    // RdmaPktMetaDataAndPayloadPipeOut rdmaPktMetaDataAndPayloadPipeIn,
-    PayloadConsumer payloadConsumer,
-    WorkCompHandler workCompHandler
-)(PipeOut#(WorkComp));
-    // FIFOF#(WorkComp) workCompOutQ <- mkFIFOF;
+    RetryHandleSQ retryHandler
+    // PayloadConsumer payloadConsumer,
+    // WorkCompGen workCompGen
+)(RespHandleSQ);
+    FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
+    FIFOF#(WorkCompGenReqSQ) workCompGenReqOutQ <- mkFIFOF;
+
+    FIFOF#(Tuple6#(
+        PendingWorkReq, RdmaPktMetaData, RdmaRespType,
+        RetryReason, WorkReqAckType, WorkCompReqType
+    )) pendingRespQ <- mkLFIFOF;
     FIFOF#(Tuple5#(
-        PendingWorkReq, RdmaPktMetaData, RdmaRespType, RetryReason, WorkReqAckType
-    )) pendingRespQ <- mkFIFOF;
-    FIFOF#(Tuple4#(
-        PendingWorkReq, RdmaPktMetaData, Bool, Maybe#(WorkCompStatus)
-    )) pendingDmaReqQ <- mkFIFOF;
-    // FIFOF#(Tuple3#(PendingWorkReq, Bool, WorkCompFlags)) pendingWorkCompQ <-
-    //     mkSizedFIFOF(valueOf(MAX_PENDING_REQ_NUM));
+        PendingWorkReq, RdmaPktMetaData, WorkReqAction,
+        Maybe#(WorkCompStatus), WorkCompReqType
+    )) pendingDmaReqQ <- mkLFIFOF;
 
     Reg#(PSN)               retryStartPsnReg <- mkRegU;
     Reg#(WorkReqID)        retryWorkReqIdReg <- mkRegU;
     Reg#(RetryReason)         retryReasonReg <- mkRegU;
+    Reg#(Maybe#(RnrTimer))  retryRnrTimerReg <- mkRegU;
     Reg#(Length)     remainingReadRespLenReg <- mkRegU;
     Reg#(ADDR)      nextReadRespWriteAddrReg <- mkRegU;
     Reg#(PktNum)           readRespPktNumReg <- mkRegU; // TODO: remove it
@@ -76,25 +92,26 @@ module mkRespHandleSQ#(
 
     // TODO: check discard duplicate or ghost reponses has
     // no response from PayloadConsumer will not incur bugs.
-    function Action discardPayloadReq(PmtuFragNum fragNum);
+    function Action discardPayload(PmtuFragNum fragNum);
         action
             if (!isZero(fragNum)) begin
                 let discardReq = PayloadConReq {
-                    initiator       : PAYLOAD_INIT_SQ_DISCARD,
-                    fragNum         : fragNum,
-                    dmaWriteMetaData: tagged Invalid
+                    initiator  : PAYLOAD_INIT_SQ_DISCARD,
+                    fragNum    : fragNum,
+                    consumeInfo: tagged DiscardPayload
                 };
-                payloadConsumer.request.put(discardReq);
+                payloadConReqOutQ.enq(discardReq);
+                // payloadConsumer.request(discardReq);
             end
         endaction
     endfunction
 
     // Response handle pipeline first stage
     rule recvRespHeader if (
-        cntrl.isRTRorRTS           &&
-        pendingWorkReqBuf.fifoF.notEmpty &&
+        cntrl.isRTS                      &&
+        // pendingWorkReqBuf.fifoF.notEmpty &&
         respHandleStateReg == SQ_HANDLE_RESP_HEADER
-    );
+    ); // This rule will not run at retry state
         let curPktMetaData = pktMetaDataPipeIn.first;
         let curPendingWR   = pendingWorkReqBuf.fifoF.first;
         let curRdmaHeader  = curPktMetaData.pktHeader;
@@ -111,9 +128,9 @@ module mkRespHandleSQ#(
         );
 
         PSN nextPSN   = cntrl.getNPSN;
-        PSN startPSN  = fromMaybe(?, curPendingWR.startPSN);
-        PSN endPSN    = fromMaybe(?, curPendingWR.endPSN);
-        PktNum pktNum = fromMaybe(?, curPendingWR.pktNum);
+        PSN startPSN  = unwrapMaybe(curPendingWR.startPSN);
+        PSN endPSN    = unwrapMaybe(curPendingWR.endPSN);
+        PktNum pktNum = unwrapMaybe(curPendingWR.pktNum);
         dynAssert(
             isValid(curPendingWR.startPSN) &&
             isValid(curPendingWR.endPSN) &&
@@ -133,100 +150,139 @@ module mkRespHandleSQ#(
             $format("rdmaRespType=", fshow(rdmaRespType), " should not be unknown")
         );
 
-        if (!curPktMetaData.pktValid) begin // Discard invalid packet
+        let wrAckType = WR_ACK_FLUSH;
+        let wcReqType = WC_REQ_TYPE_UNKNOWN;
+        if (!pendingWorkReqBuf.fifoF.notEmpty) begin // Discard ghost response
             pktMetaDataPipeIn.deq;
-            discardPayloadReq(curPktMetaData.pktFragNum);
+            wrAckType = WR_ACK_GHOST;
+            wcReqType = WC_REQ_TYPE_NO_WC;
+        end
+        else if (!curPktMetaData.pktValid) begin
+            pktMetaDataPipeIn.deq;
+            wrAckType = WR_ACK_ILLEGAL;
+            wcReqType = WC_REQ_TYPE_ERR_FULL_ACK;
         end
         else begin
             // This stage needs to do:
             // - dequeue pending WR when normal response;
             // - change to flush state if retry or error response
-            let wrAckType = WR_ACK_TYPE_UNKNOWN;
-            let shouldDeqPktMetaData = True
+            let shouldDeqPktMetaData = True;
             let deqPendingWorkReqWithNormalResp = False;
-            if (bth.opcode == endPSN) begin // Response to whole WR
-                wrAckType = WR_ACK_TYPE_EXPLICIT_WHOLE;
+            if (bth.psn == endPSN) begin // Response to whole WR
+                wrAckType = WR_ACK_EXPLICIT_WHOLE;
 
                 case (rdmaRespType)
                     RDMA_RESP_RETRY: begin
+                        wcReqType           = WC_REQ_TYPE_NO_WC;
                         respHandleStateReg <= SQ_RETRY_FLUSH;
                         retryStartPsnReg   <= bth.psn;
                         retryWorkReqIdReg  <= curPendingWR.wr.id;
                         retryReasonReg     <= retryReason;
+                        retryRnrTimerReg   <= (retryReason == RETRY_REASON_RNR) ?
+                            (tagged Valid aeth.value) : (tagged Invalid);
                     end
                     RDMA_RESP_ERROR: begin
+                        wcReqType           = WC_REQ_TYPE_ERR_FULL_ACK;
                         respHandleStateReg <= SQ_ERROR_FLUSH;
                     end
                     RDMA_RESP_NORMAL: begin
+                        wcReqType = WC_REQ_TYPE_SUC_FULL_ACK;
                         deqPendingWorkReqWithNormalResp = True;
                     end
                     default: begin end
                 endcase
             end
-            else if (psnInRangeExclusive(bth.opcode, endPSN, nextPSN)) begin // Coalesce ACK
-                shouldDeqPayload = False;
+            else if (psnInRangeExclusive(bth.psn, endPSN, nextPSN)) begin // Coalesce ACK
+                shouldDeqPktMetaData = False;
 
                 if (isReadOrAtomicWorkReq(curPendingWR.wr.opcode)) begin // Implicit retry
-                    wrAckType           = WR_ACK_TYPE_COALESCE_RETRY;
+                    wrAckType           = WR_ACK_COALESCE_RETRY;
+                    wcReqType           = WC_REQ_TYPE_NO_WC;
                     respHandleStateReg <= SQ_RETRY_FLUSH;
                     retryStartPsnReg   <= startPSN;
                     retryWorkReqIdReg  <= curPendingWR.wr.id;
                     retryReasonReg     <= RETRY_REASON_IMPLICIT;
+                    retryRnrTimerReg   <= tagged Invalid;
                 end
                 else begin
-                    wrAckType = WR_ACK_TYPE_COALESCE_NORMAL;
+                    wrAckType = WR_ACK_COALESCE_NORMAL;
+                    wcReqType = WC_REQ_TYPE_SUC_FULL_ACK;
                     deqPendingWorkReqWithNormalResp = True;
                 end
             end
-            else if (bth.opcode == startPSN || psnInRangeExclusive(bth.opcode, startPSN, endPSN)) begin
-                wrAckType = WR_ACK_TYPE_EXPLICIT_PARTIAL;
+            else if (bth.psn == startPSN || psnInRangeExclusive(bth.psn, startPSN, endPSN)) begin
+                wrAckType = WR_ACK_EXPLICIT_PARTIAL;
 
                 case (rdmaRespType)
                     RDMA_RESP_RETRY: begin
+                        wcReqType           = WC_REQ_TYPE_NO_WC;
                         respHandleStateReg <= SQ_RETRY_FLUSH;
                         retryStartPsnReg   <= bth.psn;
                         retryWorkReqIdReg  <= curPendingWR.wr.id;
                         retryReasonReg     <= retryReason;
                     end
                     RDMA_RESP_ERROR: begin
+                        // Explicit error responses will dequeue whole WR,
+                        // no matter error reponses are full or partial ACK.
+                        wcReqType        = WC_REQ_TYPE_ERR_FULL_ACK;
                         respHandleStateReg <= SQ_ERROR_FLUSH;
                     end
-                    RDMA_RESP_NORMAL: begin end
+                    RDMA_RESP_NORMAL: begin
+                        wcReqType = WC_REQ_TYPE_SUC_PARTIAL_ACK;
+                    end
                     default         : begin end
                 endcase
             end
             else begin // Duplicated responses
-                wrAckType = WR_ACK_TYPE_DUPLICATE;
-                discardPayloadReq(curPktMetaData.pktFragNum);
+                wrAckType = WR_ACK_DUPLICATE;
+                wcReqType = WC_REQ_TYPE_NO_WC;
             end
 
-            dynAssert(
-                wrAckType != WR_ACK_TYPE_UNKNOWN,
-                "wrAckType assertion @ mkRespHandleSQ",
-                $format("wrAckType=", fshow(wrAckType), " should not be unknown")
-            );
-            pendingRespQ.enq(tuple5(
-                curPendingWR, curPktMetaData, rdmaRespType, retryReason, wrAckType
-            ));
-            if (shouldDeqPayload) begin
+            if (shouldDeqPktMetaData) begin
                 pktMetaDataPipeIn.deq;
             end
             if (deqPendingWorkReqWithNormalResp) begin
                 pendingWorkReqBuf.fifoF.deq;
-                cntrl.resetRetryCnt;
+                retryHandler.resetRetryCnt;
+            end
+
+            if (isLastOrOnlyRdmaOpCode(bth.opcode)) begin
+                dynAssert(
+                    deqPendingWorkReqWithNormalResp,
+                    "deqPendingWorkReqWithNormalResp assertion @ mkRespHandleSQ",
+                    $format(
+                        "deqPendingWorkReqWithNormalResp=", fshow(deqPendingWorkReqWithNormalResp),
+                        " should be true when bth.opcode=", fshow(bth.opcode),
+                        " is last or only read response"
+                    )
+                );
             end
         end
+
+        dynAssert(
+            wrAckType != WR_ACK_FLUSH && wcReqType != WC_REQ_TYPE_UNKNOWN,
+            "wrAckType and wcReqType assertion @ mkRespHandleSQ",
+            $format(
+                "wrAckType=", fshow(wrAckType),
+                ", and wcReqType=", fshow(wcReqType),
+                " should not be unknown in rule recvRespHeader"
+            )
+        );
+        pendingRespQ.enq(tuple6(
+            curPendingWR, curPktMetaData, rdmaRespType, retryReason, wrAckType, wcReqType
+        ));
     endrule
 
     // Response handle pipeline second stage
-    rule handleRespByType if (cntrl.isRTRorRTS); // This rule still runs at retry state
-        let { curPendingWR, curPktMetaData, rdmaRespType, retryReason, wrAckType } = pendingRespQ.first;
+    rule handleRespByType if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            curPendingWR, curPktMetaData, rdmaRespType, retryReason, wrAckType, wcReqType
+        } = pendingRespQ.first;
         pendingRespQ.deq;
 
-        // let curRdmaHeader = curPktMetaData.pktHeader;
-        // let bth           = extractBTH(curRdmaHeader.headerData);
-        // let aeth          = extractAETH(curRdmaHeader.headerData);
-        // let retryReason   = getRetryReasonFromAETH(aeth);
+        let curRdmaHeader = curPktMetaData.pktHeader;
+        let bth           = extractBTH(curRdmaHeader.headerData);
+        let aeth          = extractAETH(curRdmaHeader.headerData);
 
         let wcStatus = tagged Invalid;
         if (rdmaRespHasAETH(bth.opcode)) begin
@@ -237,31 +293,38 @@ module mkRespHandleSQ#(
                 $format("wcStatus=", fshow(wcStatus), " should be valid")
             );
         end
-        // let wcRetryErrStatus = getErrWorkCompStatusFromRetryReason(retryReason);
 
         Bool isReadWR           = isReadWorkReq(curPendingWR.wr.opcode);
         Bool isAtomicWR         = isAtomicWorkReq(curPendingWR.wr.opcode);
-        Bool respOpCodeSeqCheck = rdmaNormalRespOpCodeSeqCheck(preOpCodeReg, bth.opcode);
+        Bool respOpCodeSeqCheck = rdmaNormalRespOpCodeSeqCheck(preRdmaOpCodeReg, bth.opcode);
         Bool respMatchWorkReq   = rdmaRespMatchWorkReq(bth.opcode, curPendingWR.wr.opcode);
 
         let hasWorkComp = False;
+        // TODO: handle extra dequeue pending WR
         let deqPendingWorkReqWhenErr = False;
         let needDmaWrite = False;
         let isFinalRespNormal = False;
+        let shouldDiscardPayload = False;
+        let wrAction = WR_ACT_UNKNOWN;
         case (wrAckType)
-            WR_ACK_TYPE_EXPLICIT_WHOLE, WR_ACK_TYPE_EXPLICIT_PARTIAL: begin
+            WR_ACK_EXPLICIT_WHOLE, WR_ACK_EXPLICIT_PARTIAL: begin
                 case (rdmaRespType)
                     RDMA_RESP_RETRY: begin
-                        Bool isRetryExceed  = cntrl.retryExceedLimit(retryReason);
-                        cntrl.decRetryCnt(retryReason);
-                        if (isRetryExceed) begin
-                            hasWorkComp = True;
+                        Bool isRetryExcErr = retryHandler.retryExcLimit(retryReason);
+                        if (isRetryExcErr) begin
+                            hasWorkComp  = True;
                             deqPendingWorkReqWhenErr = True;
+                            wrAction     = WR_ACT_RETRY_EXC;
+                            wcReqType    = WC_REQ_TYPE_ERR_PARTIAL_ACK;
+                        end
+                        else begin
+                            wrAction = WR_ACT_EXPLICIT_RETRY;
                         end
                     end
                     RDMA_RESP_ERROR: begin
                         hasWorkComp = True;
                         deqPendingWorkReqWhenErr = True;
+                        wrAction = WR_ACT_ERROR_RESP;
                     end
                     RDMA_RESP_NORMAL: begin
                         // Only update pre-opcode when normal response
@@ -271,147 +334,213 @@ module mkRespHandleSQ#(
                             hasWorkComp = True;
                             deqPendingWorkReqWhenErr = True;
                             wcStatus = tagged Valid IBV_WC_BAD_RESP_ERR;
+                            wrAction = WR_ACT_BAD_RESP;
+                            if (wrAckType == WR_ACK_EXPLICIT_PARTIAL) begin
+                                wcReqType = WC_REQ_TYPE_ERR_PARTIAL_ACK;
+                            end
+                            else begin
+                                wcReqType = WC_REQ_TYPE_ERR_FULL_ACK;
+                            end
                         end
                         else begin
-                            hasWorkComp = curPendingWR.wr.ackReq;
+                            hasWorkComp  = workReqNeedWorkComp(curPendingWR.wr);
                             needDmaWrite = isReadWR || isAtomicWR;
                             isFinalRespNormal = True;
+                            wrAction = WR_ACT_EXPLICIT_RESP;
                         end
                     end
                     default: begin end
                 endcase
             end
-            WR_ACK_TYPE_COALESCE_NORMAL: begin
-                hasWorkComp = curPendingWR.wr.ackReq;
+            WR_ACK_COALESCE_NORMAL: begin
+                hasWorkComp = workReqNeedWorkComp(curPendingWR.wr);
                 wcStatus = hasWorkComp ? (tagged Valid IBV_WC_SUCCESS) : (tagged Invalid);
                 isFinalRespNormal = True;
+                wrAction = WR_ACT_COALESCE_RESP;
             end
-            WR_ACK_TYPE_COALESCE_RETRY: begin
+            WR_ACK_COALESCE_RETRY: begin
                 retryReason = RETRY_REASON_IMPLICIT;
-                Bool isRetryExceed  = cntrl.retryExceedLimit(retryReason);
-                cntrl.decRetryCnt(retryReason);
-                if (isRetryExceed) begin
+                Bool isRetryExcErr  = retryHandler.retryExcLimit(retryReason);
+                if (isRetryExcErr) begin
                     hasWorkComp = True;
-                    wcStatus = tagged Valid IBV_WC_RETRY_EXC_ERR;
+                    wcStatus    = tagged Valid IBV_WC_RETRY_EXC_ERR;
+                    wrAction    = WR_ACT_RETRY_EXC;
+                    wcReqType   = WC_REQ_TYPE_ERR_PARTIAL_ACK;
+                end
+                else begin
+                    wrAction = WR_ACT_IMPLICIT_RETRY;
                 end
             end
-            WR_ACK_TYPE_DUPLICATE: begin
+            WR_ACK_DUPLICATE: begin
                 // Discard duplicate responses
+                shouldDiscardPayload = True;
+                wrAction = WR_ACT_DUPLICATE_RESP;
+            end
+            WR_ACK_GHOST: begin
+                // Discard ghost responses
+                shouldDiscardPayload = True;
+                wrAction = WR_ACT_GHOST_RESP;
+            end
+            WR_ACK_ILLEGAL: begin
+                // Discard invalid responses
+                shouldDiscardPayload = True;
+                wcStatus = pktStatus2WorkCompStatusSQ(curPktMetaData.pktStatus);
+                wrAction = WR_ACT_ILLEGAL_RESP;
+            end
+            WR_ACK_FLUSH: begin
+                // Discard responses when retry or error flush
+                shouldDiscardPayload = True;
+                wrAction = WR_ACT_FLUSH_RESP;
             end
             default: begin end
         endcase
 
-        if (hasWorkComp || needDmaWrite) begin
-            pendingDmaReqQ.enq(tuple4(
-                curPendingWR, curPktMetaData, isFinalRespNormal, wcStatus
-            ));
-        end
+        dynAssert(
+            wrAction != WR_ACT_UNKNOWN,
+            "wrAction assertion @ mkRespHandleSQ",
+            $format("wrAction=", fshow(wrAction), " should not be unknown")
+        );
+        // if (hasWorkComp || needDmaWrite || shouldDiscardPayload) begin
+        pendingDmaReqQ.enq(tuple5(
+            curPendingWR, curPktMetaData, wrAction, wcStatus, wcReqType
+        ));
     endrule
 
     // Response handle pipeline third stage
-    rule genWorkCompAndInitDmaWrite if (cntrl.isRTRorRTS); // This rule still runs at retry state
-        let { pendingWR, pktMetaData, isFinalRespNormal, wcStatus } = pendingDmaReqQ.first;
+    rule genWorkCompAndConsumePayload if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pendingWR, pktMetaData, wrAction, wcStatus, wcReqType
+        } = pendingDmaReqQ.first;
         pendingDmaReqQ.deq;
 
-        let rdmaHeader       = pktMetaDataReg.pktHeader;
+        let rdmaHeader       = pktMetaData.pktHeader;
         let bth              = extractBTH(rdmaHeader.headerData);
         let atomicAckAeth    = extractAtomicAckEth(rdmaHeader.headerData);
-        let pktPayloadLen    = pktMetaDataReg.pktPayloadLen - zeroExtend(bth.padCnt);
+        let pktPayloadLen    = pktMetaData.pktPayloadLen - zeroExtend(bth.padCnt);
         let isReadWR         = isReadWorkReq(pendingWR.wr.opcode);
         let isZeroWorkReqLen = isZero(pendingWR.wr.len);
-        let isNonZeroReadWR  = isReadWR && !isZeroWorkReqLen;
+        // let isNonZeroReadWR  = isReadWR && !isZeroWorkReqLen;
         let isAtomicWR       = isAtomicWorkReq(pendingWR.wr.opcode);
-        let isFirstOrMidPkt  = isFirstOrMiddleRdmaOpCode(bth.opcode);
-        let needWorkComp     = pendingWR.wr.ackReq;
+        // let isFirstOrMidPkt  = isFirstOrMiddleRdmaOpCode(bth.opcode);
+        let isFirstPkt       = isFirstRdmaOpCode(bth.opcode);
+        let isMidPkt         = isMiddleRdmaOpCode(bth.opcode);
+        let isLastPkt        = isLastRdmaOpCode(bth.opcode);
+        let isOnlyPkt        = isOnlyRdmaOpCode(bth.opcode);
+        let needWorkComp     = workReqNeedWorkComp(pendingWR.wr);
 
+        let genWorkComp   = False;
         let wcWaitDmaResp = False;
-        if (isFinalRespNormal) begin
-            if (isNonZeroReadWR) begin
-                let remainingReadRespLen  = remainingReadRespLenReg;
-                let nextReadRespWriteAddr = nextReadRespWriteAddrReg;
-                let readRespPktNum        = readRespPktNumReg;
-                let oneAsPSN              = 1;
+        case (wrAction)
+            WR_ACT_BAD_RESP: begin
+                genWorkComp = True;
+            end
+            WR_ACT_ERROR_RESP: begin
+                genWorkComp = True;
+            end
+            WR_ACT_EXPLICIT_RESP: begin
+                // No WC for the first and middle read response
+                genWorkComp = needWorkComp && !(isFirstPkt || isMidPkt);
 
-                case ( {
-                    pack(isOnlyRdmaOpCode(bth.opcode)), pack(isFirstRdmaOpCode(bth.opcode)),
-                    pack(isMiddleRdmaOpCode(bth.opcode)), pack(isLastRdmaOpCode(bth.opcode))
-                } )
-                    4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
-                        remainingReadRespLen  = pendingWorkReqReg.wr.len - pktPayloadLen;
-                        nextReadRespWriteAddr = pendingWorkReqReg.wr.laddr;
-                        readRespPktNum        = 1;
-                    end
-                    4'b0100, 4'b0010: begin // isFirstOrMiddleRdmaOpCode(bth.opcode)
-                        remainingReadRespLen  = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
-                        nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntrl.getPMTU);
-                        readRespPktNum        = readRespPktNumReg + 1;
-                    end
-                    4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                        remainingReadRespLen  = remainingReadRespLenReg - pktPayloadLen;
-                        nextReadRespWriteAddr = nextReadRespWriteAddrReg + pktPayloadLen;
-                        readRespPktNum        = readRespPktNumReg + 1;
-                    end
-                    default: begin end
-                endcase
-                remainingReadRespLenReg  <= remainingReadRespLen;
-                nextReadRespWriteAddrReg <= nextReadRespWriteAddr;
-                readRespPktNumReg        <= readRespPktNum;
+                if (isReadWR) begin
+                    let remainingReadRespLen  = remainingReadRespLenReg;
+                    let nextReadRespWriteAddr = nextReadRespWriteAddrReg;
+                    let readRespPktNum        = readRespPktNumReg;
+                    let oneAsPSN              = 1;
 
-                let initReadRespDmaWrite = True;
-                if (isLastOrOnlyRdmaOpCode(bth.opcode)) begin
-                    dynAssert(
-                        ackWholeWR,
-                        "ackWholeWR assertion @ mkRespHandleSQ",
-                        $format(
-                            "ackWholeWR=%b should be true when bth.opcode=",
-                            ackWholeWR, fshow(bth.opcode),
-                            " is last or only read response"
-                        )
-                    );
+                    case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
+                        4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
+                            remainingReadRespLen  = pendingWR.wr.len - zeroExtend(pktPayloadLen);
+                            nextReadRespWriteAddr = pendingWR.wr.laddr;
+                            readRespPktNum        = 1;
+                        end
+                        4'b0100, 4'b0010: begin // isFirstOrMiddleRdmaOpCode(bth.opcode)
+                            remainingReadRespLen  = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
+                            nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntrl.getPMTU);
+                            readRespPktNum        = readRespPktNumReg + 1;
+                        end
+                        4'b0001: begin // isLastRdmaOpCode(bth.opcode)
+                            remainingReadRespLen  = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
+                            // No need to calculate next DMA write address for last read responses
+                            // nextReadRespWriteAddr = nextReadRespWriteAddrReg + zeroExtend(pktPayloadLen);
+                            readRespPktNum        = readRespPktNumReg + 1;
+                        end
+                        default: begin end
+                    endcase
+                    remainingReadRespLenReg  <= remainingReadRespLen;
+                    nextReadRespWriteAddrReg <= nextReadRespWriteAddr;
+                    readRespPktNumReg        <= readRespPktNum;
 
-                    if (!isZero(remainingReadRespLen)) begin
+                    let readRespLenMatch = True;
+                    if ((isLastPkt || isOnlyPkt) && !isZero(remainingReadRespLen)) begin
                         // Read response length not match WR length
-                        wcStatus = tagged Valid IBV_WC_LOC_LEN_ERR;
-                        initReadRespDmaWrite = False;
+                        readRespLenMatch = False;
+                        discardPayload(pktMetaData.pktFragNum);
+                        wcStatus  = tagged Valid IBV_WC_LOC_LEN_ERR;
+                        wcReqType = WC_REQ_TYPE_ERR_FULL_ACK;
+                    end
+                    else if (!isZeroWorkReqLen) begin
+                        let payloadConReq = PayloadConReq {
+                            initiator  : PAYLOAD_INIT_SQ_WR,
+                            fragNum    : pktMetaData.pktFragNum,
+                            consumeInfo: tagged ReadRespInfo DmaWriteMetaData {
+                                sqpn        : cntrl.getSQPN,
+                                startAddr   : nextReadRespWriteAddr,
+                                len         : pktPayloadLen,
+                                psn         : bth.psn
+                            }
+                        };
+                        if (readRespLenMatch) begin
+                            payloadConReqOutQ.enq(payloadConReq);
+                            // payloadConsumer.request(payloadConReq);
+                            wcWaitDmaResp = True;
+                        end
                     end
                 end
-
-                let payloadConsumeReq = PayloadConReq {
-                    initiator       : PAYLOAD_INIT_SQ_WR,
-                    fragNum         : pktMetaData.pktFragNum,
-                    dmaWriteMetaData: DmaWriteReq {
-                        sqpn        : cntrl.getSQPN,
-                        startAddr   : nextReadRespWriteAddr,
-                        len         : pktPayloadLen,
-                        inlineData  : tagged Invalid,
-                        psn         : bth.opcode
-                    }
-                };
-                if (initReadRespDmaWrite) begin
-                    payloadConsumer.request.put(payloadConsumeReq);
+                else if (isAtomicWR) begin
+                    let initiator = isAtomicWR ? PAYLOAD_INIT_SQ_ATOMIC : PAYLOAD_INIT_SQ_WR;
+                    let atomicWriteReq = PayloadConReq {
+                        initiator  : initiator,
+                        fragNum    : 0,
+                        consumeInfo: tagged AtomicRespInfoAndPayload tuple2(
+                            DmaWriteMetaData {
+                                sqpn     : cntrl.getSQPN,
+                                startAddr: pendingWR.wr.laddr,
+                                len      : truncate(pendingWR.wr.len),
+                                psn      : bth.psn
+                            },
+                            atomicAckAeth.orig
+                        )
+                    };
+                    payloadConReqOutQ.enq(atomicWriteReq);
+                    // payloadConsumer.request(atomicWriteReq);
                     wcWaitDmaResp = True;
                 end
             end
-            else if (isAtomicWR) begin
-                let initiator = isAtomicWR ? PAYLOAD_INIT_SQ_ATOMIC : PAYLOAD_INIT_SQ_WR;
-                let atomicWriteReq = PayloadConReq {
-                    initiator         : initiator,
-                    fragNum           : 0,
-                    dmaWriteMetaData  : tagged Valid DmaWriteReq {
-                        sqpn          : cntrl.getSQPN,
-                        startAddr     : pendingWR.wr.laddr,
-                        len           : pendingWR.wr.len,
-                        data          : tagged Valid atomicAckAeth.orig,
-                        psn           : bth.opcode
-                    }
-                };
-                payloadConsumer.request.put(atomicWriteReq);
-                wcWaitDmaResp = True;
+            WR_ACT_COALESCE_RESP: begin
+                genWorkComp = needWorkComp;
             end
-        end
+            WR_ACT_DUPLICATE_RESP: begin
+                discardPayload(pktMetaData.pktFragNum);
+            end
+            WR_ACT_GHOST_RESP: begin
+                discardPayload(pktMetaData.pktFragNum);
+            end
+            WR_ACT_ILLEGAL_RESP: begin
+                genWorkComp = True;
+                discardPayload(pktMetaData.pktFragNum);
+            end
+            WR_ACT_FLUSH_RESP: begin
+                discardPayload(pktMetaData.pktFragNum);
+            end
+            WR_ACT_EXPLICIT_RETRY: begin end
+            WR_ACT_IMPLICIT_RETRY: begin end
+            WR_ACT_RETRY_EXC: begin
+                genWorkComp = True;
+            end
+            default: begin end
+        endcase
 
-        // No WC for the first and middle read response
-        if (!(isReadWR && isFirstOrMidPkt)) begin
+        if (genWorkComp) begin
             dynAssert(
                 isValid(wcStatus),
                 "isValid(wcStatus) assertion @ mkRespHandleSQ",
@@ -419,116 +548,95 @@ module mkRespHandleSQ#(
                     "wcStatus=", fshow(wcStatus), " should be valid"
                 )
             );
-            let wcs = fromMaybe(?, wcStatus);
-            workCompHandler.submitFromRespHandleInSQ(pendingWR, wcWaitDmaResp, wcs);
-            // pendingWorkCompQ.enq(tuple3(pendingWR, wcWaitDmaResp, wcs));
-        end
-    endrule
-/*
-    // Response handle pipeline fourth stage
-    rule outputWorkComp if (cntrl.isRTRorRTS); // This rule still runs at retry state
-        let { pendingWR, wcWaitDmaResp, wcStatus } = pendingWorkCompQ.first;
-        let workComp = genWorkCompFromWorkReq(cntrl, pendingWR.wr, wcStatus);
-
-        // Change to error state if error WC or CQ full
-        if (wcStatus != IBV_WC_SUCCESS || !workCompOutQ.notFull) begin
-            cntrl.setStateErr;
-
-            if (!workCompOutQ.notFull) begin
-                // TODO: async event to report CQ full
-            end
-
-            dynAssert(
-                !wcWaitDmaResp,
-                "wcWaitDmaResp assertion @ mkRespHandleSQ",
-                $format(
-                    "wcWaitDmaResp=", fshow(wcWaitDmaResp),
-                    " should be false when wcStatus=", fshow(wcStatus)
-                )
-            );
-        end
-
-        let endPSN = fromMaybe(?, pendingWR.endPSN);
-        if (wcWaitDmaResp) begin
-            // TODO: report error if waiting too long for DMA write response
-            let payloadConsumeResp <- payloadConsumer.response.get;
-            if (payloadConsumeResp.dmaWriteResp.psn == endPSN) begin
-                pendingWorkCompQ.deq;
-                workCompOutQ.enq(workComp);
-            end
-        end
-        else begin
-            pendingWorkCompQ.deq;
-            workCompOutQ.enq(workComp);
+            let wcGenReq = WorkCompGenReqSQ {
+                pendingWR: pendingWR,
+                wcWaitDmaResp: wcWaitDmaResp,
+                wcReqType: wcReqType,
+                respPSN: bth.psn,
+                wcStatus: unwrapMaybe(wcStatus)
+            };
+            workCompGenReqOutQ.enq(wcGenReq);
+            // workCompGen.submitFromRespHandleInSQ(pendingWR, wcWaitDmaResp, wcs);
         end
     endrule
 
-    rule flushPendingWorkReq if (cntrl.isERR);
-        let pendingWR = pendingWorkReqBuf.fifoF.first;
-        pendingWorkReqBuf.fifoF.deq;
-
-        let wcWaitDmaResp = False;
-        pendingWorkCompQ.enq(tuple3(pendingWR, wcWaitDmaResp, IBV_WC_WR_FLUSH_ERR));
-
-        respHandleStateReg <= RecvRespHeader;
-        respHeaderQ.clear;
-    endrule
-*/
-    rule flushPktMetaData if (
-        cntrl.isERR || respHandleStateReg == SQ_ERROR_FLUSH || // Error flush
-        respHandleStateReg == SQ_RETRY_FLUSH                || // Retry flush
-        !pendingWorkReqBuf.fifoF.notEmpty                      // Discard ghost responses
+    // (* no_implicit_conditions, fire_when_enabled *)
+    (* fire_when_enabled *)
+    rule flushPktMetaDataAndPayload if (
+        cntrl.isERR                          ||
+        respHandleStateReg == SQ_ERROR_FLUSH || // Error flush
+        respHandleStateReg == SQ_RETRY_FLUSH || // Retry flush
+        respHandleStateReg == SQ_RETRY_FLUSH_AND_WAIT
     );
         if (pktMetaDataPipeIn.notEmpty) begin
+            let pktMetaData = pktMetaDataPipeIn.first;
             pktMetaDataPipeIn.deq;
-        end
 
-        let allPipeEmpty = !(
-            pktMetaDataPipeIn.notEmpty ||
-            pendingRespQ.notEmpty ||
-            pendingDmaReqQ.notEmpty
-            // pendingWorkCompQ.notEmpty
-        );
-        if (cntrl.isERR && allPipeEmpty) begin
-            workCompHandler.respHandlePipeEmptyInSQ;
-        end
-
-        // TODO: handle RNR waiting
-        if (
-            cntrl.isRTRorRTS &&
-            respHandleStateReg == SQ_RETRY_FLUSH
-        ) begin
-            let curPendingWR = pendingWorkReqBuf.fifoF.first;
-            dynAssert(
-                retryWorkReqIdReg == curPendingWR.wr.id,
-                "retryWorkReqIdReg assertion @ mkRespHandleSQ",
-                $format(
-                    "retryWorkReqIdReg=%h should == curPendingWR.wr.id=%h",
-                    retryWorkReqIdReg, curPendingWR.wr.id
-                )
-            );
-
-            let startPSN = fromMaybe(?, curPendingWR.startPSN);
-            let wrLen = curPendingWR.wr.len;
-            let laddr = curPendingWR.wr.laddr;
-            let psnDiff = psnDiff(retryStartPsnReg, startPSN);
-            let retryWorkReqLen = lenSubtractPsnMultiplyPMTU(wrLen, psnDiff, cntrl.getPMTU);
-            let retryWorkReqAddr = addrAddPsnMultiplyPMTU(laddr, psnDiff, cntrl.getPMTU);
-
-            // All pending responses handled, then retry flush finishes,
-            // change state to normal handling
-            if (allPipeEmpty) begin
-                cntrl.setRetryPulse(
-                    retryWorkReqIdReg,
-                    retryStartPsnReg,
-                    retryWorkReqLen,
-                    retryWorkReqAddr,
-                    retryReasonReg
-                );
-                respHandleStateReg <= SQ_HANDLE_RESP_HEADER;
-            end
+            PendingWorkReq emptyPendingWR = dontCareValue;
+            let rdmaRespType = RDMA_RESP_UNKNOWN;
+            let retryReason = RETRY_REASON_NOT_RETRY;
+            let wrAckType = WR_ACK_FLUSH;
+            let wcReqType = WC_REQ_TYPE_NO_WC;
+            pendingRespQ.enq(tuple6(
+                emptyPendingWR, pktMetaData, rdmaRespType,
+                retryReason, wrAckType, wcReqType
+            ));
         end
     endrule
 
-    return convertFifo2PipeOut(workCompOutQ);
+    // (* no_implicit_conditions, fire_when_enabled *)
+    (* fire_when_enabled *)
+    rule retryNotify if (
+        cntrl.isRTS && respHandleStateReg == SQ_RETRY_FLUSH
+    );
+        // When retry, the procedure is:
+        // - retry flush incoming packets start;
+        // - wait response handle pipeline empty;
+        // - notify controller to start retry;
+        // - recover from retry state by controller.
+
+        // When retry then retry exceed limit error, the procedure is:
+        // - retry flush incoming packets start;
+        // - wait response handle pipeline empty;
+        // - in the same cycle pipeline becomes empty, the controller enters error state;
+        // - notify WC generator to start flush pending WR.
+
+        // let respHandlePipelineEmpty = !(
+        //     pendingRespQ.notEmpty ||
+        //     pendingDmaReqQ.notEmpty
+        // );
+        if (cntrl.isRTS && respHandleStateReg == SQ_RETRY_FLUSH) begin
+            // if (respHandlePipelineEmpty) begin
+            retryHandler.notifyRetry(
+                retryWorkReqIdReg,
+                retryStartPsnReg,
+                retryReasonReg,
+                unwrapMaybe(retryRnrTimerReg)
+            );
+            // end
+
+            respHandleStateReg <= SQ_RETRY_FLUSH_AND_WAIT;
+        end
+
+        // if (cntrl.isERR) begin // && respHandlePipelineEmpty
+        //     // workCompGen.respHandlePipeEmptyInSQ;
+
+        //     respHandleStateReg <= SQ_FLUSH_AND_WAIT;
+        // end
+    endrule
+
+    // (* no_implicit_conditions, fire_when_enabled *)
+    (* fire_when_enabled *)
+    rule waitRetryDone if (
+        cntrl.isRTS &&
+        respHandleStateReg == SQ_RETRY_FLUSH_AND_WAIT
+    );
+        // Retry finished change state to normal handling
+        if (retryHandler.isRetryDone) begin
+            respHandleStateReg <= SQ_HANDLE_RESP_HEADER;
+        end
+    endrule
+
+    interface payloadConReqPipeOut = convertFifo2PipeOut(payloadConReqOutQ);
+    interface workCompGenReqPipeOut = convertFifo2PipeOut(workCompGenReqOutQ);
 endmodule

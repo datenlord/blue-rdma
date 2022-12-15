@@ -36,13 +36,8 @@ endmodule
 
 interface DmaReadSrvAndReqRespPipeOut;
     interface DmaReadSrv dmaReadSrv;
-    interface PipeOut#(DmaReadReq) dmaReadReqPipeOut;
-    interface PipeOut#(DmaReadResp) dmaReadRespPipeOut;
-endinterface
-
-interface DmaReadSrvAndDataStreamPipeOut;
-    interface DmaReadSrv dmaReadSrv;
-    interface DataStreamPipeOut dataStreamPipeOut;
+    interface PipeOut#(DmaReadReq) dmaReadReq;
+    interface PipeOut#(DmaReadResp) dmaReadResp;
 endinterface
 
 module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
@@ -151,17 +146,106 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
         interface request = toPut(dmaReadReqQ);
         interface response = toGet(dmaReadRespQ);
     endinterface;
-    interface dmaReadReqPipeOut = convertFifo2PipeOut(dmaReadReqOutQ);
-    interface dmaReadRespPipeOut = convertFifo2PipeOut(dmaReadRespOutQ);
+    interface dmaReadReq = convertFifo2PipeOut(dmaReadReqOutQ);
+    interface dmaReadResp = convertFifo2PipeOut(dmaReadRespOutQ);
+endmodule
+
+interface DmaReadSrvAndDataStreamPipeOut;
+    interface DmaReadSrv dmaReadSrv;
+    interface DataStreamPipeOut dataStream;
+endinterface
+
+module mkSimDmaReadSrvAndDataStreamPipeOut(DmaReadSrvAndDataStreamPipeOut);
+    function DataStream getDmaReadRespData(
+        DmaReadResp dmaReadResp
+    ) = dmaReadResp.data;
+
+    let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
+    let dmaReadReqSink <- mkSink(simDmaReadSrv.dmaReadReq);
+    DataStreamPipeOut dataStreamPipeOut <- mkFunc2Pipe(
+        getDmaReadRespData, simDmaReadSrv.dmaReadResp
+    );
+
+    interface dmaReadSrv = simDmaReadSrv.dmaReadSrv;
+    interface dataStream = dataStreamPipeOut;
 endmodule
 
 module mkSimDmaReadSrv(DmaReadSrv);
-    let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
-    let dmaReadReqSink <- mkSink(simDmaReadSrv.dmaReadReqPipeOut);
-    let dmaReadRespSink <- mkSink(simDmaReadSrv.dmaReadRespPipeOut);
+    let simDmaReadSrv   <- mkSimDmaReadSrvAndReqRespPipeOut;
+    let dmaReadReqSink  <- mkSink(simDmaReadSrv.dmaReadReq);
+    let dmaReadRespSink <- mkSink(simDmaReadSrv.dmaReadResp);
     return simDmaReadSrv.dmaReadSrv;
 endmodule
 
+interface DmaWriteSrvAndReqRespPipeOut;
+    interface DmaWriteSrv dmaWriteSrv;
+    interface PipeOut#(DmaWriteReq) dmaWriteReq;
+    interface PipeOut#(DmaWriteResp) dmaWriteResp;
+endinterface
+
+module mkSimDmaWriteSrvAndReqRespPipeOut(DmaWriteSrvAndReqRespPipeOut);
+    FIFOF#(DmaWriteReq) dmaWriteReqQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaWriteRespQ <- mkFIFOF;
+    FIFOF#(DmaWriteReq) dmaWriteReqOutQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaWriteRespOutQ <- mkFIFOF;
+
+    function Action genDmaWriteResp(DmaWriteMetaData metaData);
+        action
+            let dmaWriteResp = DmaWriteResp {
+                sqpn: metaData.sqpn,
+                psn : metaData.psn
+            };
+            dmaWriteRespQ.enq(dmaWriteResp);
+            dmaWriteRespOutQ.enq(dmaWriteResp);
+        endaction
+    endfunction
+
+    rule write;
+        let dmaWriteReq = dmaWriteReqQ.first;
+        dmaWriteReqQ.deq;
+        dmaWriteReqOutQ.enq(dmaWriteReq);
+
+        if (dmaWriteReq.data.isLast) begin
+            genDmaWriteResp(dmaWriteReq.metaData);
+        end
+    endrule
+
+    interface dmaWriteSrv  = interface DmaWriteSrv;
+        interface request  = toPut(dmaWriteReqQ);
+        interface response = toGet(dmaWriteRespQ);
+    endinterface;
+    interface dmaWriteReq  = convertFifo2PipeOut(dmaWriteReqOutQ);
+    interface dmaWriteResp = convertFifo2PipeOut(dmaWriteRespOutQ);
+endmodule
+
+interface DmaWriteSrvAndDataStreamPipeOut;
+    interface DmaWriteSrv dmaWriteSrv;
+    interface DataStreamPipeOut dataStream;
+endinterface
+
+module mkSimDmaWriteSrvAndDataStreamPipeOut(DmaWriteSrvAndDataStreamPipeOut);
+    function DataStream getDmaWriteReqData(
+        DmaWriteReq dmaWriteReq
+    ) = dmaWriteReq.data;
+
+    let simDmaWriteSrv <- mkSimDmaWriteSrvAndReqRespPipeOut;
+    let dmaWriteRespSink <- mkSink(simDmaWriteSrv.dmaWriteResp);
+    DataStreamPipeOut dataStreamPipeOut <- mkFunc2Pipe(
+        getDmaWriteReqData, simDmaWriteSrv.dmaWriteReq
+    );
+
+    interface dmaWriteSrv = simDmaWriteSrv.dmaWriteSrv;
+    interface dataStream = dataStreamPipeOut;
+endmodule
+
+module mkSimDmaWriteSrv(DmaWriteSrv);
+    let simDmaWriteSrv   <- mkSimDmaWriteSrvAndReqRespPipeOut;
+    let dmaWriteReqSink  <- mkSink(simDmaWriteSrv.dmaWriteReq);
+    let dmaWriteRespSink <- mkSink(simDmaWriteSrv.dmaWriteResp);
+    return simDmaWriteSrv.dmaWriteSrv;
+endmodule
+
+/*
 module mkSimDmaWriteSrv(DmaWriteSrv);
     FIFOF#(DmaWriteReq) dmaWriteReqQ <- mkFIFOF;
     FIFOF#(DmaWriteResp) dmaWriteRespQ <- mkFIFOF;
@@ -191,93 +275,6 @@ module mkSimDmaWriteSrv(DmaWriteSrv);
     interface request = toPut(dmaWriteReqQ);
     interface response = toGet(dmaWriteRespQ);
 endmodule
-/*
-module mkSimDmaReadSrv(DmaReadSrv);
-    FIFOF#(DmaReadReq) dmaReadReqQ <- mkFIFOF;
-    FIFOF#(DmaReadResp) dmaReadRespQ <- mkFIFOF;
-    Reg#(TotalFragNum) totalFragCntReg <- mkRegU;
-    Randomize#(DataStream) randomDataStream <- mkGenericRandomizer;
-    Reg#(Bool) initializedReg <- mkReg(False);
-    Reg#(Bool) busyReg <- mkReg(False);
-    Reg#(Bool) isFirstReg <- mkRegU;
-    Reg#(ByteEn) lastFragByteEnReg <- mkRegU;
-    Reg#(BusBitNum) lastFragInvalidBitNumReg <- mkRegU;
-    Reg#(DmaReadReq) curReqReg <- mkRegU;
-
-    Bool isFragCntZero = isZero(totalFragCntReg);
-
-    rule init if (!initializedReg);
-        randomDataStream.cntrl.init;
-        initializedReg <= True;
-    endrule
-
-    rule acceptReq if (!busyReg && initializedReg);
-        let curReq = dmaReadReqQ.first;
-        dmaReadReqQ.deq;
-
-        let isZeroLen = isZero(curReq.len);
-        dynAssert(
-            !isZeroLen,
-            "dmaReadReq.len non-zero assrtion",
-            $format("curReq.len=%h should not be zero", curReq.len)
-        );
-
-        let { totalFragCnt, lastFragByteEn, lastFragValidByteNum } = calcTotalFragNumByLength(curReq.len);
-        let { lastFragValidBitNum, lastFragInvalidByteNum, lastFragInvalidBitNum } =
-            calcFragBitNumAndByteNum(lastFragValidByteNum);
-
-        totalFragCntReg <= isZeroLen ? 0 : totalFragCnt - 1;
-        lastFragByteEnReg <= lastFragByteEn;
-        lastFragInvalidBitNumReg <= lastFragInvalidBitNum;
-
-        dynAssert(
-            !isZero(lastFragByteEn),
-            "lastFragByteEn non-zero assertion",
-            $format("lastFragByteEn=%h should not have zero ByteEn, curReq.len=%h", lastFragByteEn, curReq.len)
-        );
-
-        curReqReg <= curReq;
-        busyReg <= True;
-        isFirstReg <= True;
-    endrule
-
-    rule returnResp if (busyReg && initializedReg);
-        totalFragCntReg <= totalFragCntReg - 1;
-        let dataStream <- randomDataStream.next;
-        dataStream.isFirst = isFirstReg;
-        isFirstReg <= False;
-        dataStream.isLast = isFragCntZero;
-        dataStream.byteEn = maxBound;
-
-        if (isFragCntZero) begin
-            busyReg <= False;
-            dataStream.byteEn = lastFragByteEnReg;
-            DATA tmpData = dataStream.data >> lastFragInvalidBitNumReg;
-            dataStream.data = truncate(tmpData << lastFragInvalidBitNumReg);
-        end
-
-        let resp = DmaReadResp {
-            initiator: curReqReg.initiator,
-            sqpn: curReqReg.sqpn,
-            wrID: curReqReg.wrID,
-            data: dataStream
-        };
-        dmaReadRespQ.enq(resp);
-
-        dynAssert(
-            !isZero(dataStream.byteEn),
-            "dmaReadResp.data.byteEn non-zero assertion",
-            $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
-        );
-        // $display(
-        //     "time=%0d: SimDmaReadSrv response, totalFragNum=%h, dataStream=",
-        //     $time, totalFragCntReg, fshow(dataStream)
-        // );
-    endrule
-
-    interface request = toPut(dmaReadReqQ);
-    interface response = toGet(dmaReadRespQ);
-endmodule
 */
 module mkFixedLenSimDataStreamPipeOut#(
     PipeOut#(Length) dmaLenPipeOut
@@ -291,11 +288,11 @@ module mkFixedLenSimDataStreamPipeOut#(
         dmaLenPipeOut.deq;
 
         let dmaReq = DmaReadReq {
-            // initiator: ?,
-            sqpn: ?,
-            startAddr: ?,
-            len: dmaLength,
-            wrID: ?
+            // initiator: dontCareValue,
+            sqpn     : dontCareValue,
+            startAddr: dontCareValue,
+            len      : dmaLength,
+            wrID     : dontCareValue
         };
         simDmaReadSrv.request.put(dmaReq);
         // $display("time=%0d: dmaLength=%0d", $time, dmaLength);
@@ -313,17 +310,6 @@ module mkRandomLenSimDataStreamPipeOut#(
         mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut);
 
     return simDataStreamPipeOut;
-endmodule
-
-module mkSimDmaReadSrvAndDataStreamPipeOut(DmaReadSrvAndDataStreamPipeOut);
-    function DataStream getDmaReadRespData(DmaReadResp dmaReadResp) = dmaReadResp.data;
-
-    let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
-    let dmaReadReqSink <- mkSink(simDmaReadSrv.dmaReadReqPipeOut);
-    DataStreamPipeOut dsPipeOut <- mkFunc2Pipe(getDmaReadRespData, simDmaReadSrv.dmaReadRespPipeOut);
-
-    interface dmaReadSrv = simDmaReadSrv.dmaReadSrv;
-    interface dataStreamPipeOut = dsPipeOut;
 endmodule
 
 (* synthesize *)

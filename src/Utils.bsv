@@ -18,6 +18,10 @@ function Bool isLessOrEqOne(Bit#(nSz) bits) provisos(Add#(1, kSz, nSz));
     return ret;
 endfunction
 
+function Bool isOne(Bit#(nSz) bits) provisos(Add#(1, kSz, nSz));
+    return isLessOrEqOne(bits) && unpack(bits[0]);
+endfunction
+
 function Bool isAllOnes(Bit#(nSz) bits);
     Bool ret = unpack(&bits);
     return ret;
@@ -29,6 +33,14 @@ endfunction
 
 function Bit#(nSz) zeroExtendLSB(Bit#(mSz) bits) provisos(Add#(mSz, kSz, nSz));
     return { bits, 0 };
+endfunction
+
+function anytype dontCareValue() provisos(Bits#(anytype, nSz));
+    return ?;
+endfunction
+
+function anytype unwrapMaybe(Maybe#(anytype) maybe) provisos(Bits#(anytype, nSz));
+    return fromMaybe(?, maybe);
 endfunction
 
 // ByteEn related
@@ -105,12 +117,6 @@ function PktLen calcPmtuLen(PMTU pmtu);
         IBV_MTU_4096: 4096;
     endcase);
 endfunction
-
-// function Bool lenEqPMTU(Bit#(nSz) len, PMTU pmtu) provisos(Add#(TLog#(MAX_PMTU), kSz, nSz));
-//     let tmpPktLen = len;
-//     tmpPktLen[getPmtuLogValue(pmtu)-1] = 0;
-//     return isZero(tmpPktLen);
-// endfunction
 
 function Bool pktLenEqPMTU(PktLen pktLen, PMTU pmtu);
     let tmpPktLen = pktLen;
@@ -215,7 +221,7 @@ function Bool psnInRangeExclusive(PSN psn, PSN psnStart, PSN psnEnd);
     return ret;
 endfunction
 
-function PSN psnDiff(PSN psnA, PSN psnB);
+function PSN calcPsnDiff(PSN psnA, PSN psnB);
     return truncate({ 1'b1, psnA } - { 1'b0, psnB });
 endfunction
 
@@ -265,6 +271,31 @@ function Length lenSubtractPsnMultiplyPMTU(Length len, PSN psn, PMTU pmtu);
         IBV_MTU_4096: begin
             // 12 = log2(4096)
             { (len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 12] - truncate(psn)), len[11 : 0] };
+        end
+    endcase;
+endfunction
+
+function Length lenSubtractPktLen(Length len, PktLen pktLen, PMTU pmtu);
+    return case (pmtu)
+        IBV_MTU_256 : begin
+            // 8 = log2(256)
+            { len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 9], (len[8 : 0] - truncate(pktLen)) };
+        end
+        IBV_MTU_512 : begin
+            // 9 = log2(512)
+            { len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 10], (len[9 : 0] - truncate(pktLen)) };
+        end
+        IBV_MTU_1024: begin
+            // 10 = log2(1024)
+            { len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 11], (len[10 : 0] - truncate(pktLen)) };
+        end
+        IBV_MTU_2048: begin
+            // 11 = log2(2048)
+            { len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 12], (len[11 : 0] - truncate(pktLen)) };
+        end
+        IBV_MTU_4096: begin
+            // 12 = log2(4096)
+            { len[valueOf(RDMA_MAX_LEN_WIDTH)-1 : 13], (len[12 : 0] - truncate(pktLen)) };
         end
     endcase;
 endfunction
@@ -536,6 +567,70 @@ function Bool rdmaReqHasIETH(RdmaOpCode opcode);
     endcase;
 endfunction
 
+function Bool checkBTH(BTH bth);
+    let bthRsvdCheck =
+        isZero(pack(bth.tver))  &&
+        isZero(pack(bth.fecn))  &&
+        isZero(pack(bth.becn))  &&
+        isZero(pack(bth.resv6)) &&
+        isZero(pack(bth.resv7));
+    return bthRsvdCheck;
+endfunction
+
+// TODO: implement request header verification
+// TODO: check QP supported operation
+function Bool checkRdmaReqHeader(BTH bth, RETH reth, AtomicEth atomicEth);
+    let padCntCheck = isZero(bth.padCnt);
+
+    return case (bth.opcode)
+        SEND_FIRST, SEND_MIDDLE            : padCntCheck;
+        SEND_LAST, SEND_ONLY               ,
+        SEND_LAST_WITH_IMMEDIATE           ,
+        SEND_ONLY_WITH_IMMEDIATE           ,
+        SEND_LAST_WITH_INVALIDATE          ,
+        SEND_ONLY_WITH_INVALIDATE          : True;
+
+        RDMA_WRITE_FIRST, RDMA_WRITE_MIDDLE: padCntCheck;
+        RDMA_WRITE_LAST, RDMA_WRITE_ONLY   ,
+        RDMA_WRITE_LAST_WITH_IMMEDIATE     ,
+        RDMA_WRITE_ONLY_WITH_IMMEDIATE     : True;
+
+        RDMA_READ_REQUEST                  ,
+        COMPARE_SWAP                       ,
+        FETCH_ADD                          : True;
+
+        default                            : False;
+    endcase;
+endfunction
+
+// TODO: verify that read/atomic response can only have normal AETH code
+function Bool checkRdmaRespHeader(BTH bth, AETH aeth);
+    let padCntCheck = isZero(bth.padCnt);
+
+    case (bth.opcode)
+        RDMA_READ_RESPONSE_MIDDLE: return padCntCheck;
+        RDMA_READ_RESPONSE_LAST  ,
+        RDMA_READ_RESPONSE_ONLY  : return aeth.code == AETH_CODE_ACK;
+        RDMA_READ_RESPONSE_FIRST ,
+        ATOMIC_ACKNOWLEDGE       : return aeth.code == AETH_CODE_ACK && padCntCheck;
+        ACKNOWLEDGE              : case (aeth.code)
+            AETH_CODE_ACK: return padCntCheck;
+            AETH_CODE_RNR: return padCntCheck;
+            AETH_CODE_NAK: return case (aeth.value)
+                zeroExtend(pack(AETH_NAK_SEQ_ERR)),
+                zeroExtend(pack(AETH_NAK_INV_REQ)),
+                zeroExtend(pack(AETH_NAK_RMT_ACC)),
+                zeroExtend(pack(AETH_NAK_RMT_OP)) ,
+                zeroExtend(pack(AETH_NAK_INV_RD)) : padCntCheck;
+                default                           : False;
+            endcase;
+            // AETH_CODE_RSVD
+            default: return False;
+        endcase
+        default: return False;
+    endcase
+endfunction
+
 function RdmaRespType getRdmaRespType(RdmaOpCode opcode, AETH aeth);
     case (opcode)
         RDMA_READ_RESPONSE_FIRST ,
@@ -543,8 +638,7 @@ function RdmaRespType getRdmaRespType(RdmaOpCode opcode, AETH aeth);
         RDMA_READ_RESPONSE_LAST  ,
         RDMA_READ_RESPONSE_ONLY  ,
         ATOMIC_ACKNOWLEDGE       : return RDMA_RESP_NORMAL;
-
-        ACKNOWLEDGE: case (aeth.code)
+        ACKNOWLEDGE              : case (aeth.code)
             AETH_CODE_ACK: return RDMA_RESP_NORMAL;
             AETH_CODE_RNR: return RDMA_RESP_RETRY;
             AETH_CODE_NAK: return case (aeth.value)
@@ -553,7 +647,7 @@ function RdmaRespType getRdmaRespType(RdmaOpCode opcode, AETH aeth);
                 zeroExtend(pack(AETH_NAK_RMT_ACC)),
                 zeroExtend(pack(AETH_NAK_RMT_OP)) ,
                 zeroExtend(pack(AETH_NAK_INV_RD)) : RDMA_RESP_ERROR;
-                default: RDMA_RESP_UNKNOWN;
+                default                           : RDMA_RESP_UNKNOWN;
             endcase;
             // AETH_CODE_RSVD
             default: return RDMA_RESP_UNKNOWN;
@@ -607,21 +701,6 @@ function Bool rdmaRespMatchWorkReq(RdmaOpCode opcode, WorkReqOpCode wrOpCode);
         default                  : False;
     endcase;
 endfunction
-
-// function Bool isNormalRdmaResp(RdmaOpCode opcode, AETH aeth);
-//     // TODO: check if normal response or not
-//     return True;
-// endfunction
-
-// function Bool isRetryRdmaResp(RdmaOpCode opcode, AETH aeth);
-//     // TODO: check if retry response or not
-//     return False;
-// endfunction
-
-// function Bool isErrorRdmaResp(RdmaOpCode opcode, AETH aeth);
-//     // TODO: check if fatal error response or not
-//     return False;
-// endfunction
 
 // WorkReq related
 
@@ -734,6 +813,21 @@ function Bool workReqHasInv(WorkReqOpCode opcode);
     return opcode == IBV_WR_SEND_WITH_INV;
 endfunction
 
+module mkNewPendingWorkReqPipeOut#(
+    PipeOut#(WorkReq) workReqPipeIn
+)(PipeOut#(PendingWorkReq));
+    function PendingWorkReq genPendingWorkReq(WorkReq wr) = PendingWorkReq {
+        wr: wr,
+        startPSN: tagged Invalid,
+        endPSN: tagged Invalid,
+        pktNum: tagged Invalid,
+        isOnlyReqPkt: tagged Invalid
+    };
+
+    PipeOut#(PendingWorkReq) resultPipeOut <- mkFunc2Pipe(genPendingWorkReq, workReqPipeIn);
+    return resultPipeOut;
+endmodule
+
 // WorkComp related
 
 // TODO: support multiple WC flags
@@ -741,6 +835,19 @@ function Bool compareWorkCompFlags(
     WorkCompFlags flag1, WorkCompFlags flag2
 );
     return flag1 == flag2;
+endfunction
+
+function Maybe#(WorkCompStatus) pktStatus2WorkCompStatusSQ(
+    PktVeriStatus pktStatus
+);
+    return case (pktStatus)
+        PKT_ST_VALID  : tagged Valid IBV_WC_SUCCESS;
+        PKT_ST_LEN_ERR: tagged Valid IBV_WC_LOC_LEN_ERR;
+        PKT_ST_ACC_ERR: tagged Valid IBV_WC_LOC_ACCESS_ERR;
+        // TODO: should drop invalid response packets?
+        // PKT_ST_INVALID: tagged Valid IBV_WC_LOC_QP_OP_ERR;
+        default       : tagged Invalid;
+    endcase;
 endfunction
 
 function Maybe#(WorkCompOpCode) workReqOpCode2WorkCompOpCode4SQ(WorkReqOpCode wrOpCode);
@@ -761,22 +868,22 @@ function Maybe#(WorkCompOpCode) workReqOpCode2WorkCompOpCode4SQ(WorkReqOpCode wr
     endcase;
 endfunction
 
-function WorkCompFlags workReqOpCode2WorkCompFlags(WorkReqOpCode wrOpCode);
-    return case (wrOpCode)
-        IBV_WR_RDMA_WRITE          ,
-        IBV_WR_SEND                ,
-        IBV_WR_RDMA_READ           ,
-        IBV_WR_ATOMIC_CMP_AND_SWP  ,
-        IBV_WR_ATOMIC_FETCH_AND_ADD,
-        IBV_WR_BIND_MW             : IBV_WC_NO_FLAGS;
-        IBV_WR_RDMA_WRITE_WITH_IMM ,
-        IBV_WR_SEND_WITH_IMM       : IBV_WC_WITH_IMM;
-        IBV_WR_LOCAL_INV           ,
-        IBV_WR_SEND_WITH_INV       : IBV_WC_WITH_INV;
+// function WorkCompFlags workReqOpCode2WorkCompFlags(WorkReqOpCode wrOpCode);
+//     return case (wrOpCode)
+//         IBV_WR_RDMA_WRITE          ,
+//         IBV_WR_SEND                ,
+//         IBV_WR_RDMA_READ           ,
+//         IBV_WR_ATOMIC_CMP_AND_SWP  ,
+//         IBV_WR_ATOMIC_FETCH_AND_ADD,
+//         IBV_WR_BIND_MW             : IBV_WC_NO_FLAGS;
+//         IBV_WR_RDMA_WRITE_WITH_IMM ,
+//         IBV_WR_SEND_WITH_IMM       : IBV_WC_WITH_IMM;
+//         IBV_WR_LOCAL_INV           ,
+//         IBV_WR_SEND_WITH_INV       : IBV_WC_WITH_INV;
 
-        default                    : IBV_WC_NO_FLAGS;
-    endcase;
-endfunction
+//         default                    : IBV_WC_NO_FLAGS;
+//     endcase;
+// endfunction
 
 function Maybe#(WorkCompOpCode) rdmaOpCode2WorkCompOpCode4RQ(RdmaOpCode opcode);
     return case (opcode)
@@ -910,20 +1017,15 @@ endmodule
 //     return ret;
 // endmodule
 */
+
 // PipeOut related
 
 function PipeOut#(anytype) convertFifo2PipeOut(FIFOF#(anytype) outputQ);
     return f_FIFOF_to_PipeOut(outputQ);
 endfunction
 
-// function PipeOut #(ta) applyActionFunc2PipeOut(
-//     function Action afn (ta inputVal),
-//     PipeOut #(ta) pipeIn
-// );
-//     return fn_tee_to_Action(afn, pipeIn)
-// endfunction
 module mkPipeFilter#(
-    function Bool filterF(anytype in),
+    function Bool filterF(anytype inputVal),
     PipeOut#(anytype) pipeIn
 )(PipeOut#(anytype)) provisos (Bits #(anytype, aSz));
     FIFOF#(anytype) outQ <- mkFIFOF;
@@ -986,17 +1088,17 @@ module mkMuxPipeOut#(
     endmethod
 endmodule
 
-function Tuple2#(PipeOut#(anytype), PipeOut#(anytype)) deMuxPipeOut(
+function Tuple2#(PipeOut#(anytype), PipeOut#(anytype)) mkDeMuxPipeOut(
     Bool sel, PipeOut#(anytype) pipeIn
 );
     PipeOut#(anytype) p1 = interface PipeOut;
         method anytype first() if (sel);
             return pipeIn.first;
         endmethod
-        method Action deq if (sel);
+        method Action deq() if (sel);
             pipeIn.deq;
         endmethod
-        method Bool notEmpty if (sel);
+        method Bool notEmpty() if (sel);
             return pipeIn.notEmpty;
         endmethod
     endinterface;
@@ -1005,10 +1107,10 @@ function Tuple2#(PipeOut#(anytype), PipeOut#(anytype)) deMuxPipeOut(
         method anytype first() if (!sel);
             return pipeIn.first;
         endmethod
-        method Action deq if (!sel);
+        method Action deq() if (!sel);
             pipeIn.deq;
         endmethod
-        method Bool notEmpty if (!sel);
+        method Bool notEmpty() if (!sel);
             return pipeIn.notEmpty;
         endmethod
     endinterface;

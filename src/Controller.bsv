@@ -40,17 +40,21 @@ interface Controller;
     method QpType getQpType();
     // method Action setQpType(QpType qpType);
 
-    method Bool retryExceedLimit(RetryReason retryReason);
-    method Action decRetryCnt(RetryReason retryReason);
-    method Action resetRetryCnt();
-    method Bool getRetryPulse();
-    method Action setRetryPulse(
-        WorkReqID wrID,
-        PSN retryStartPSN,
-        Length retryWorkReqLen,
-        ADDR retryWorkReqAddr,
-        RetryReason retryReason
-    );
+    method RetryCnt getMaxRnrCnt();
+    method RetryCnt getMaxRetryCnt();
+    method TimeOutTimer getMaxTimeOut();
+    method RnrTimer getMinRnrTimer();
+    // method Bool retryExcLimit(RetryReason retryReason);
+    // method Action decRetryCnt(RetryReason retryReason);
+    // method Action resetRetryCnt();
+    // method Bool getRetryPulse();
+    // method Action notifyRetry(
+    //     WorkReqID wrID,
+    //     PSN retryStartPSN,
+    //     Length retryWorkReqLen,
+    //     ADDR retryWorkReqAddr,
+    //     RetryReason retryReason
+    // );
     method Action errFlushDone();
 
     method PendingReqCnt getPendingWorkReqNum();
@@ -81,19 +85,19 @@ module mkController(Controller);
     Reg#(QpState) stateReg <- mkReg(IBV_QPS_RESET);
     Reg#(QpType) qpTypeReg <- mkRegU;
 
-    Reg#(RetryCnt)         rnrCntReg <- mkRegU;
-    Reg#(RetryCnt)       retryCntReg <- mkRegU;
+    // Reg#(RetryCnt)         rnrCntReg <- mkRegU;
+    // Reg#(RetryCnt)       retryCntReg <- mkRegU;
     Reg#(RetryCnt)      maxRnrCntReg <- mkRegU;
     Reg#(RetryCnt)    maxRetryCntReg <- mkRegU;
     Reg#(TimeOutTimer) maxTimeOutReg <- mkRegU;
     Reg#(RnrTimer)    minRnrTimerReg <- mkRegU;
 
-    Reg#(Bool)          retryPulseReg <- mkRegU;
-    Reg#(WorkReqID) retryWorkReqIdReg <- mkRegU;
-    Reg#(PSN)        retryStartPsnReg <- mkRegU;
-    Reg#(Length)   retryWorkReqLenReg <- mkRegU;
-    Reg#(ADDR)    retryWorkReqAddrReg <- mkRegU;
-    Reg#(RetryReason)  retryReasonReg <- mkRegU;
+    // Reg#(Bool)          retryHandleStateReg <- mkRegU;
+    // Reg#(WorkReqID) retryWorkReqIdReg <- mkRegU;
+    // Reg#(PSN)        retryStartPsnReg <- mkRegU;
+    // Reg#(Length)   retryWorkReqLenReg <- mkRegU;
+    // Reg#(ADDR)    retryWorkReqAddrReg <- mkRegU;
+    // Reg#(RetryReason)  retryReasonReg <- mkRegU;
     Reg#(Bool)        errFlushDoneReg <- mkRegU;
 
     Reg#(PendingReqCnt) pendingWorkReqNumReg <- mkRegU;
@@ -111,9 +115,9 @@ module mkController(Controller);
 
     Bool qpInitialized = stateReg != IBV_QPS_RESET;
 
-    rule clearRetryPulse if (qpInitialized && retryPulseReg);
-        retryPulseReg <= False;
-    endrule
+    // rule clearRetryPulse if (qpInitialized && retryHandleStateReg);
+    //     retryHandleStateReg <= False;
+    // endrule
 
     method Action initialize(
         QpType qpType,
@@ -135,13 +139,13 @@ module mkController(Controller);
         stateReg             <= IBV_QPS_INIT;
 
         qpTypeReg            <= qpType;
-        rnrCntReg            <= maxRnrCnt;
-        retryCntReg          <= maxRetryCnt;
+        // rnrCntReg            <= maxRnrCnt;
+        // retryCntReg          <= maxRetryCnt;
         maxRnrCntReg         <= maxRnrCnt;
         maxRetryCntReg       <= maxRetryCnt;
         maxTimeOutReg        <= maxTimeOut;
         minRnrTimerReg       <= minRnrTimer;
-        retryPulseReg        <= False;
+        // retryHandleStateReg  <= False;
         errFlushDoneReg      <= False;
         pendingWorkReqNumReg <= pendingWorkReqNum;
         pendingRecvReqNumReg <= pendingRecvReqNum;
@@ -188,53 +192,59 @@ module mkController(Controller);
     //     qpTypeReg <= qpType;
     // endmethod
 
-    method Bool retryExceedLimit(RetryReason retryReason) if (qpInitialized);
-        return case (retryReason)
-            RETRY_REASON_RNR      : isZero(rnrCntReg);
-            RETRY_REASON_SEQ_ERR  ,
-            RETRY_REASON_IMPLICIT ,
-            RETRY_REASON_TIME_OUT : isZero(retryCntReg);
-            // RETRY_REASON_NOT_RETRY: False;
-            default               : False;
-        endcase;
-    endmethod
-    method Action decRetryCnt(RetryReason retryReason) if (qpInitialized);
-        case (retryReason)
-            RETRY_REASON_SEQ_ERR, RETRY_REASON_IMPLICIT, RETRY_REASON_TIME_OUT:
-                if (maxRetryCntReg != fromInteger(valueOf(INFINITE_RETRY))) begin
-                    if (!isZero(retryCntReg)) begin
-                        retryCntReg <= retryCntReg - 1;
-                    end
-                end
-            RETRY_REASON_RNR:
-                if (maxRnrCntReg != fromInteger(valueOf(INFINITE_RETRY))) begin
-                    if (!isZero(rnrCntReg)) begin
-                        rnrCntReg <= rnrCntReg - 1;
-                    end
-                end
-            default: begin end
-        endcase
-    endmethod
-    method Action resetRetryCnt() if (qpInitialized);
-        retryCntReg <= maxRetryCntReg;
-        rnrCntReg   <= maxRnrCntReg;
-    endmethod
+    method RetryCnt   getMaxRnrCnt() if (qpInitialized) = maxRnrCntReg;
+    method RetryCnt getMaxRetryCnt() if (qpInitialized) = maxRetryCntReg;
+    method TimeOutTimer getMaxTimeOut() if (qpInitialized) = maxTimeOutReg;
+    method RnrTimer    getMinRnrTimer() if (qpInitialized) = minRnrTimerReg;
+    // method Bool retryExcLimit(RetryReason retryReason) if (qpInitialized);
+    //     return case (retryReason)
+    //         RETRY_REASON_RNR      : isZero(rnrCntReg);
+    //         RETRY_REASON_SEQ_ERR  ,
+    //         RETRY_REASON_IMPLICIT ,
+    //         RETRY_REASON_TIME_OUT : isZero(retryCntReg);
+    //         // RETRY_REASON_NOT_RETRY: False;
+    //         default               : False;
+    //     endcase;
+    // endmethod
+    // method Action decRetryCnt(RetryReason retryReason) if (qpInitialized);
+    //     case (retryReason)
+    //         RETRY_REASON_SEQ_ERR, RETRY_REASON_IMPLICIT, RETRY_REASON_TIME_OUT:
+    //             if (maxRetryCntReg != fromInteger(valueOf(INFINITE_RETRY))) begin
+    //                 if (!isZero(retryCntReg)) begin
+    //                     retryCntReg <= retryCntReg - 1;
+    //                 end
+    //             end
+    //         RETRY_REASON_RNR:
+    //             if (maxRnrCntReg != fromInteger(valueOf(INFINITE_RETRY))) begin
+    //                 if (!isZero(rnrCntReg)) begin
+    //                     rnrCntReg <= rnrCntReg - 1;
+    //                 end
+    //             end
+    //         default: begin end
+    //     endcase
+    // endmethod
+    // method Action resetRetryCnt() if (qpInitialized);
+    //     retryCntReg <= maxRetryCntReg;
+    //     rnrCntReg   <= maxRnrCntReg;
+    // endmethod
 
-    method Bool getRetryPulse() if (qpInitialized) = retryPulseReg;
-    method Action setRetryPulse(
-        WorkReqID   wrID,
-        PSN         retryStartPSN,
-        Length      retryWorkReqLen,
-        ADDR        retryWorkReqAddr,
-        RetryReason retryReason
-    ) if (qpInitialized && !retryPulseReg);
-        retryPulseReg       <= True;
-        retryWorkReqIdReg   <= wrID;
-        retryStartPsnReg    <= retryStartPSN;
-        retryWorkReqLenReg  <= retryWorkReqLen;
-        retryWorkReqAddrReg <= retryWorkReqAddr;
-        retryReasonReg      <= retryReason;
-    endmethod
+    // method Bool getRetryPulse() if (qpInitialized) = retryHandleStateReg;
+    // method Action notifyRetry(
+    //     WorkReqID   wrID,
+    //     PSN         retryStartPSN,
+    //     Length      retryWorkReqLen,
+    //     ADDR        retryWorkReqAddr,
+    //     RetryReason retryReason
+    // ) if (qpInitialized);
+    //     if (!retryHandleStateReg) begin
+    //         retryHandleStateReg       <= True;
+    //         retryWorkReqIdReg   <= wrID;
+    //         retryStartPsnReg    <= retryStartPSN;
+    //         retryWorkReqLenReg  <= retryWorkReqLen;
+    //         retryWorkReqAddrReg <= retryWorkReqAddr;
+    //         retryReasonReg      <= retryReason;
+    //     end
+    // endmethod
     method Action errFlushDone if (qpInitialized && stateReg == IBV_QPS_ERR && !errFlushDoneReg);
         errFlushDoneReg <= True;
     endmethod

@@ -1,8 +1,11 @@
 // Adjustible settings
+typedef 250 TARGET_FREQ_MHZ;
 typedef 32 MAX_PENDING_REQ_NUM;
 // typedef 16 MAX_PENDING_READ_ATOMIC_REQ_NUM;
 typedef 256 DATA_BUS_WIDTH;
-typedef 2 MIN_PKT_NUM_IN_BUF;
+typedef 2 MIN_PKT_NUM_IN_RECV_BUF;
+
+typedef TMul#(2, MAX_PENDING_REQ_NUM) MAX_PENDING_WORK_COMP_NUM;
 
 // Device attributes
 typedef TExp#(31)           MAX_MR_SIZE; // 2GB

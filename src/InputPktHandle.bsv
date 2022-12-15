@@ -1,3 +1,4 @@
+import BRAMFIFO :: *;
 import FIFOF :: *;
 import PAClib :: *;
 import Vector :: *;
@@ -90,9 +91,12 @@ typedef enum {
 // This module will discard:
 // - invalid packet that header is without payload but packet has payload;
 // TODO: handle invalid TransType or RdmaOpCode
+// TODO: check MR permission
+// TODO: check PKEY match
 // TODO: discard BTH or AETH with reserved value, and packet validation
-// TODO: reset mkInputRdmaPktBufAndCalcPktLen when error or retry
-module mkInputRdmaPktBufAndCalcPktLen#(
+// TODO: check read/atomic response AETH code abnormal, not RNR or NAK code
+// TODO: reset mkInputRdmaPktBufAndHeaderValidation when error or retry
+module mkInputRdmaPktBufAndHeaderValidation#(
     // Only output payload when packet has non-zero payload,
     // otherwise output packet header/metadata only,
     // namely header and payload are not one-to-one mapping,
@@ -102,14 +106,15 @@ module mkInputRdmaPktBufAndCalcPktLen#(
 )(RdmaPktMetaDataAndPayloadPipeOut);
     // TODO: payloadOutQ should use BramFIFO?
     // TODO: check payloadOutQ buffer size is enough for DMA write delay?
-    FIFOF#(DataStream) payloadOutQ <- mkSizedFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
+    FIFOF#(DataStream)          payloadOutQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
     FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkSizedFIFOF(valueOf(PKT_META_DATA_BUF_SIZE));
 
-    FIFOF#(DataStream) payloadTmpQ <- mkFIFOF;
-    FIFOF#(RdmaHeader) rdmaHeaderTmpQ <- mkFIFOF;
-    Reg#(PktLen) pktLenReg <- mkRegU;
+    FIFOF#(DataStream)    payloadLenCheckQ <- mkLFIFOF;
+    FIFOF#(RdmaHeader) rdmaHeaderLenCheckQ <- mkLFIFOF;
+
     Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
-    Reg#(Bool) pktValidReg <- mkRegU;
+    Reg#(PktLen)          pktLenReg <- mkRegU;
+    Reg#(Bool)          pktValidReg <- mkRegU;
 
     Reg#(RdmaPktBufState) pktBufStateReg <- mkReg(RDMA_PKT_BUF_RECV_FRAG);
 
@@ -118,6 +123,67 @@ module mkInputRdmaPktBufAndCalcPktLen#(
         pipeIn.headerAndMetaData.headerDataStream,
         pipeIn.headerAndMetaData.headerMetaData
     );
+
+    rule recvPktFrag if (pktBufStateReg == RDMA_PKT_BUF_RECV_FRAG);
+        let payloadFrag = payloadPipeIn.first;
+        payloadPipeIn.deq;
+        let payloadHasSingleFrag = payloadFrag.isFirst && payloadFrag.isLast;
+        let fragHasNoData = isZero(payloadFrag.byteEn);
+
+        let rdmaHeader = rdmaHeaderPipeOut.first;
+        let bth        = extractBTH(rdmaHeader.headerData);
+        let aeth       = extractAETH(rdmaHeader.headerData);
+        let reth       = extractRETH(rdmaHeader.headerData, bth.trans);
+        let atomicEth  = extractAtomicEth(rdmaHeader.headerData, bth.trans);
+
+        let bthCheckResult = checkBTH(bth);
+        let headerCheckResult =
+            checkRdmaReqHeader(bth, reth, atomicEth) ||
+            checkRdmaRespHeader(bth, aeth);
+        // Discard packet that should not have payload
+        let nonPayloadHeaderShouldHaveNoPayload =
+            rdmaHeader.headerMetaData.hasPayload ? True :
+            (payloadHasSingleFrag && fragHasNoData);
+        // $display(
+        //     "time=%0d: bthCheckResult=", $time, fshow(bthCheckResult),
+        //     ", headerCheckResult=", fshow(headerCheckResult),
+        //     ", nonPayloadHeaderShouldHaveNoPayload=", fshow(nonPayloadHeaderShouldHaveNoPayload),
+        //     ", bth=", fshow(bth), ", aeth=", fshow(aeth)
+        // );
+
+        if (payloadFrag.isFirst) begin
+            rdmaHeaderPipeOut.deq;
+
+            if (!bthCheckResult || !headerCheckResult || !nonPayloadHeaderShouldHaveNoPayload) begin
+                if (!payloadFrag.isLast) begin
+                    $warning(
+                        "time=%0d: discard invalid RDMA packet of multi-fragment payload", $time
+                    );
+                    pktBufStateReg <= RDMA_PKT_BUF_DISCARD_FRAG;
+                end
+                else begin
+                    $warning(
+                        "time=%0d: discard invalid RDMA packet of single-fragment payload", $time
+                    );
+                end
+            end
+            else begin
+                // Packet header is valid
+                rdmaHeaderLenCheckQ.enq(rdmaHeader);
+                payloadLenCheckQ.enq(payloadFrag);
+
+                // $display(
+                //     "time=%0d: bth=", $time, fshow(bth),
+                //     ", headerMetaData=", fshow(rdmaHeader.headerMetaData),
+                //     "\ntime=%0d: payloadFrag=", $time, fshow(payloadFrag)
+                // );
+            end
+        end
+        else begin
+            payloadLenCheckQ.enq(payloadFrag);
+            // $display("time=%0d: payloadFrag=", $time, fshow(payloadFrag));
+        end
+    endrule
 
     rule discardInvalidFrag if (pktBufStateReg == RDMA_PKT_BUF_DISCARD_FRAG);
         let payload = payloadPipeIn.first;
@@ -128,24 +194,24 @@ module mkInputRdmaPktBufAndCalcPktLen#(
     endrule
 
     rule calcPktLen; // if (pktBufStateReg == RDMA_PKT_BUF_RECV_FRAG);
-        let payloadFrag = payloadTmpQ.first;
-        payloadTmpQ.deq;
+        let payloadFrag = payloadLenCheckQ.first;
+        payloadLenCheckQ.deq;
 
-        let rdmaHeader = rdmaHeaderTmpQ.first;
+        let rdmaHeader = rdmaHeaderLenCheckQ.first;
         let bth = extractBTH(rdmaHeader.headerData);
-        // let isOnlyPkt = isOnlyRdmaOpCode(bth.opcode);
         let isLastPkt = isLastRdmaOpCode(bth.opcode);
         let isFirstOrMidPkt = isFirstOrMiddleRdmaOpCode(bth.opcode);
 
         let payloadFragLen = calcFragByteNumFromByteEn(payloadFrag.byteEn);
         dynAssert(
             isValid(payloadFragLen),
-            "isValid(payloadFragLen) assertion @ mkInputRdmaPktBufAndCalcPktLen",
+            "isValid(payloadFragLen) assertion @ mkInputRdmaPktBufAndHeaderValidation",
             $format(
                 "payloadFragLen=", fshow(payloadFragLen), " should be valid"
             )
         );
-        PktLen fragLen = zeroExtend(fromMaybe(?, payloadFragLen));
+        let fragLen = unwrapMaybe(payloadFragLen);
+        let isByteEnNonZero = !isZero(fragLen);
         // $display(
         //     "time=%0d: payloadFrag.byteEn=%h, payloadFrag.isFirst=",
         //     $time, payloadFrag.byteEn, fshow(payloadFrag.isFirst),
@@ -158,11 +224,12 @@ module mkInputRdmaPktBufAndCalcPktLen#(
         let pktLen = pktLenReg;
         let pktFragNum = pktFragNumReg;
         let pktValid = False;
+        PktLen fragLenExt = zeroExtend(fragLen);
         case ({ pack(payloadFrag.isFirst), pack(payloadFrag.isLast) })
             2'b11: begin // payloadFrag.isFirst && payloadFrag.isLast
-                pktLen = fragLen;
+                pktLen = fragLenExt;
                 pktFragNum = 1;
-                pktValid = isFirstOrMidPkt ? False : (isLastPkt ? (!isZero(fragLen)) : True);
+                pktValid = (isFirstOrMidPkt ? False : (isLastPkt ? isByteEnNonZero : True));
             end
             2'b10: begin // payloadFrag.isFirst && !payloadFrag.isLast
                 pktLen = fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
@@ -170,7 +237,7 @@ module mkInputRdmaPktBufAndCalcPktLen#(
                 pktValid = isByteEnAllOne;
             end
             2'b01: begin // !payloadFrag.isFirst && payloadFrag.islast
-                pktLen = pktLenReg + fragLen;
+                pktLen = pktLenReg + fragLenExt;
                 pktFragNum = pktFragNumReg + 1;
                 pktValid = pktValidReg;
             end
@@ -185,24 +252,33 @@ module mkInputRdmaPktBufAndCalcPktLen#(
         pktFragNumReg <= pktFragNum;
         pktValidReg <= pktValid;
 
-        let isZeroLen = isZero(pktLen);
+        let pktStatus = PKT_ST_VALID;
         if (payloadFrag.isLast) begin
-            rdmaHeaderTmpQ.deq;
+            rdmaHeaderLenCheckQ.deq;
+
+            let isZeroLen = isZero(pktLen);
             if (!isZeroLen) begin
                 payloadOutQ.enq(payloadFrag);
                 // $display("time=%0d: payloadFrag=", $time, fshow(payloadFrag));
-
             end
             else begin
                 // Discard zero length payload no matter packet has payload or not
                 // $info("time=%0d: discard zero-length payload for RDMA packet", $time);
             end
 
+            if (pktValid && isFirstOrMidPkt) begin
+                pktValid = pktLenEqPMTU(pktLen, pmtu);
+            end
+            if (!pktValid) begin
+                // Invalid packet length
+                pktStatus = PKT_ST_LEN_ERR;
+            end
             let pktMetaData = RdmaPktMetaData {
                 pktPayloadLen: pktLen,
                 pktFragNum   : (isZeroLen ? 0 : pktFragNum),
                 pktHeader    : rdmaHeader,
-                pktValid     : (isFirstOrMidPkt ? pktLenEqPMTU(pktLen, pmtu) : pktValid)
+                pktValid     : pktValid,
+                pktStatus    : pktStatus
             };
             pktMetaDataOutQ.enq(pktMetaData);
             // $display(
@@ -211,59 +287,6 @@ module mkInputRdmaPktBufAndCalcPktLen#(
         end
         else begin
             payloadOutQ.enq(payloadFrag);
-            // $display("time=%0d: payloadFrag=", $time, fshow(payloadFrag));
-        end
-    endrule
-
-    rule recvPktFrag if (pktBufStateReg == RDMA_PKT_BUF_RECV_FRAG);
-        let payloadFrag = payloadPipeIn.first;
-        payloadPipeIn.deq;
-        let payloadHasSingleFrag = payloadFrag.isFirst && payloadFrag.isLast;
-        let fragHasNoData = isZero(payloadFrag.byteEn);
-
-        let rdmaHeader = rdmaHeaderPipeOut.first;
-        if (payloadFrag.isFirst) begin
-            rdmaHeaderPipeOut.deq;
-            let bth = extractBTH(rdmaHeader.headerData);
-
-            // Discard packet that should not have payload
-            if (!rdmaHeader.headerMetaData.hasPayload) begin
-                if (payloadHasSingleFrag && fragHasNoData) begin
-                    rdmaHeaderTmpQ.enq(rdmaHeader);
-                    // Keep the empty payload of the packet without payload for now.
-                    payloadTmpQ.enq(payloadFrag);
-
-                    // $display(
-                    //     "time=%0d: bth=", $time, fshow(bth),
-                    //     ", headerMetaData=", fshow(rdmaHeader.headerMetaData)
-                    // );
-                end
-                else if (!payloadFrag.isLast) begin
-                    $warning(
-                        "time=%0d: discard RDMA packet should not have multi-fragment payload", $time
-                    );
-                    pktBufStateReg <= RDMA_PKT_BUF_DISCARD_FRAG;
-                end
-                else begin
-                    $warning(
-                        "time=%0d: discard RDMA packet should not have single-fragment payload", $time
-                    );
-                end
-            end
-            else begin
-                // Packet has payload
-                rdmaHeaderTmpQ.enq(rdmaHeader);
-                payloadTmpQ.enq(payloadFrag);
-
-                // $display(
-                //     "time=%0d: bth=", $time, fshow(bth),
-                //     ", headerMetaData=", fshow(rdmaHeader.headerMetaData),
-                //     "\ntime=%0d: payloadFrag=", $time, fshow(payloadFrag)
-                // );
-            end
-        end
-        else begin
-            payloadTmpQ.enq(payloadFrag);
             // $display("time=%0d: payloadFrag=", $time, fshow(payloadFrag));
         end
     endrule

@@ -32,7 +32,7 @@ module mkTestReqGenSQ(Empty);
     // Payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let segDataStreamPipeOut <- mkSegmentDataStreamByPmtu(
-        simDmaReadSrv.dataStreamPipeOut, pmtu
+        simDmaReadSrv.dataStream, pmtu
     );
     let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
@@ -106,8 +106,8 @@ module mkTestReqGenSQ(Empty);
         end
 
         let refPendingWR = pendingWorkReqPipeOut4Ref.first;
-        let wrStartPSN = fromMaybe(?, refPendingWR.startPSN);
-        let wrEndPSN = fromMaybe(?, refPendingWR.endPSN);
+        let wrStartPSN = unwrapMaybe(refPendingWR.startPSN);
+        let wrEndPSN = unwrapMaybe(refPendingWR.endPSN);
 
         if (isOnlyRdmaOpCode(rdmaOpCode)) begin
             pendingWorkReqPipeOut4Ref.deq;

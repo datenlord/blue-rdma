@@ -227,8 +227,8 @@ module mkSimGenRdmaResp#(
             )
         );
 
-        PSN startPSN = fromMaybe(?, curPendingWR.startPSN);
-        PktNum pktNum = fromMaybe(?, curPendingWR.pktNum);
+        PSN startPSN = unwrapMaybe(curPendingWR.startPSN);
+        PktNum pktNum = unwrapMaybe(curPendingWR.pktNum);
         Bool isOnlyPkt = isLessOrEqOne(pktNum);
         Bool hasOnlyRespPkt = isOnlyPkt || !isReadWorkReq(curPendingWR.wr.opcode);
         MSN msn = hasOnlyRespPkt ? (msnReg + 1) : msnReg;
@@ -325,18 +325,19 @@ module mkTestSimGenRdmaResp(Empty);
         mkRandomWorkReq(minDmaLength, maxDmaLength);
     Vector#(2, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
+    let pendingWorkReqPipeOut4RespGen = existingPendingWorkReqPipeOutVec[0];
     let pendingWorkReqPipeOut4Ref <- mkBufferN(4, existingPendingWorkReqPipeOutVec[1]);
 
     // Payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let segDataStreamPipeOut <- mkSegmentDataStreamByPmtu(
-        simDmaReadSrv.dataStreamPipeOut, pmtu
+        simDmaReadSrv.dataStream, pmtu
     );
     let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
     // Generate RDMA responses
     let rdmaRespAndHeaderPipeOut <- mkSimGenRdmaResp(
-        cntrl, simDmaReadSrv.dmaReadSrv, existingPendingWorkReqPipeOutVec[0]
+        cntrl, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
     let rdmaRespHeaderPipeOut4Ref <- mkBufferN(2, rdmaRespAndHeaderPipeOut.respHeader);
     Vector#(2, PipeOut#(RdmaHeader)) rdmaRespHeaderPipeOut4RefVec <-
@@ -411,8 +412,8 @@ module mkTestSimGenRdmaResp(Empty);
         // $display("time=%0d: BTH=", $time, fshow(bth), ", AETH=", fshow(aeth));
 
         let refPendingWR = pendingWorkReqPipeOut4Ref.first;
-        let wrStartPSN = fromMaybe(?, refPendingWR.startPSN);
-        let wrEndPSN = fromMaybe(?, refPendingWR.endPSN);
+        let wrStartPSN = unwrapMaybe(refPendingWR.startPSN);
+        let wrEndPSN = unwrapMaybe(refPendingWR.endPSN);
 
         let respHasAeth = True;
         if (isOnlyRdmaOpCode(rdmaOpCode)) begin
