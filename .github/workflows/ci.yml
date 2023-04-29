@@ -1,0 +1,25 @@
+name: CI
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  # CI runs every hour
+  schedule: [cron: "0 * * * *"]
+
+jobs:
+  ci-check:
+    name: CI Build and Simulate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v2
+      - name: build and simulate
+        run : |
+          ./setup.sh
+          ./run.sh
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+

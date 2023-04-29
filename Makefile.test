@@ -1,0 +1,96 @@
+TESTDIR ?= $(abspath ../test)
+LOGDIR ?= $(abspath ../tmp)
+
+TESTBENCHS = \
+            SimDma.bsv \
+            SimGenRdmaReqAndResp.bsv \
+            TestArbitration.bsv \
+            TestController.bsv \
+            TestDupReadAtomicCache.bsv \
+            TestExtractAndPrependPipeOut.bsv \
+            TestInputPktHandle.bsv \
+            TestMetaData.bsv \
+            TestPayloadConAndGen.bsv \
+            TestReqGenSQ.bsv \
+            TestReqHandleRQ.bsv \
+            TestRespHandleSQ.bsv \
+            TestRetryHandleSQ.bsv \
+            TestSpecialFIFOF.bsv \
+            TestUtils.bsv \
+            TestWorkCompGen.bsv
+
+SimDma.bsv                       = mkTestFixedLenSimDataStreamPipeOut
+SimGenRdmaReqAndResp.bsv         = mkTestSimGenRdmaResp
+TestArbitration.bsv              = mkTestPipeOutArbiter \
+                                    mkTestServerArbiter
+TestController.bsv               = mkTestCntrlInVec
+TestDupReadAtomicCache.bsv       = mkTestDupReadAtomicCache \
+                                    mkTestCacheFIFO
+TestExtractAndPrependPipeOut.bsv = mkTestHeaderAndDataStreamConversion \
+                                    mkTestPrependHeaderBeforeEmptyDataStream \
+                                    mkTestExtractHeaderWithPayloadLessThanOneFrag \
+                                    mkTestExtractHeaderLongerThanDataStream \
+                                    mkTestExtractAndPrependHeader
+TestInputPktHandle.bsv           = mkTestCalculateRandomPktLen \
+                                    mkTestCalculatePktLenEqPMTU \
+                                    mkTestCalculateZeroPktLen \
+                                    mkTestReceiveCNP
+TestMetaData.bsv                 = mkTestMetaDataMRs \
+                                    mkTestMetaDataPDs \
+                                    mkTestMetaDataQPs \
+                                    mkTestPermCheckMR \
+                                    mkTestMetaDataSrv \
+                                    mkTestBramCache \
+                                    mkTestTLB
+TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
+                                    mkTestPayloadGenSegmentAndPaddingCase
+TestReqGenSQ.bsv                 = mkTestReqGenNormalCase \
+                                    mkTestReqGenZeroLenCase \
+                                    mkTestReqGenDmaReadErrCase
+TestReqHandleRQ.bsv              = mkTestReqHandleNormalReqCase \
+                                    mkTestReqHandleDupReqCase \
+                                    mkTestReqHandleNoAckReqCase \
+                                    mkTestReqHandleTooManyReadAtomicReqCase \
+                                    mkTestReqHandleReqErrCase \
+                                    mkTestReqHandlePermCheckFailCase \
+                                    mkTestReqHandleDmaReadErrCase \
+                                    mkTestReqHandleRnrCase \
+                                    mkTestReqHandleSeqErrCase
+TestRespHandleSQ.bsv             = mkTestRespHandleNormalRespCase \
+                                    mkTestRespHandleDupRespCase \
+                                    mkTestRespHandleGhostRespCase \
+                                    mkTestRespHandleRespErrCase \
+                                    mkTestRespHandleRetryErrCase \
+                                    mkTestRespHandleTimeOutErrCase \
+                                    mkTestRespHandlePermCheckFailCase \
+                                    mkTestRespHandleRnrCase \
+                                    mkTestRespHandleSeqErrCase \
+                                    mkTestRespHandleNestedRetryCase
+TestRetryHandleSQ.bsv            = mkTestRetryHandleSeqErrCase \
+                                    mkTestRetryHandleImplicitRetryCase \
+                                    mkTestRetryHandleRnrCase \
+                                    mkTestRetryHandleTimeOutCase \
+                                    mkTestRetryHandleNestedRetryCase \
+                                    mkTestRetryHandleExcRetryLimitErrCase \
+                                    mkTestRetryHandleExcTimeOutLimitErrCase
+TestSpecialFIFOF.bsv             = mkTestCacheFIFO2 \
+                                    mkTestScanFIFOF \
+                                    mkTestSearchFIFOF \
+                                    mkTestVectorSearch
+TestUtils.bsv                    = mkTestSegmentDataStream \
+                                    mkTestPsnFunc
+TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \
+                                    mkTestWorkCompGenErrFlushCaseRQ \
+                                    mkTestWorkCompGenNormalCaseSQ \
+                                    mkTestWorkCompGenErrFlushCaseSQ
+
+all: $(TESTBENCHS)
+
+%.bsv:
+	$(foreach testcase, $($@), $(shell cd $(TESTDIR) && make simulate TESTFILE=$@ TOPMODULE=$(testcase) > $(LOGDIR)/$@-$(testcase).log 2>&1))
+
+clean:
+	rm -f $(LOGDIR)/*.log
+
+.PHONY: all TESTBENCHS %.bsv clean
+.DEFAULT_GOAL := all
