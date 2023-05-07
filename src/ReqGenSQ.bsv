@@ -794,6 +794,8 @@ typedef struct {
     Bool isNewWorkReq;
     Bool isZeroPmtuResidue;
     Bool isReliableConnection;
+    Bool isUnreliableDatagram;
+    Bool needDmaRead;
 } WorkReqInfo deriving(Bits);
 
 interface ReqGenSQ;
@@ -814,16 +816,17 @@ module mkReqGenSQ#(
 
     // Pipeline FIFO
     FIFOF#(PayloadGenReq) payloadGenReqOutQ <- mkFIFOF;
-    FIFOF#(Tuple6#(
-        PendingWorkReq, PktNum, PmtuResidue, Bool, Bool, Bool
+    FIFOF#(Tuple7#(
+        PendingWorkReq, PktNum, PmtuResidue, Bool, Bool, Bool, Bool
     )) workReqPayloadGenQ <- mkFIFOF;
     FIFOF#(Tuple3#(PendingWorkReq, PktNum, WorkReqInfo)) workReqPktNumQ <- mkFIFOF;
     FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))            workReqPsnQ <- mkFIFOF;
     FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))            workReqOutQ <- mkFIFOF;
-    FIFOF#(PendingWorkReq)                                    reqCountQ <- mkFIFOF;
-    FIFOF#(ReqPktHeaderInfo)                          reqHeaderPrepareQ <- mkFIFOF;
-    FIFOF#(Tuple3#(
-        PendingWorkReq, Maybe#(Tuple3#(HeaderData, HeaderByteNum, Bool)), PSN
+    FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))          workReqCheckQ <- mkFIFOF;
+    FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))              reqCountQ <- mkFIFOF;
+    FIFOF#(Tuple2#(ReqPktHeaderInfo, WorkReqInfo))    reqHeaderPrepareQ <- mkFIFOF;
+    FIFOF#(Tuple4#(
+        PendingWorkReq, WorkReqInfo, Maybe#(Tuple3#(HeaderData, HeaderByteNum, Bool)), PSN
     )) pendingReqHeaderQ <- mkFIFOF;
     FIFOF#(Tuple4#(
         PendingWorkReq, Maybe#(RdmaHeader), Maybe#(PayloadGenResp), PSN
@@ -884,6 +887,7 @@ module mkReqGenSQ#(
                         issuePayloadGenReq, \
                         calcPktNum4NewWorkReq, \
                         calcPktSeqNum4NewWorkReq, \
+                        checkPendingWorkReq, \
                         outputNewPendingWorkReq, \
                         countReqPkt, \
                         prepareReqHeaderGen, \
@@ -903,6 +907,7 @@ module mkReqGenSQ#(
         );
 
         let isReliableConnection = qpType == IBV_QPT_RC || qpType == IBV_QPT_XRC_SEND;
+        let isUnreliableDatagram = qpType == IBV_QPT_UD;
         if (cntrl.isSQD) begin
             immAssert(
                 isReliableConnection,
@@ -978,9 +983,9 @@ module mkReqGenSQ#(
         if (shouldDeqPendingWR) begin
             pendingWorkReqPipeIn.deq;
 
-            workReqPayloadGenQ.enq(tuple6(
-                curPendingWR, totalReqPktNum, pmtuResidue,
-                needDmaRead, isNewWorkReq, isReliableConnection
+            workReqPayloadGenQ.enq(tuple7(
+                curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead,
+                isNewWorkReq, isReliableConnection, isUnreliableDatagram
             ));
             // $display("time=%0t: received PendingWorkReq=", $time, fshow(curPendingWR));
         end
@@ -988,8 +993,8 @@ module mkReqGenSQ#(
 
     rule issuePayloadGenReq if (cntrl.isRTS && isNormalStateReg);
         let {
-            curPendingWR, totalReqPktNum, pmtuResidue,
-            needDmaRead, isNewWorkReq, isReliableConnection
+            curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead,
+            isNewWorkReq, isReliableConnection, isUnreliableDatagram
         } = workReqPayloadGenQ.first;
         workReqPayloadGenQ.deq;
 
@@ -1013,7 +1018,9 @@ module mkReqGenSQ#(
         let workReqInfo = WorkReqInfo {
             isNewWorkReq        : isNewWorkReq,
             isZeroPmtuResidue   : isZeroPmtuResidue,
-            isReliableConnection: isReliableConnection
+            isReliableConnection: isReliableConnection,
+            isUnreliableDatagram: isUnreliableDatagram,
+            needDmaRead         : needDmaRead
         };
         workReqPktNumQ.enq(tuple3(curPendingWR, totalReqPktNum, workReqInfo));
     endrule
@@ -1040,7 +1047,7 @@ module mkReqGenSQ#(
                 isValid(curPendingWR.endPSN)   &&
                 isValid(curPendingWR.pktNum)   &&
                 isValid(curPendingWR.isOnlyReqPkt),
-                "curPendingWR assertion @ mkWorkReq2Headers",
+                "curPendingWR assertion @ mkReqGenSQ",
                 $format(
                     "curPendingWR should have valid PSN and PktNum, curPendingWR=",
                     fshow(curPendingWR)
@@ -1086,29 +1093,63 @@ module mkReqGenSQ#(
             // );
         end
 
+        workReqCheckQ.enq(tuple2(curPendingWR, workReqInfo));
         workReqOutQ.enq(tuple2(curPendingWR, workReqInfo));
+    endrule
+
+    rule checkPendingWorkReq if (cntrl.isRTS && isNormalStateReg);
+        let { curPendingWR, workReqInfo } = workReqCheckQ.first;
+        workReqCheckQ.deq;
+
+        let isOnlyReqPkt = unwrapMaybe(curPendingWR.isOnlyReqPkt);
+
+        let isNewWorkReq         = workReqInfo.isNewWorkReq;
+        let isUnreliableDatagram = workReqInfo.isUnreliableDatagram;
+        let isValidWorkReq       = !isUnreliableDatagram || isOnlyReqPkt;
+
+        if (!isNewWorkReq) begin
+            immAssert(
+                isValidWorkReq,
+                "existing UD WR assertion @ mkReqGenSQ",
+                $format(
+                    "illegal existing UD WR with length=%0d", curPendingWR.wr.len,
+                    " larger than PMTU when QpType=", fshow(cntrl.getQpType),
+                    " and isOnlyReqPkt=", fshow(isOnlyReqPkt)
+                )
+            );
+        end
+
+        if (isValidWorkReq) begin // Discard UD with payload more than one packets
+            reqCountQ.enq(tuple2(curPendingWR, workReqInfo));
+        end
     endrule
 
     rule outputNewPendingWorkReq if (cntrl.isRTS && isNormalStateReg);
         let { curPendingWR, workReqInfo } = workReqOutQ.first;
         workReqOutQ.deq;
 
-        let qpType         = cntrl.getQpType;
-        let isOnlyReqPkt   = unwrapMaybe(curPendingWR.isOnlyReqPkt);
-        let isValidWorkReq = !(qpType == IBV_QPT_UD) || isOnlyReqPkt;
+        let isNewWorkReq         = workReqInfo.isNewWorkReq;
+        let isReliableConnection = workReqInfo.isReliableConnection;
+
+        if (isNewWorkReq && isReliableConnection) begin
+            // Only for RC and XRC output new WR as pending WR, not retry WR
+            pendingWorkReqOutQ.enq(curPendingWR);
+        end
+    endrule
+/*
+    rule outputNewPendingWorkReq if (cntrl.isRTS && isNormalStateReg);
+        let { curPendingWR, workReqInfo } = workReqOutQ.first;
+        workReqOutQ.deq;
+
+        // let qpType       = cntrl.getQpType;
+        let isOnlyReqPkt = unwrapMaybe(curPendingWR.isOnlyReqPkt);
 
         let isNewWorkReq         = workReqInfo.isNewWorkReq;
         let isReliableConnection = workReqInfo.isReliableConnection;
+        let isUnreliableDatagram = workReqInfo.isUnreliableDatagram;
+        let isValidWorkReq       = !isUnreliableDatagram || isOnlyReqPkt;
+
         if (isNewWorkReq) begin
-            // let hasOnlyReqPkt = isOnlyPkt || isReadWorkReq(curPendingWR.wr.opcode);
-
-            // curPendingWR.startPSN = tagged Valid startPktSeqNum;
-            // curPendingWR.endPSN = tagged Valid endPktSeqNum;
-            // curPendingWR.pktNum = tagged Valid totalPktNum;
-            // curPendingWR.isOnlyReqPkt = tagged Valid hasOnlyReqPkt;
-
-            // isValidWorkReq = qpType == IBV_QPT_UD ? isOnlyReqPkt : True;
-
             // Only for RC and XRC output new WR as pending WR, not retry WR
             if (isReliableConnection) begin
                 pendingWorkReqOutQ.enq(curPendingWR);
@@ -1127,12 +1168,12 @@ module mkReqGenSQ#(
         end
 
         if (isValidWorkReq) begin // Discard UD with payload more than one packets
-            reqCountQ.enq(curPendingWR);
+            reqCountQ.enq(tuple2(curPendingWR, workReqInfo));
         end
     endrule
-
+*/
     rule countReqPkt if (cntrl.isRTS && isNormalStateReg);
-        let pendingWR = reqCountQ.first;
+        let { pendingWR, workReqInfo } = reqCountQ.first;
 
         let startPSN = unwrapMaybe(pendingWR.startPSN);
         let totalPktNum = unwrapMaybe(pendingWR.pktNum);
@@ -1189,11 +1230,11 @@ module mkReqGenSQ#(
             isFirstReqPkt: isFirstReqPkt,
             isLastReqPkt : isLastReqPkt
         };
-        reqHeaderPrepareQ.enq(reqPktHeaderInfo);
+        reqHeaderPrepareQ.enq(tuple2(reqPktHeaderInfo, workReqInfo));
     endrule
 
     rule prepareReqHeaderGen if (cntrl.isRTS && isNormalStateReg);
-        let reqPktHeaderInfo = reqHeaderPrepareQ.first;
+        let { reqPktHeaderInfo, workReqInfo } = reqHeaderPrepareQ.first;
         reqHeaderPrepareQ.deq;
 
         let pendingWR    = reqPktHeaderInfo.pendingWR;
@@ -1237,7 +1278,7 @@ module mkReqGenSQ#(
                 let endPSN = unwrapMaybe(pendingWR.endPSN);
                 immAssert(
                     curPSN == endPSN,
-                    "endPSN assertion @ mkWorkReq2Headers",
+                    "endPSN assertion @ mkReqGenSQ",
                     $format(
                         "curPSN=%h should == pendingWR.endPSN=%h",
                         curPSN, endPSN,
@@ -1247,7 +1288,7 @@ module mkReqGenSQ#(
             end
         end
 
-        pendingReqHeaderQ.enq(tuple3(pendingWR, maybeReqHeaderGenInfo, curPSN));
+        pendingReqHeaderQ.enq(tuple4(pendingWR, workReqInfo, maybeReqHeaderGenInfo, curPSN));
         // $display(
         //     "time=%0t: output PendingWorkReq=", $time, fshow(pendingWR),
         //     ", maybeReqHeaderGenInfo=", fshow(maybeReqHeaderGenInfo),
@@ -1258,7 +1299,9 @@ module mkReqGenSQ#(
     endrule
 
     rule genReqHeader if (cntrl.isRTS && isNormalStateReg);
-        let { pendingWR, maybeReqHeaderGenInfo, triggerPSN } = pendingReqHeaderQ.first;
+        let {
+            pendingWR, workReqInfo, maybeReqHeaderGenInfo, triggerPSN
+        } = pendingReqHeaderQ.first;
         pendingReqHeaderQ.deq;
 
         let maybeReqHeader = tagged Invalid;
@@ -1268,7 +1311,8 @@ module mkReqGenSQ#(
             let reqHeader = genRdmaHeader(headerData, headerLen, hasPayload);
             maybeReqHeader = tagged Valid reqHeader;
 
-            if (workReqNeedDmaReadSQ(pendingWR.wr)) begin
+            // if (workReqNeedDmaReadSQ(pendingWR.wr)) begin
+            if (workReqInfo.needDmaRead) begin
                 let payloadGenResp = payloadGenerator.respPipeOut.first;
                 payloadGenerator.respPipeOut.deq;
                 maybePayloadGenResp = tagged Valid payloadGenResp;
@@ -1317,8 +1361,8 @@ module mkReqGenSQ#(
 
     rule errFlushWR if (cntrl.isERR || (cntrl.isRTS && !isNormalStateReg));
         let {
-            curPendingWR, totalReqPktNum, pmtuResidue,
-            needDmaRead, isNewWorkReq, isReliableConnection
+            curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead, isNewWorkReq,
+            isReliableConnection, isUnreliableDatagram
         } = workReqPayloadGenQ.first;
         workReqPayloadGenQ.deq;
 
