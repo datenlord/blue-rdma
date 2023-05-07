@@ -75,6 +75,7 @@ module mkPayloadGenerator#(
 
     Reg#(PmtuFragNum) pmtuFragCntReg <- mkRegU;
     Reg#(Bool)     shouldSetFirstReg <- mkReg(False);
+    Reg#(Bool)      isFragCntZeroReg <- mkReg(False);
     Reg#(Bool)      isNormalStateReg <- mkReg(True);
 
     rule clearAndReset if (cntrl.isReset);
@@ -90,6 +91,7 @@ module mkPayloadGenerator#(
         // end
 
         shouldSetFirstReg <= False;
+        isFragCntZeroReg  <= False;
         isNormalStateReg  <= True;
 
         // $display("time=%0t: clearAndReset @ mkPayloadGenerator", $time);
@@ -185,18 +187,23 @@ module mkPayloadGenerator#(
         // );
 
         if (shouldSegment) begin
-            Bool isFragCntZero = isZero(pmtuFragCntReg);
+            // Bool isFragCntZero = isZero(pmtuFragCntReg);
             if (shouldSetFirstReg || curData.isFirst) begin
                 curData.isFirst = True;
                 shouldSetFirstReg <= False;
-                pmtuFragCntReg <= pmtuFragNum - 2;
+
+                let nextPmtuFragCnt = pmtuFragNum - 2;
+                pmtuFragCntReg   <= nextPmtuFragCnt;
+                isFragCntZeroReg <= isZero(nextPmtuFragCnt);
             end
-            else if (isFragCntZero) begin
+            else if (isFragCntZeroReg) begin
                 curData.isLast = True;
                 shouldSetFirstReg <= True;
             end
             else if (!curData.isLast) begin
-                pmtuFragCntReg <= pmtuFragCntReg - 1;
+                let nextPmtuFragCnt = pmtuFragCntReg - 1;
+                pmtuFragCntReg   <= nextPmtuFragCnt;
+                isFragCntZeroReg <= isZero(nextPmtuFragCnt);
             end
         end
 

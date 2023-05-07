@@ -814,8 +814,8 @@ module mkReqGenSQ#(
 
     // Pipeline FIFO
     FIFOF#(PayloadGenReq) payloadGenReqOutQ <- mkFIFOF;
-    FIFOF#(Tuple5#(
-        PendingWorkReq, PktNum, PmtuResidue, Bool, Bool
+    FIFOF#(Tuple6#(
+        PendingWorkReq, PktNum, PmtuResidue, Bool, Bool, Bool
     )) workReqPayloadGenQ <- mkFIFOF;
     FIFOF#(Tuple3#(PendingWorkReq, PktNum, WorkReqInfo)) workReqPktNumQ <- mkFIFOF;
     FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))            workReqPsnQ <- mkFIFOF;
@@ -973,12 +973,14 @@ module mkReqGenSQ#(
         // TODO: handle pending read/atomic request number limit
 
         let isNewWorkReq = !isValid(curPendingWR.isOnlyReqPkt);
+        let needDmaRead = workReqNeedDmaReadSQ(curPendingWR.wr);
         let { totalReqPktNum, pmtuResidue } = truncateLenByPMTU(curPendingWR.wr.len, cntrl.getPMTU);
         if (shouldDeqPendingWR) begin
             pendingWorkReqPipeIn.deq;
 
-            workReqPayloadGenQ.enq(tuple5(
-                curPendingWR, totalReqPktNum, pmtuResidue, isNewWorkReq, isReliableConnection
+            workReqPayloadGenQ.enq(tuple6(
+                curPendingWR, totalReqPktNum, pmtuResidue,
+                needDmaRead, isNewWorkReq, isReliableConnection
             ));
             // $display("time=%0t: received PendingWorkReq=", $time, fshow(curPendingWR));
         end
@@ -986,11 +988,12 @@ module mkReqGenSQ#(
 
     rule issuePayloadGenReq if (cntrl.isRTS && isNormalStateReg);
         let {
-            curPendingWR, totalReqPktNum, pmtuResidue, isNewWorkReq, isReliableConnection
+            curPendingWR, totalReqPktNum, pmtuResidue,
+            needDmaRead, isNewWorkReq, isReliableConnection
         } = workReqPayloadGenQ.first;
         workReqPayloadGenQ.deq;
 
-        if (workReqNeedDmaReadSQ(curPendingWR.wr)) begin
+        if (needDmaRead) begin
             let payloadGenReq = PayloadGenReq {
                 addPadding   : True,
                 segment      : True,
@@ -1314,7 +1317,8 @@ module mkReqGenSQ#(
 
     rule errFlushWR if (cntrl.isERR || (cntrl.isRTS && !isNormalStateReg));
         let {
-            curPendingWR, totalReqPktNum, pmtuResidue, isNewWorkReq, isReliableConnection
+            curPendingWR, totalReqPktNum, pmtuResidue,
+            needDmaRead, isNewWorkReq, isReliableConnection
         } = workReqPayloadGenQ.first;
         workReqPayloadGenQ.deq;
 
