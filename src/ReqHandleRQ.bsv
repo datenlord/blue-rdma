@@ -377,6 +377,7 @@ typedef struct {
     Bool   isOnlyRespPkt;
     Bool   isExpected;
     Bool   isDuplicated;
+    Bool   isAccCheckPass;
 } RdmaReqPktInfo deriving(Bits);
 
 typedef struct {
@@ -684,7 +685,8 @@ module mkReqHandleRQ#(
             isLastOrOnlyPkt : isLastOrOnlyPkt,
             isOnlyRespPkt   : dontCareValue, // isReadReq ? isOnlyRespPkt : True,
             isExpected      : isExpected,
-            isDuplicated    : isDuplicated
+            isDuplicated    : isDuplicated,
+            isAccCheckPass : dontCareValue
         };
 
         preStageIsZeroPmtuResidueReg <= isZero(pmtuResidue);
@@ -709,8 +711,11 @@ module mkReqHandleRQ#(
         let curRdmaHeader  = curPktMetaData.pktHeader;
         let reqPktInfo     = preStageReqPktInfoReg;
 
-        let bth = reqPktInfo.bth;
-        // let reth = extractRETH(curRdmaHeader.headerData, bth.trans);
+        let bth         = reqPktInfo.bth;
+        let isSendReq   = reqPktInfo.isSendReq;
+        let isWriteReq  = reqPktInfo.isWriteReq;
+        let isReadReq   = reqPktInfo.isReadReq;
+        let isAtomicReq = reqPktInfo.isAtomicReq;
 
         let reqStatus = pktStatus2ReqStatusRQ(curPktMetaData.pktStatus, bth.trans);
         immAssert(
@@ -726,12 +731,30 @@ module mkReqHandleRQ#(
         reqPktInfo.isOnlyRespPkt = reqPktInfo.isReadReq ? isOnlyRespPkt : True;
         reqPktInfo.respPktNum = reqPktInfo.isReadReq ? totalRespPktNum : 1;
 
-        // isRetryFlushDoneReg <= reqPktInfo.isExpected && reqPktInfo.epoch == epochReg;
-        // isRetryFlushDoneReg <= reqPktInfo.isExpected &&
-            // reqPktInfo.epoch == epochReg && (
-            //     retryFlushStateReg == RQ_RNR_WAIT_DONE ||
-            //     retryFlushStateReg == RQ_SEQ_RETRY_FLUSH
-            // );
+        let isAccCheckPass = False;
+        case ({ pack(isSendReq || isWriteReq), pack(isReadReq), pack(isAtomicReq) })
+            3'b100: begin
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_WRITE);
+            end
+            3'b010: begin
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_READ);
+            end
+            3'b001: begin
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_ATOMIC);
+            end
+            default: begin
+                immFail(
+                    "unreachible case @ mkReqHandleRQ",
+                    $format(
+                        "isSendReq=", fshow(isSendReq),
+                        "isWriteReq=", fshow(isWriteReq),
+                        "isReadReq=", fshow(isReadReq),
+                        "isAtomicReq=", fshow(isAtomicReq)
+                    )
+                );
+            end
+        endcase
+        reqPktInfo.isAccCheckPass = isAccCheckPass;
 
         preStageReqStatusReg  <= reqStatus;
         preStageReqPktInfoReg <= reqPktInfo;
@@ -745,8 +768,6 @@ module mkReqHandleRQ#(
         // );
     endrule
 
-                        // calcNormalSendWriteReqDmaLen, \
-                        // errFlushNewReqAndRecvReq, \
     // TODO: add conflict_free attribute to preBuildReqInfo, preCalcReqInfo, canonicalize
     (* conflict_free = "checkEPSN, \
                         checkSupportedReqOpCode, \
@@ -915,6 +936,87 @@ module mkReqHandleRQ#(
         let { pktMetaData, reqStatus, reqPktInfo } = qpAccPermCheckQ.first;
         qpAccPermCheckQ.deq;
 
+        let bth            = reqPktInfo.bth;
+        let epoch          = reqPktInfo.epoch;
+        let isReadReq      = reqPktInfo.isReadReq;
+        let isAtomicReq    = reqPktInfo.isAtomicReq;
+        let isAccCheckPass = reqPktInfo.isAccCheckPass;
+
+        if (epoch == epochReg) begin
+            if (reqStatus == RDMA_REQ_ST_NORMAL) begin
+                let hasTooManyReadAtomicReqs = False;
+                if (isReadReq || isAtomicReq) begin
+                    pendingDestReadAtomicReqCnt.incr(1);
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     " increase pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
+                    //     ", bth.opcode=", fshow(bth.opcode),
+                    //     ", bth.psn=%h", bth.psn
+                    // );
+
+                    if (
+                        pendingDestReadAtomicReqCnt >= cntrl.getPendingDestReadAtomicReqNum
+                    ) begin
+                        hasTooManyReadAtomicReqs = True;
+                        $display(
+                            "time=%0t:", $time,
+                            " pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
+                            " must < cntrl.getPendingDestReadAtomicReqNum=%0d",
+                            cntrl.getPendingDestReadAtomicReqNum,
+                            " when bth.psn=%h", bth.psn,
+                            ", bth.opcode=", fshow(bth.opcode),
+                            ", reqStatus=", fshow(reqStatus)
+                        );
+                    end
+                end
+
+                if (!isAccCheckPass || hasTooManyReadAtomicReqs) begin
+                    reqStatus = getInvReqStatusByTransType(bth.trans);
+                    immAssert(
+                        reqStatus != RDMA_REQ_ST_UNKNOWN,
+                        "reqStatus assertion @ mkReqHandleRQ",
+                        $format(
+                            "reqStatus=", fshow(reqStatus), " should not be unknown"
+                        )
+                    );
+
+                    $display(
+                        "time=%0t: found invalid request in 3rd stage", $time,
+                        ", bth.opcode=", fshow(bth.opcode),
+                        ", bth.psn=%h", bth.psn,
+                        ", isAccCheckPass=", fshow(isAccCheckPass),
+                        ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs)
+                    );
+                end
+            end
+        end
+        else begin
+            reqStatus = RDMA_REQ_ST_DISCARD;
+
+            $display(
+                "time=%0t: epoch mismatch in 3rd stage, epoch=", $time, fshow(epoch),
+                ", epochReg=", fshow(epochReg)
+            );
+        end
+
+        reqOpCodeSeqCheckQ.enq(tuple3(pktMetaData, reqStatus, reqPktInfo));
+        // $display(
+        //     "time=%0t: 3rd stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h, epoch=%h", bth.psn, epoch,
+        //     ", isAccCheckPass=", fshow(isAccCheckPass),
+        //     // ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs),
+        //     ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
+/*
+    rule checkQpAccPermAndReadAtomicReqNum if (
+        cntrl.isNonErr                     &&
+        retryFlushStateReg == RQ_NOT_RETRY &&
+        !hasErrOccurredReg
+    );
+        let { pktMetaData, reqStatus, reqPktInfo } = qpAccPermCheckQ.first;
+        qpAccPermCheckQ.deq;
+
         let bth         = reqPktInfo.bth;
         let epoch       = reqPktInfo.epoch;
         let isSendReq   = reqPktInfo.isSendReq;
@@ -922,16 +1024,16 @@ module mkReqHandleRQ#(
         let isReadReq   = reqPktInfo.isReadReq;
         let isAtomicReq = reqPktInfo.isAtomicReq;
 
-        let accessCheckPass = False;
+        let isAccCheckPass = False;
         case ({ pack(isSendReq || isWriteReq), pack(isReadReq), pack(isAtomicReq) })
             3'b100: begin
-                accessCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_WRITE);
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_WRITE);
             end
             3'b010: begin
-                accessCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_READ);
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_READ);
             end
             3'b001: begin
-                accessCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_ATOMIC);
+                isAccCheckPass = containAccessTypeFlag(cntrl.getAccessFlags, IBV_ACCESS_REMOTE_ATOMIC);
             end
             default: begin
                 immFail(
@@ -974,7 +1076,7 @@ module mkReqHandleRQ#(
                     end
                 end
 
-                if (!accessCheckPass || hasTooManyReadAtomicReqs) begin
+                if (!isAccCheckPass || hasTooManyReadAtomicReqs) begin
                     reqStatus = getInvReqStatusByTransType(bth.trans);
                     immAssert(
                         reqStatus != RDMA_REQ_ST_UNKNOWN,
@@ -988,7 +1090,7 @@ module mkReqHandleRQ#(
                         "time=%0t: found invalid request in 3rd stage", $time,
                         ", bth.opcode=", fshow(bth.opcode),
                         ", bth.psn=%h", bth.psn,
-                        ", accessCheckPass=", fshow(accessCheckPass),
+                        ", isAccCheckPass=", fshow(isAccCheckPass),
                         ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs)
                     );
                 end
@@ -1007,12 +1109,12 @@ module mkReqHandleRQ#(
         // $display(
         //     "time=%0t: 3rd stage, bth.opcode=", $time, fshow(bth.opcode),
         //     ", bth.psn=%h, epoch=%h", bth.psn, epoch,
-        //     ", accessCheckPass=", fshow(accessCheckPass),
+        //     ", isAccCheckPass=", fshow(isAccCheckPass),
         //     // ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs),
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-
+*/
     rule checkNormalReqOpCodeSeq if (
         cntrl.isNonErr                     &&
         retryFlushStateReg == RQ_NOT_RETRY &&
@@ -3284,7 +3386,8 @@ module mkReqHandleRQ#(
             isLastOrOnlyPkt : True,
             isOnlyRespPkt   : True,
             isDuplicated    : False,
-            isExpected      : False
+            isExpected      : False,
+            isAccCheckPass  : False
         };
 
         reqPermInfoBuildQ.enq(tuple4(
@@ -3343,7 +3446,8 @@ module mkReqHandleRQ#(
             isLastOrOnlyPkt : isLastOrOnlyPkt,
             isOnlyRespPkt   : True,
             isDuplicated    : False,
-            isExpected      : False
+            isExpected      : False,
+            isAccCheckPass  : False
         };
 
         reqPermInfoBuildQ.enq(tuple4(

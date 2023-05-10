@@ -148,16 +148,6 @@ function Bit#(nSz) arbitrateByDoubleBits(
     return grantOneHot;
 endfunction
 
-function Bit#(TWO) arbitrateBinaryBits(
-    Bit#(TWO) priorityBits, Bit#(TWO) requestBits
-);
-    let curGrant = priorityBits & requestBits;
-    if (isZero(curGrant)) begin
-        curGrant = requestBits;
-    end
-    return curGrant;
-endfunction
-
 module mkBinaryPipeOutArbiter#(
     PipeOut#(anytype) pipeIn1,
     PipeOut#(anytype) pipeIn2,
@@ -167,10 +157,48 @@ module mkBinaryPipeOutArbiter#(
     FIFOF#(anytype) pipeOutQ <- mkFIFOF;
     Reg#(Bool) needArbitrationReg <- mkReg(True);
     // Initial grant to LSB
+    Reg#(Bool) priorityReg <- mkReg(False);
+    Reg#(Bool)    grantReg <- mkReg(False);
+
+    (* fire_when_enabled *)
+    rule binaryArbitrate;
+        Bit#(TLog#(TWO)) curGrantIdx = pack(grantReg);
+        let shouldGrantPipeIn2 = (priorityReg && pipeIn2.notEmpty) || (!pipeIn2.notEmpty && pipeIn2.notEmpty);
+
+        if (needArbitrationReg) begin
+            curGrantIdx = pack(shouldGrantPipeIn2);
+            grantReg    <= shouldGrantPipeIn2;
+            priorityReg <= !shouldGrantPipeIn2;
+        end
+
+        let inputPayload = inputPipeOutVec[curGrantIdx].first;
+        inputPipeOutVec[curGrantIdx].deq;
+        pipeOutQ.enq(inputPayload);
+
+        needArbitrationReg <= isPipePayloadFinished(inputPayload);
+
+        // $display(
+        //     "time=%0t:", $time,
+        //     " needArbitrationReg=", fshow(needArbitrationReg),
+        //     ", requestBits=%h, curGrantOneHotReg=%h, newGrantOneHot=%h, curGrantIdx=%h, priorityOneHotReg=%h",
+        //     requestBits, curGrantOneHotReg, newGrantOneHot, curGrantIdx, priorityOneHotReg
+        // );
+    endrule
+/*
     Reg#(Bit#(TWO)) priorityOneHotReg <- mkReg(1);
     Reg#(Bit#(TWO)) curGrantOneHotReg <- mkReg(1);
 
     function Bool portHasReqFunc(PipeOut#(anytype) pipeIn) = pipeIn.notEmpty;
+
+    function Bit#(TWO) arbitrateBinaryBits(
+        Bit#(TWO) priorityBits, Bit#(TWO) requestBits
+    );
+        let curGrant = priorityBits & requestBits;
+        if (isZero(curGrant)) begin
+            curGrant = requestBits;
+        end
+        return curGrant;
+    endfunction
 
     // (* no_implicit_conditions, fire_when_enabled *)
     (* fire_when_enabled *)
@@ -212,7 +240,7 @@ module mkBinaryPipeOutArbiter#(
         //     requestBits, curGrantOneHotReg, newGrantOneHot, curGrantIdx, priorityOneHotReg
         // );
     endrule
-
+*/
     return convertFifo2PipeOut(pipeOutQ);
 endmodule
 

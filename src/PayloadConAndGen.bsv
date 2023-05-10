@@ -17,10 +17,6 @@ import Utils :: *;
 //     interface Get#(resp_type) response;
 // endinterface: Server
 
-// function DataStream getDataStreamFromPayloadGenRespPipeOut(
-//     PayloadGenResp resp
-// ) = resp.dmaReadResp.dataStream;
-
 // TODO: add clearAndReset rule
 module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
     PipeOut#(anytype)
@@ -395,6 +391,8 @@ module mkPayloadConsumer#(
 
         let remainingFragNum       = consumeReq.fragNum - 2;
         let isRemainingFragNumZero = isZero(remainingFragNum);
+        remainingFragNumReg       <= remainingFragNum;
+        isRemainingFragNumZeroReg <= isRemainingFragNumZero;
 
         case (consumeReq.consumeInfo) matches
             tagged DiscardPayloadInfo .discardInfo: begin
@@ -407,8 +405,8 @@ module mkPayloadConsumer#(
                     // pendingConReqQ.enq(consumeReq);
                 end
                 else begin
-                    remainingFragNumReg       <= remainingFragNum;
-                    isRemainingFragNumZeroReg <= isRemainingFragNumZero;
+                    // remainingFragNumReg       <= remainingFragNum;
+                    // isRemainingFragNumZeroReg <= isRemainingFragNumZero;
                     busyReg <= True;
                 end
             end
@@ -441,8 +439,8 @@ module mkPayloadConsumer#(
                         )
                     );
 
-                    remainingFragNumReg       <= remainingFragNum;
-                    isRemainingFragNumZeroReg <= isRemainingFragNumZero;
+                    // remainingFragNumReg       <= remainingFragNum;
+                    // isRemainingFragNumZeroReg <= isRemainingFragNumZero;
                     busyReg <= True;
                     // $display(
                     //     "time=%0t: multi-packet response remainingFragNumReg=%0d, change to busy",
