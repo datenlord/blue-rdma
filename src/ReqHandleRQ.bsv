@@ -448,7 +448,7 @@ module mkReqHandleRQ#(
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RETH, Bool)) dupReadReqPermCheckQ <- mkFIFOF;
     FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, DupReadReqStartState)) reqAddrCalcQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, DupReadReqStartState, ADDR)) reqRemainingLenCalcQ <- mkFIFOF;
-    FIFOF#(Tuple8#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, DupReadReqStartState, ADDR, Length, Bool)) reqTotalLenCalcQ <- mkFIFOF;
+    FIFOF#(Tuple8#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, DupReadReqStartState, ADDR, Length, Length)) reqTotalLenCalcQ <- mkFIFOF;
     // FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, DupReadReqStartState, ADDR)) reqLenCalcQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, ReqLenCheckResult, DupReadReqStartState)) reqLenCheckQ <- mkFIFOF;
     // FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, ADDR, DupReadReqStartState)) issueDmaReqQ <- mkFIFOF;
@@ -1765,6 +1765,158 @@ module mkReqHandleRQ#(
         let isLastPkt  = reqPktInfo.isLastPkt;
 
         let remainingDmaWriteLen = cntrl.contextRQ.getRemainingDmaWriteLen;
+        let sendWriteReqPktNum   = cntrl.contextRQ.getSendWriteReqPktNum;
+        let pktPayloadLen        = pktMetaData.pktPayloadLen;
+        let oneAsPSN             = 1;
+
+        if (isSendReq || isWriteReq) begin
+            case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
+                4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
+                    // Exact remaining length is not necessory, zero or non-zero is enough
+                    remainingDmaWriteLen = lenSubtractPktLen(permCheckInfo.totalLen, pktPayloadLen, cntrl.getPMTU);
+                    sendWriteReqPktNum   = cntrl.contextRQ.getSendWriteReqPktNum + 1;
+                end
+                4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
+                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(permCheckInfo.totalLen, oneAsPSN, cntrl.getPMTU);
+                    sendWriteReqPktNum   = cntrl.contextRQ.getSendWriteReqPktNum + 1;
+                end
+                4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
+                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(cntrl.contextRQ.getRemainingDmaWriteLen, oneAsPSN, cntrl.getPMTU);
+                    sendWriteReqPktNum   = 1;
+                end
+                4'b0001: begin // isLastRdmaOpCode(bth.opcode)
+                    // Exact remaining length is not necessory, zero or non-zero is enough
+                    remainingDmaWriteLen = lenSubtractPktLen(cntrl.contextRQ.getRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
+                    sendWriteReqPktNum   = 1;
+                end
+                default: begin
+                    immFail(
+                        "unreachible case @ mkReqHandleRQ",
+                        $format(
+                            "isOnlyPkt=", fshow(isOnlyPkt),
+                            "isFirstPkt=", fshow(isFirstPkt),
+                            "isMidPkt=", fshow(isMidPkt),
+                            "isLastPkt=", fshow(isLastPkt)
+                        )
+                    );
+                end
+            endcase
+
+            if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrOccurredReg) begin
+                cntrl.contextRQ.setRemainingDmaWriteLen(remainingDmaWriteLen);
+                cntrl.contextRQ.setSendWriteReqPktNum(sendWriteReqPktNum);
+                // $display(
+                //     "time=%0t: remainingDmaWriteLen=%h, sendWriteReqPktNum=%0d",
+                //     $time, remainingDmaWriteLen, sendWriteReqPktNum
+                // );
+            end
+        end
+
+        reqTotalLenCalcQ.enq(tuple8(
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, dupReadReqStartState,
+            curDmaWriteAddr, remainingDmaWriteLen, cntrl.contextRQ.getRemainingDmaWriteLen
+        ));
+        // $display(
+        //     "time=%0t: 14th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
+
+    rule calcNormalSendWriteReqDmaTotalLen if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, dupReadReqStartState,
+            curDmaWriteAddr, remainingDmaWriteLen, preRemainingDmaWriteLen
+        } = reqTotalLenCalcQ.first;
+        reqTotalLenCalcQ.deq;
+
+        let bth        = reqPktInfo.bth;
+        let rdmaHeader = pktMetaData.pktHeader;
+        let isSendReq  = reqPktInfo.isSendReq;
+        let isWriteReq = reqPktInfo.isWriteReq;
+        let isOnlyPkt  = reqPktInfo.isOnlyPkt;
+        let isFirstPkt = reqPktInfo.isFirstPkt;
+        let isMidPkt   = reqPktInfo.isMidPkt;
+        let isLastPkt  = reqPktInfo.isLastPkt;
+
+        Length totalDmaWriteLen  = cntrl.contextRQ.getTotalDmaWriteLen;
+        let pktPayloadLen        = pktMetaData.pktPayloadLen;
+        let isLastPayloadLenZero = False;
+        let enoughDmaSpace       = False;
+        let oneAsPSN             = 1;
+
+        if (isSendReq || isWriteReq) begin
+            case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
+                4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
+                    totalDmaWriteLen     = zeroExtend(pktPayloadLen);
+                    enoughDmaSpace       = lenGtEqPktLen(permCheckInfo.totalLen, pktPayloadLen, cntrl.getPMTU);
+                end
+                4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
+                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPMTU(permCheckInfo.totalLen, cntrl.getPMTU);
+                end
+                4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
+                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(cntrl.contextRQ.getTotalDmaWriteLen, oneAsPSN, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.getPMTU);
+                end
+                4'b0001: begin // isLastRdmaOpCode(bth.opcode)
+                    totalDmaWriteLen     = lenAddPktLen(cntrl.contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
+                    isLastPayloadLenZero = reqPktInfo.isZeroPayloadLen;
+                end
+                default: begin
+                    immFail(
+                        "unreachible case @ mkReqHandleRQ",
+                        $format(
+                            "isOnlyPkt=", fshow(isOnlyPkt),
+                            "isFirstPkt=", fshow(isFirstPkt),
+                            "isMidPkt=", fshow(isMidPkt),
+                            "isLastPkt=", fshow(isLastPkt)
+                        )
+                    );
+                end
+            endcase
+
+            if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrOccurredReg) begin
+                cntrl.contextRQ.setTotalDmaWriteLen(totalDmaWriteLen);
+                // $display(
+                //     "time=%0t: totalDmaWriteLen=%h", $time, totalDmaWriteLen
+                // );
+            end
+        end
+
+        let reqLenCheckResult = ReqLenCheckResult {
+            enoughDmaSpace      : enoughDmaSpace,
+            isLastPayloadLenZero: isLastPayloadLenZero,
+            curDmaWriteAddr     : curDmaWriteAddr,
+            remainingDmaWriteLen: remainingDmaWriteLen,
+            totalDmaWriteLen    : totalDmaWriteLen
+        };
+        reqLenCheckQ.enq(tuple6(
+            pktMetaData, reqStatus, permCheckInfo,
+            reqPktInfo, reqLenCheckResult, dupReadReqStartState
+        ));
+        // $display(
+        //     "time=%0t: 15th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
+/*
+    rule calcNormalSendWriteReqDmaRemainingLen if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, dupReadReqStartState, curDmaWriteAddr
+        } = reqRemainingLenCalcQ.first;
+        reqRemainingLenCalcQ.deq;
+
+        let bth        = reqPktInfo.bth;
+        let rdmaHeader = pktMetaData.pktHeader;
+        let isSendReq  = reqPktInfo.isSendReq;
+        let isWriteReq = reqPktInfo.isWriteReq;
+        let isOnlyPkt  = reqPktInfo.isOnlyPkt;
+        let isFirstPkt = reqPktInfo.isFirstPkt;
+        let isMidPkt   = reqPktInfo.isMidPkt;
+        let isLastPkt  = reqPktInfo.isLastPkt;
+
+        let remainingDmaWriteLen = cntrl.contextRQ.getRemainingDmaWriteLen;
         let pktPayloadLen        = pktMetaData.pktPayloadLen;
         let enoughDmaSpace       = False;
         let oneAsPSN             = 1;
@@ -1901,6 +2053,7 @@ module mkReqHandleRQ#(
         //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
         // );
     endrule
+*/
 /*
     rule calcNormalSendWriteReqDmaAddr if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
         let {
