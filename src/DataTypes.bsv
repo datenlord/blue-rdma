@@ -194,6 +194,7 @@ typedef enum {
 typedef struct {
     PktLen pktPayloadLen;
     PmtuFragNum pktFragNum;
+    Bool isZeroPayloadLen;
     RdmaHeader pktHeader;
     HandlerPD pdHandler;
     Bool pktValid;

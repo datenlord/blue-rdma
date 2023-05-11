@@ -612,87 +612,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         // );
         // $display("time=%0t: 7th stage calcPktLen", $time);
     endrule
-/*
-    rule checkPktLen;
-        let { payloadFrag, qpIndex, isRespPkt } = payloadPktLenCheckQ.first;
-        payloadPktLenCheckQ.deq;
 
-        if (payloadFrag.isLast) begin
-            let pktLenCheckInfo = rdmaHeaderPktLenCheckQ.first;
-            rdmaHeaderPktLenCheckQ.deq;
-
-            let rdmaHeader      = pktLenCheckInfo.rdmaHeader;
-            let pdHandler       = pktLenCheckInfo.pdHandler;
-            let pktFragNum      = pktLenCheckInfo.pktFragNum;
-            let pktLen          = pktLenCheckInfo.pktLen;
-            let pmtu            = pktLenCheckInfo.pmtu;
-            let pktValid        = pktLenCheckInfo.pktValid;
-            let isFirstOrMidPkt = pktLenCheckInfo.isFirstOrMidPkt;
-            let isLastOrOnlyPkt = pktLenCheckInfo.isLastOrOnlyPkt;
-
-            let isZeroPayloadLen = isZero(pktLen);
-            if (!isZeroPayloadLen) begin
-                // if (isRespPkt) begin
-                //     respPayloadOutVec[qpIndex].enq(payloadFrag);
-                // end
-                // else begin
-                //     reqPayloadOutVec[qpIndex].enq(payloadFrag);
-                // end
-                payloadOutputQ.enq(tuple3(payloadFrag, qpIndex, isRespPkt));
-                // $display("time=%0t: payloadFrag=", $time, fshow(payloadFrag));
-            end
-            else begin
-                // Discard zero length payload no matter packet has payload or not
-                $info("time=%0t: discard zero-length payload for RDMA packet", $time);
-            end
-
-            if (pktValid) begin
-                pktValid =
-                    (isFirstOrMidPkt && pktLenEqPMTU(pktLen, pmtu)) ||
-                    (isLastOrOnlyPkt && !pktLenGtPMTU(pktLen, pmtu));
-                // $display(
-                //     "time=%0t: pktLen=%0d", $time, pktLen,
-                //     ", pmtu=", fshow(pmtu), ", pktValid=", fshow(pktValid)
-                // );
-            end
-
-            let pktStatus = PKT_ST_VALID;
-            if (!pktValid) begin
-                // Invalid packet length
-                pktStatus = PKT_ST_LEN_ERR;
-            end
-            let pktMetaData = RdmaPktMetaData {
-                pktPayloadLen: pktLen,
-                pktFragNum   : (isZeroPayloadLen ? 0 : pktFragNum),
-                pktHeader    : rdmaHeader,
-                pdHandler    : pdHandler,
-                pktValid     : pktValid,
-                pktStatus    : pktStatus
-            };
-            // if (isRespPkt) begin
-            //     respPktMetaDataOutVec[qpIndex].enq(pktMetaData);
-            // end
-            // else begin
-            //     reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
-            // end
-            rdmaHeaderOutputQ.enq(tuple3(pktMetaData, qpIndex, isRespPkt));
-            // $display(
-            //     "time=%0t: bth=", $time, fshow(bth), ", pktMetaData=", fshow(pktMetaData)
-            // );
-        end
-        else begin
-            // if (isRespPkt) begin
-            //     respPayloadOutVec[qpIndex].enq(payloadFrag);
-            // end
-            // else begin
-            //     reqPayloadOutVec[qpIndex].enq(payloadFrag);
-            // end
-            payloadOutputQ.enq(tuple3(payloadFrag, qpIndex, isRespPkt));
-            // $display("time=%0t: payloadFrag=", $time, fshow(payloadFrag));
-        end
-        // $display("time=%0t: 8th stage checkPktLen", $time);
-    endrule
-*/
     rule preCheckPktLen;
         let { payloadFrag, qpIndex, isRespPkt } = payloadPktLenPreCheckQ.first;
         payloadPktLenPreCheckQ.deq;
@@ -760,12 +680,13 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 pktStatus = PKT_ST_LEN_ERR;
             end
             let pktMetaData = RdmaPktMetaData {
-                pktPayloadLen: pktLen,
-                pktFragNum   : (isZeroPayloadLen ? 0 : pktFragNum),
-                pktHeader    : rdmaHeader,
-                pdHandler    : pdHandler,
-                pktValid     : pktValid,
-                pktStatus    : pktStatus
+                pktPayloadLen   : pktLen,
+                pktFragNum      : (isZeroPayloadLen ? 0 : pktFragNum),
+                isZeroPayloadLen: isZeroPayloadLen,
+                pktHeader       : rdmaHeader,
+                pdHandler       : pdHandler,
+                pktValid        : pktValid,
+                pktStatus       : pktStatus
             };
 
             rdmaHeaderOutputQ.enq(tuple3(pktMetaData, qpIndex, isRespPkt));

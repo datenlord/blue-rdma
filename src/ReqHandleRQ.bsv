@@ -367,7 +367,7 @@ typedef struct {
     Bool   isWriteImmReq;
     Bool   isReadReq;
     Bool   isAtomicReq;
-    Bool   isZeroPayloadLen;
+    // Bool   isZeroPayloadLen;
     Bool   isOnlyPkt;
     Bool   isFirstPkt;
     Bool   isMidPkt;
@@ -490,59 +490,9 @@ module mkReqHandleRQ#(
 
     // TODO: move the two counters into Controller
     Count#(PendingReqCnt) pendingWorkReqCnt <- mkCount(fromInteger(valueOf(TSub#(MAX_QP_WR, 1))));
-    Reg#(Bool) isPendingWorkReqCntZeroReg <- mkReg(False);
     Count#(PendingReqCnt) pendingDestReadAtomicReqCnt <- mkCountCF(0);
+    Reg#(Bool) isPendingWorkReqCntZeroReg <- mkReg(False);
 
-    // (* no_implicit_conditions, fire_when_enabled *)
-    // rule resetAndClear if (cntrl.isReset);
-    //     payloadConReqOutQ.clear;
-    //     payloadGenReqOutQ.clear;
-    //     atomicOpReqQ.clear;
-    //     workCompGenReqOutQ.clear;
-    //     headerQ.clear;
-
-    //     clearRetryRelatedPipelineQ;
-    //     reqPermQueryQ.clear;
-    //     reqPermCheckQ.clear;
-    //     readCacheInsertQ.clear;
-    //     dupReadReqPermQueryQ.clear;
-    //     dupReadReqPermCheckQ.clear;
-    //     reqAddrCalcQ.clear;
-    //     reqRemainingLenCalcQ.clear;
-    //     reqTotalLenCalcQ.clear;
-    //     reqLenCalcQ.clear;
-    //     reqLenCheckQ.clear;
-    //     issueDmaReqQ.clear;
-    //     issuePayloadConReqQ.clear;
-    //     issuePayloadGenReqQ.clear;
-    //     respGenCheckQ.clear;
-    //     waitAtomicRespQ.clear;
-    //     atomicCacheInsertQ.clear;
-    //     dupAtomicReqPermQueryQ.clear;
-    //     dupAtomicReqPermCheckQ.clear;
-    //     respCountQ.clear;
-    //     respPsnAndMsnQ.clear;
-    //     respCheckQ.clear;
-    //     respHeaderGenQ.clear;
-    //     pendingRespQ.clear;
-    //     workCompReqQ.clear;
-
-    //     retryFlushStateReg       <= RQ_NOT_RETRY;
-    //     preStageStateReg         <= RQ_PRE_BUILD_STAGE;
-    //     hasErrRespGenReg         <= False;
-    //     hasDmaReadRespErrReg     <= False;
-    //     hasErrOccurredReg        <= False;
-    //     isFirstOrOnlyRespPktReg  <= True;
-    //     reqStatusErrNotifyReg[0] <= False;
-    //     readRespErrNotifyReg[0]  <= False;
-
-    //     pendingWorkReqCnt <= fromInteger(valueOf(TSub#(MAX_QP_WR, 1)));
-    //     isPendingWorkReqCntZeroReg <= False;
-    //     pendingDestReadAtomicReqCnt <= 0;
-    //     // $display("time=%0t: reset and clear retry handler", $time);
-    // endrule
-
-    // let atomicOpRespPipeIn <- mkAtomicOp(convertFifo2PipeOut(atomicOpReqQ));
     let atomicSrv <- mkAtomicSrv(cntrl);
     let payloadGenerator <- mkPayloadGenerator(
         cntrl, dmaReadSrv, convertFifo2PipeOut(payloadGenReqOutQ)
@@ -555,6 +505,8 @@ module mkReqHandleRQ#(
         headerDataStreamAndMetaDataPipeOut.headerMetaData,
         payloadGenerator.payloadDataStreamPipeOut
     );
+
+    let inErrorState = (cntrl.isNonErr && hasErrOccurredReg) || cntrl.isERR;
 
     function Action incEpoch();
         action
@@ -585,6 +537,56 @@ module mkReqHandleRQ#(
         return retryFlushDone;
     endfunction
 
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule resetAndClear if (cntrl.isReset);
+        payloadConReqOutQ.clear;
+        payloadGenReqOutQ.clear;
+        // atomicOpReqQ.clear;
+        workCompGenReqOutQ.clear;
+        headerQ.clear;
+
+        clearRetryRelatedPipelineQ;
+        reqPermInfoBuildQ.clear;
+        reqPermQueryQ.clear;
+        reqPermCheckQ.clear;
+        readCacheInsertQ.clear;
+        dupReadReqPermQueryQ.clear;
+        dupReadReqPermCheckQ.clear;
+        reqAddrCalcQ.clear;
+        reqRemainingLenCalcQ.clear;
+        reqTotalLenCalcQ.clear;
+        // reqLenCalcQ.clear;
+        reqLenCheckQ.clear;
+        // issueDmaReqQ.clear;
+        issuePayloadConReqQ.clear;
+        issuePayloadGenReqQ.clear;
+        respGenCheckQ.clear;
+        waitAtomicRespQ.clear;
+        atomicCacheInsertQ.clear;
+        dupAtomicReqPermQueryQ.clear;
+        dupAtomicReqPermCheckQ.clear;
+        respCountQ.clear;
+        respPsnAndMsnQ.clear;
+        respCheckQ.clear;
+        respHeaderGenQ.clear;
+        pendingRespQ.clear;
+        workCompReqQ.clear;
+
+        retryFlushStateReg       <= RQ_NOT_RETRY;
+        preStageStateReg         <= RQ_PRE_BUILD_STAGE;
+        hasErrRespGenReg         <= False;
+        hasDmaReadRespErrReg     <= False;
+        hasErrOccurredReg        <= False;
+        isFirstOrOnlyRespPktReg  <= True;
+        reqStatusErrNotifyReg[0] <= False;
+        readRespErrNotifyReg[0]  <= False;
+
+        pendingWorkReqCnt <= fromInteger(valueOf(TSub#(MAX_QP_WR, 1)));
+        pendingDestReadAtomicReqCnt <= 0;
+        isPendingWorkReqCntZeroReg <= False;
+        // $display("time=%0t: reset and clear retry handler", $time);
+    endrule
+
     // TODO: check preBuildReqInfo and preCalcReqInfo having negative impact on throughput,
     // since preBuildReqInfo and preCalcReqInfo is not pipelined.
     rule preBuildReqInfo if (
@@ -606,7 +608,7 @@ module mkReqHandleRQ#(
         let isAtomicReq      = isAtomicReqRdmaOpCode(bth.opcode);
         let isFirstOrOnlyPkt = isFirstOrOnlyRdmaOpCode(bth.opcode);
         let isLastOrOnlyPkt  = isLastOrOnlyRdmaOpCode(bth.opcode);
-        let isZeroPayloadLen = isZero(curPktMetaData.pktPayloadLen);
+        // let isZeroPayloadLen = isZero(curPktMetaData.pktPayloadLen);
 
         let isOnlyPkt  = isOnlyRdmaOpCode(bth.opcode);
         let isFirstPkt = isFirstRdmaOpCode(bth.opcode);
@@ -657,7 +659,7 @@ module mkReqHandleRQ#(
             isWriteImmReq   : isWriteImmReq,
             isReadReq       : isReadReq,
             isAtomicReq     : isAtomicReq,
-            isZeroPayloadLen: isZeroPayloadLen,
+            // isZeroPayloadLen: isZeroPayloadLen,
             isOnlyPkt       : isOnlyPkt,
             isFirstPkt      : isFirstPkt,
             isMidPkt        : isMidPkt,
@@ -1160,8 +1162,8 @@ module mkReqHandleRQ#(
         let bth   = reqPktInfo.bth;
         let epoch = reqPktInfo.epoch;
 
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
         let isFirstOrOnlyPkt = reqPktInfo.isFirstOrOnlyPkt;
-        let isZeroPayloadLen = reqPktInfo.isZeroPayloadLen;
         let isSendReq        = reqPktInfo.isSendReq;
         let isWriteImmReq    = reqPktInfo.isWriteImmReq;
         let maybeRecvReq     = tagged Invalid;
@@ -1272,8 +1274,8 @@ module mkReqHandleRQ#(
         let reth       = extractRETH(rdmaHeader.headerData, bth.trans);
         let atomicEth  = extractAtomicEth(rdmaHeader.headerData, bth.trans);
 
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
         let isFirstOrOnlyPkt = reqPktInfo.isFirstOrOnlyPkt;
-        let isZeroPayloadLen = reqPktInfo.isZeroPayloadLen;
         let isSendReq        = reqPktInfo.isSendReq;
         let isWriteReq       = reqPktInfo.isWriteReq;
         let isReadReq        = reqPktInfo.isReadReq;
@@ -1826,7 +1828,7 @@ module mkReqHandleRQ#(
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPktLen(cntrl.contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
-                    isLastPayloadLenZero = reqPktInfo.isZeroPayloadLen;
+                    isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin
                     immFail(
@@ -2045,7 +2047,7 @@ module mkReqHandleRQ#(
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPktLen(cntrl.contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
                     enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
-                    isLastPayloadLenZero = reqPktInfo.isZeroPayloadLen;
+                    isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin
                     immFail(
@@ -2162,7 +2164,7 @@ module mkReqHandleRQ#(
         let isSendReq        = reqPktInfo.isSendReq;
         let isWriteReq       = reqPktInfo.isWriteReq;
         let isZeroDmaLen     = permCheckInfo.isZeroDmaLen;
-        let isZeroPayloadLen = reqPktInfo.isZeroPayloadLen;
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrOccurredReg) begin
             if ((isSendReq || isWriteReq) && !isZeroDmaLen) begin
@@ -3328,7 +3330,7 @@ module mkReqHandleRQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule canonicalize;
+    rule canonicalize if (cntrl.isNonErr);
         if (reqStatusErrNotifyReg[1] || readRespErrNotifyReg[1]) begin
             hasErrOccurredReg <= True;
         end
@@ -3337,25 +3339,26 @@ module mkReqHandleRQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule errFlushPipelineQ if (cntrl.isERR || hasErrOccurredReg);
+    rule errFlushPipelineQ if (inErrorState); // (cntrl.isERR || hasErrOccurredReg);
         clearRetryRelatedPipelineQ;
     endrule
 
     (* fire_when_enabled *)
-    rule errFlushRecvReq if (
-        (cntrl.isERR || hasErrOccurredReg) && recvReqBuf.notEmpty
-    );
+    rule errFlushRecvReq if (inErrorState && recvReqBuf.notEmpty);
+    //     (cntrl.isERR || hasErrOccurredReg) && recvReqBuf.notEmpty
+    // );
         let recvReq = recvReqBuf.first;
         recvReqBuf.deq;
         let maybeRecvReq = tagged Valid recvReq;
 
         let pktMetaData = RdmaPktMetaData {
-            pktPayloadLen: 0,
-            pktFragNum   : 0,
-            pktHeader    : dontCareValue,
-            pdHandler    : dontCareValue,
-            pktValid     : False,
-            pktStatus    : dontCareValue
+            pktPayloadLen   : 0,
+            pktFragNum      : 0,
+            isZeroPayloadLen: True,
+            pktHeader       : dontCareValue,
+            pdHandler       : dontCareValue,
+            pktValid        : False,
+            pktStatus       : dontCareValue
             // pktStatus    : PKT_ST_DISCARD
         };
         let reqStatus   = RDMA_REQ_ST_ERR_FLUSH_RR;
@@ -3387,7 +3390,7 @@ module mkReqHandleRQ#(
             isWriteImmReq   : False,
             isReadReq       : False,
             isAtomicReq     : False,
-            isZeroPayloadLen: True,
+            // isZeroPayloadLen: True,
             isOnlyPkt       : True,
             isFirstPkt      : False,
             isMidPkt        : False,
@@ -3413,7 +3416,8 @@ module mkReqHandleRQ#(
 
     (* fire_when_enabled *)
     rule errFlushIncomingReq if (
-        (cntrl.isERR || hasErrOccurredReg) && (!recvReqBuf.notEmpty) && (pktMetaDataPipeIn.notEmpty)
+        inErrorState && !recvReqBuf.notEmpty && pktMetaDataPipeIn.notEmpty
+        // (cntrl.isERR || hasErrOccurredReg) && (!recvReqBuf.notEmpty) && (pktMetaDataPipeIn.notEmpty)
     );
         let curPktMetaData = pktMetaDataPipeIn.first;
         pktMetaDataPipeIn.deq;
@@ -3430,7 +3434,7 @@ module mkReqHandleRQ#(
         let isAtomicReq      = isAtomicReqRdmaOpCode(bth.opcode);
         let isFirstOrOnlyPkt = isFirstOrOnlyRdmaOpCode(bth.opcode);
         let isLastOrOnlyPkt  = isLastOrOnlyRdmaOpCode(bth.opcode);
-        let isZeroPayloadLen = isZero(curPktMetaData.pktPayloadLen);
+        // let isZeroPayloadLen = isZero(curPktMetaData.pktPayloadLen);
 
         let isOnlyPkt  = isOnlyRdmaOpCode(bth.opcode);
         let isFirstPkt = isFirstRdmaOpCode(bth.opcode);
@@ -3447,7 +3451,7 @@ module mkReqHandleRQ#(
             isWriteImmReq   : isWriteImmReq,
             isReadReq       : isReadReq,
             isAtomicReq     : isAtomicReq,
-            isZeroPayloadLen: isZeroPayloadLen,
+            // isZeroPayloadLen: isZeroPayloadLen,
             isOnlyPkt       : isOnlyPkt,
             isFirstPkt      : isFirstPkt,
             isMidPkt        : isMidPkt,
@@ -3460,7 +3464,6 @@ module mkReqHandleRQ#(
             isAccCheckPass  : False
         };
 */
-        let isZeroPayloadLen = isZero(curPktMetaData.pktPayloadLen);
         let reqPktInfo = RdmaReqPktInfo {
             bth             : bth,
             epoch           : epochReg,
@@ -3471,7 +3474,7 @@ module mkReqHandleRQ#(
             isWriteImmReq   : False,
             isReadReq       : False,
             isAtomicReq     : False,
-            isZeroPayloadLen: isZeroPayloadLen,
+            // isZeroPayloadLen: isZeroPayloadLen,
             isOnlyPkt       : True,
             isFirstPkt      : False,
             isMidPkt        : False,

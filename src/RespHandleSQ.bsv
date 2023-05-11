@@ -88,7 +88,7 @@ typedef enum {
 typedef struct {
     BTH bth;
     AETH aeth;
-    Bool isZeroPayloadLen;
+    // Bool isZeroPayloadLen;
     Bool isFirstOrOnlyPkt;
     Bool isLastOrOnlyPkt;
     Bool isReadResp;
@@ -167,69 +167,46 @@ module mkRespHandleSQ#(
     Reg#(Bool) errOccurredReg <- mkReg(False);
     Reg#(Bool)  retryFlushReg <- mkReg(False);
 
-    // (* no_implicit_conditions, fire_when_enabled *)
-    // rule resetAndClear if (cntrl.isReset);
-    //     payloadConReqOutQ.clear;
-    //     workCompGenReqOutQ.clear;
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule resetAndClear if (cntrl.isReset);
+        payloadConReqOutQ.clear;
+        workCompGenReqOutQ.clear;
 
-    //     incomingRespQ.clear;
-    //     pendingRespQ.clear;
-    //     pendingPermQueryQ.clear;
-    //     pendingRetryCheckQ.clear;
-    //     pendingPermCheckQ.clear;
-    //     pendingAddrCalcQ.clear;
-    //     pendingLenCalcQ.clear;
-    //     pendingLenCheckQ.clear;
-    //     pendingDmaReqQ.clear;
-    //     pendingWorkCompQ.clear;
+        incomingRespQ.clear;
+        pendingRespQ.clear;
+        pendingPermQueryQ.clear;
+        pendingRetryCheckQ.clear;
+        pendingPermCheckQ.clear;
+        pendingAddrCalcQ.clear;
+        pendingLenCalcQ.clear;
+        pendingLenCheckQ.clear;
+        pendingDmaReqQ.clear;
+        pendingWorkCompQ.clear;
 
-    //     enablePreCalcInfoReg <= True;
-    //     preStageStateReg     <= SQ_PRE_BUILD_STAGE;
-    //     preRdmaOpCodeReg     <= ACKNOWLEDGE;
-    //     recvErrRespReg       <= False;
-    //     recvRetryRespReg     <= False;
-    //     hasInternalErrReg[0] <= False;
-    //     hasTimeOutErrReg[0]  <= False;
-    //     errOccurredReg       <= False;
-    //     retryFlushReg        <= False;
+        preStageStateReg     <= SQ_PRE_BUILD_STAGE;
+        preRdmaOpCodeReg     <= ACKNOWLEDGE;
+        recvErrRespReg       <= False;
+        recvRetryRespReg     <= False;
+        hasInternalErrReg[0] <= False;
+        hasTimeOutErrReg[0]  <= False;
+        errOccurredReg       <= False;
+        retryFlushReg        <= False;
 
-    //     // $display("time=%0t: reset and clear retry handler", $time);
-    // endrule
+        // $display("time=%0t: reset and clear retry handler", $time);
+    endrule
 
     let inNormalState = !retryFlushReg && !errOccurredReg && !recvErrRespReg;
     // let inNormalStateAlt = !retryFlushReg && !errOccurredReg && !recvErrRespReg[1];
     let inRetryState = retryFlushReg && !errOccurredReg && !recvErrRespReg;
     // Error state must include controller error state
     let inErrState = errOccurredReg || cntrl.isERR;
-    let inErrStateAlt = recvErrRespReg || errOccurredReg || cntrl.isERR;
-/*
-    // TODO: check discard duplicate or ghost reponses has
-    // no response from PayloadConsumer will not incur bugs.
-    function Action discardPktPayload(PmtuFragNum fragNum);
-        action
-            immAssert(
-                !isZero(fragNum),
-                "fragNum non-zero assertion @ mkRespHandleSQ",
-                $format("fragNum=%0d", fragNum, " should be non-zero")
-            );
-            // if (!isZero(fragNum)) begin
-            let discardReq = PayloadConReq {
-                // initiator  : DMA_INIT_SQ_DISCARD,
-                fragNum    : fragNum,
-                consumeInfo: tagged DiscardPayload
-            };
-            payloadConReqOutQ.enq(discardReq);
-            // end
-        endaction
-    endfunction
-*/
+    let inErrStateAlt = (cntrl.isRTS && (recvErrRespReg || errOccurredReg)) || cntrl.isERR;
+
     // TODO: check preBuildRespInfo having negative impact on throughput,
     // since preBuildRespInfo is not pipelined.
     rule preBuildRespInfo if (
         cntrl.isRTS && pendingWorkReqPipeIn.notEmpty &&
         preStageStateReg == SQ_PRE_BUILD_STAGE && inNormalState
-        // enablePreCalcInfoReg &&
-        // respHandleStateReg == SQ_HANDLE_RESP_HEADER &&
     ); // This rule will not run at retry or error state
         let curPktMetaData = pktMetaDataPipeIn.first;
         let curRdmaHeader  = curPktMetaData.pktHeader;
@@ -259,7 +236,7 @@ module mkRespHandleSQ#(
         let respPktInfo = RespPktInfo {
             bth             : bth,
             aeth            : aeth,
-            isZeroPayloadLen: isZero(curPktMetaData.pktPayloadLen),
+            // isZeroPayloadLen: isZero(curPktMetaData.pktPayloadLen),
             isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
             isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
             isReadResp      : isReadRespRdmaOpCode(bth.opcode),
@@ -570,9 +547,6 @@ module mkRespHandleSQ#(
     endrule
 
     rule recvRespHeader if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
-    //     cntrl.isRTS && pendingWorkReqPipeIn.notEmpty &&
-    //     preStageStateReg == SQ_PRE_STAGE_DONE && inNormalState
-    // ); // This rule will not run at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         } = incomingRespQ.first;
@@ -661,10 +635,10 @@ module mkRespHandleSQ#(
 
         let bth              = respPktInfo.bth;
         let aeth             = respPktInfo.aeth;
-        let isZeroPayloadLen = respPktInfo.isZeroPayloadLen;
         let isFirstOrOnlyPkt = respPktInfo.isFirstOrOnlyPkt;
         let isReadResp       = respPktInfo.isReadResp;
         let isAtomicResp     = respPktInfo.isAtomicResp;
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         let respOpCodeSeqCheck = checkNormalRespOpCodeSeqSQ(preRdmaOpCodeReg, bth.opcode);
         let respMatchWorkReq   = rdmaRespMatchWorkReq(bth.opcode, pendingWR.wr.opcode);
@@ -741,10 +715,10 @@ module mkRespHandleSQ#(
         } = pendingPermQueryQ.first;
         pendingPermQueryQ.deq;
 
-        let isZeroPayloadLen = respPktInfo.isZeroPayloadLen;
         let isFirstOrOnlyPkt = respPktInfo.isFirstOrOnlyPkt;
         let isReadResp       = respPktInfo.isReadResp;
         let isAtomicResp     = respPktInfo.isAtomicResp;
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         let expectPermCheckResp = False;
         if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP) begin
@@ -1061,7 +1035,7 @@ module mkRespHandleSQ#(
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     remainingReadRespLen = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
                     enoughDmaSpace       = lenGtEqPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
-                    isLastPayloadLenZero = respPktInfo.isZeroPayloadLen;
+                    isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin
                     immFail(
@@ -1092,7 +1066,7 @@ module mkRespHandleSQ#(
             wcStatus, wcReqType, respLenCheckResult
         ));
         // $display(
-        //     "time=%0t: 7th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 8th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", wcStatus=", fshow(wcStatus),
@@ -1151,7 +1125,7 @@ module mkRespHandleSQ#(
                     // No need to calculate next DMA write address for last read responses
                     // nextReadRespWriteAddr = nextReadRespWriteAddrReg + zeroExtend(pktPayloadLen);
                     readRespPktNum        = readRespPktNumReg + 1;
-                    isLastPayloadLenZero  = respPktInfo.isZeroPayloadLen;
+                    isLastPayloadLenZero  = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin
                     immFail(
@@ -1230,7 +1204,7 @@ module mkRespHandleSQ#(
             wcStatus, wcReqType, nextReadRespWriteAddr
         ));
         // $display(
-        //     "time=%0t: 8th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 9th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", enoughDmaSpace=", fshow(enoughDmaSpace),
@@ -1253,9 +1227,9 @@ module mkRespHandleSQ#(
         let shouldDiscard    = respPktInfo.shouldDiscard;
         let hasLocalErr      = respPktInfo.hasLocalErr;
         let bth              = respPktInfo.bth;
-        let isZeroPayloadLen = respPktInfo.isZeroPayloadLen;
         let isReadResp       = respPktInfo.isReadResp;
         let isAtomicResp     = respPktInfo.isAtomicResp;
+        let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         let wcWaitDmaResp = False;
         if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP) begin
@@ -1358,7 +1332,7 @@ module mkRespHandleSQ#(
         };
         pendingWorkCompQ.enq(tuple2(respPktInfo, workCompGenReq));
         // $display(
-        //     "time=%0t: 9th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 10th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
@@ -1400,7 +1374,7 @@ module mkRespHandleSQ#(
         end
 
         // $display(
-        //     "time=%0t: 10th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 11th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     // ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
@@ -1415,51 +1389,49 @@ module mkRespHandleSQ#(
     (* fire_when_enabled *)
     rule discardGhostResp if (
         cntrl.isRTS && inNormalState &&
-        // respHandleStateReg == SQ_HANDLE_RESP_HEADER &&
+        pktMetaDataPipeIn.notEmpty   &&
         !pendingWorkReqPipeIn.notEmpty
     ); // Ghost responses
-        if (pktMetaDataPipeIn.notEmpty) begin
-            let pktMetaData = pktMetaDataPipeIn.first;
-            pktMetaDataPipeIn.deq;
+        let pktMetaData = pktMetaDataPipeIn.first;
+        pktMetaDataPipeIn.deq;
 
-            PendingWorkReq emptyPendingWR = dontCareValue;
+        PendingWorkReq emptyPendingWR = dontCareValue;
 
-            let rdmaHeader  = pktMetaData.pktHeader;
-            let bth         = extractBTH(rdmaHeader.headerData);
-            let aeth        = extractAETH(rdmaHeader.headerData);
-            let respPktInfo = RespPktInfo {
-                bth             : bth,
-                aeth            : aeth,
-                isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
-                isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
-                isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
-                isReadResp      : isReadRespRdmaOpCode(bth.opcode),
-                isAtomicResp    : isAtomicRespRdmaOpCode(bth.opcode),
-                hasLocalErr     : False,
-                shouldDiscard   : True,
-                genWorkComp     : False
-            };
-            // let rdmaRespType = RDMA_RESP_UNKNOWN;
-            // let retryReason  = RETRY_REASON_NOT_RETRY;
-            // let respAction   = SQ_ACT_DISCARD_RESP;
-            let retryResetReq = RETRY_HANDLER_RESET_TIMEOUT;
-            let wcReqType     = WC_REQ_TYPE_NO_WC;
-            let wrAckType     = WR_ACK_GHOST;
-            incomingRespQ.enq(tuple6(
-                emptyPendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
-            ));
-            // pendingRespQ.enq(tuple6(
-            //     emptyPendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
-            // ));
-            $display(
-                "time=%0t: 1st ghost discard stage, bth.psn=%h", $time, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                // ", rdmaRespType=", fshow(rdmaRespType),
-                // ", retryReason=", fshow(retryReason),
-                ", wrAckType=", fshow(wrAckType),
-                ", wcReqType=", fshow(wcReqType)
-            );
-        end
+        let rdmaHeader  = pktMetaData.pktHeader;
+        let bth         = extractBTH(rdmaHeader.headerData);
+        let aeth        = extractAETH(rdmaHeader.headerData);
+        let respPktInfo = RespPktInfo {
+            bth             : bth,
+            aeth            : aeth,
+            // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
+            isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
+            isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
+            isReadResp      : isReadRespRdmaOpCode(bth.opcode),
+            isAtomicResp    : isAtomicRespRdmaOpCode(bth.opcode),
+            hasLocalErr     : False,
+            shouldDiscard   : True,
+            genWorkComp     : False
+        };
+        // let rdmaRespType = RDMA_RESP_UNKNOWN;
+        // let retryReason  = RETRY_REASON_NOT_RETRY;
+        // let respAction   = SQ_ACT_DISCARD_RESP;
+        let retryResetReq = RETRY_HANDLER_RESET_TIMEOUT;
+        let wcReqType     = WC_REQ_TYPE_NO_WC;
+        let wrAckType     = WR_ACK_GHOST;
+        incomingRespQ.enq(tuple6(
+            emptyPendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
+        ));
+        // pendingRespQ.enq(tuple6(
+        //     emptyPendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
+        // ));
+        $display(
+            "time=%0t: 1st ghost discard stage, bth.psn=%h", $time, bth.psn,
+            ", bth.opcode=", fshow(bth.opcode),
+            // ", rdmaRespType=", fshow(rdmaRespType),
+            // ", retryReason=", fshow(retryReason),
+            ", wrAckType=", fshow(wrAckType),
+            ", wcReqType=", fshow(wcReqType)
+        );
     endrule
 
     (* fire_when_enabled *)
@@ -1494,7 +1466,7 @@ module mkRespHandleSQ#(
             let respPktInfo = RespPktInfo {
                 bth             : dontCareValue,
                 aeth            : dontCareValue,
-                isZeroPayloadLen: True,
+                // isZeroPayloadLen: True,
                 isFirstOrOnlyPkt: True,
                 isLastOrOnlyPkt : True,
                 isReadResp      : False,
@@ -1504,12 +1476,13 @@ module mkRespHandleSQ#(
                 genWorkComp     : True
             };
             let pktMetaData = RdmaPktMetaData {
-                pktPayloadLen: 0,
-                pktFragNum   : 0,
-                pktHeader    : dontCareValue,
-                pdHandler    : dontCareValue,
-                pktValid     : False,
-                pktStatus    : dontCareValue
+                pktPayloadLen   : 0,
+                pktFragNum      : 0,
+                isZeroPayloadLen: True,
+                pktHeader       : dontCareValue,
+                pdHandler       : dontCareValue,
+                pktValid        : False,
+                pktStatus       : dontCareValue
                 // pktStatus    : PKT_ST_DISCARD
             };
 
@@ -1547,7 +1520,7 @@ module mkRespHandleSQ#(
             let respPktInfo = RespPktInfo {
                 bth             : bth,
                 aeth            : aeth,
-                isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
+                // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
                 isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
                 isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
                 isReadResp      : isReadRespRdmaOpCode(bth.opcode),
@@ -1621,7 +1594,7 @@ module mkRespHandleSQ#(
             let respPktInfo = RespPktInfo {
                 bth             : bth,
                 aeth            : aeth,
-                isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
+                // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
                 isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
                 isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
                 isReadResp      : isReadRespRdmaOpCode(bth.opcode),
