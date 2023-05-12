@@ -454,7 +454,9 @@ module mkReqHandleRQ#(
     // FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, ADDR, DupReadReqStartState)) issueDmaReqQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, ADDR, DupReadReqStartState)) issuePayloadConReqQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, Bool, DupReadReqStartState)) issuePayloadGenReqQ <- mkFIFOF;
-    FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo)) respGenCheckQ <- mkFIFOF;
+    // FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo)) respGenCheckQ <- mkFIFOF;
+    FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo)) respGenCheck4NormalCaseQ <- mkFIFOF;
+    FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo)) respGenCheck4OtherCasesQ <- mkFIFOF;
     FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo)) respCountQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo, RespPktSeqInfo)) respPsnAndMsnQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckInfo, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo)) waitAtomicRespQ <- mkFIFOF;
@@ -489,9 +491,9 @@ module mkReqHandleRQ#(
     Reg#(Bool)  readRespErrNotifyReg[2] <- mkCReg(2, False);
 
     // TODO: move the two counters into Controller
-    Count#(PendingReqCnt) pendingWorkReqCnt <- mkCount(fromInteger(valueOf(TSub#(MAX_QP_WR, 1))));
+    Count#(PendingReqCnt) coalesceWorkReqCnt <- mkCount(fromInteger(valueOf(TSub#(MAX_QP_WR, 1))));
     Count#(PendingReqCnt) pendingDestReadAtomicReqCnt <- mkCountCF(0);
-    Reg#(Bool) isPendingWorkReqCntZeroReg <- mkReg(False);
+    Reg#(Bool) isCoalesceWorkReqCntZeroReg <- mkReg(False);
 
     let atomicSrv <- mkAtomicSrv(cntrl);
     let payloadGenerator <- mkPayloadGenerator(
@@ -560,13 +562,15 @@ module mkReqHandleRQ#(
         // issueDmaReqQ.clear;
         issuePayloadConReqQ.clear;
         issuePayloadGenReqQ.clear;
-        respGenCheckQ.clear;
+        // respGenCheckQ.clear;
+        respGenCheck4NormalCaseQ.clear;
+        respGenCheck4OtherCasesQ.clear;
+        respCountQ.clear;
+        respPsnAndMsnQ.clear;
         waitAtomicRespQ.clear;
         atomicCacheInsertQ.clear;
         dupAtomicReqPermQueryQ.clear;
         dupAtomicReqPermCheckQ.clear;
-        respCountQ.clear;
-        respPsnAndMsnQ.clear;
         respCheckQ.clear;
         respHeaderGenQ.clear;
         pendingRespQ.clear;
@@ -581,9 +585,9 @@ module mkReqHandleRQ#(
         reqStatusErrNotifyReg[0] <= False;
         readRespErrNotifyReg[0]  <= False;
 
-        pendingWorkReqCnt <= fromInteger(valueOf(TSub#(MAX_QP_WR, 1)));
+        coalesceWorkReqCnt          <= fromInteger(valueOf(TSub#(MAX_QP_WR, 1)));
         pendingDestReadAtomicReqCnt <= 0;
-        isPendingWorkReqCntZeroReg <= False;
+        isCoalesceWorkReqCntZeroReg <= False;
         // $display("time=%0t: reset and clear retry handler", $time);
     endrule
 
@@ -751,6 +755,7 @@ module mkReqHandleRQ#(
         // );
     endrule
 
+                        // checkShouldGenResp, \
     // TODO: add conflict_free attribute to preBuildReqInfo, preCalcReqInfo, canonicalize
     (* conflict_free = "checkEPSN, \
                         checkSupportedReqOpCode, \
@@ -770,7 +775,8 @@ module mkReqHandleRQ#(
                         checkReqLen, \
                         issuePayloadConReqOrDiscard, \
                         issuePayloadGenReq, \
-                        checkShouldGenResp, \
+                        shouldGenResp4NormalCase, \
+                        shouldGenResp4OtherCases, \
                         waitAtomicResp, \
                         insertIntoAtomicCache, \
                         queryPerm4DupAtomicReq, \
@@ -973,7 +979,8 @@ module mkReqHandleRQ#(
                         ", bth.opcode=", fshow(bth.opcode),
                         ", bth.psn=%h", bth.psn,
                         ", isAccCheckPass=", fshow(isAccCheckPass),
-                        ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs)
+                        ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs),
+                        ", reqStatus=", fshow(reqStatus)
                     );
                 end
             end
@@ -2278,8 +2285,8 @@ module mkReqHandleRQ#(
             atomicAckOrig           : tagged Invalid,
             dupReadReqStartState    : dupReadReqStartState
         };
-        respGenCheckQ.enq(tuple5(
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo //, atomicEth
+        respGenCheck4NormalCaseQ.enq(tuple5(
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
         ));
         // $display(
         //     "time=%0t: 18th stage, bth.opcode=", $time, fshow(bth.opcode),
@@ -2289,6 +2296,189 @@ module mkReqHandleRQ#(
         // );
     endrule
 
+    rule shouldGenResp4NormalCase if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
+        } = respGenCheck4NormalCaseQ.first;
+        respGenCheck4NormalCaseQ.deq;
+
+        let bth = reqPktInfo.bth;
+
+        let isSendReq       = reqPktInfo.isSendReq;
+        let isWriteReq      = reqPktInfo.isWriteReq;
+        let isReadReq       = reqPktInfo.isReadReq;
+        let isAtomicReq     = reqPktInfo.isAtomicReq;
+        let isLastOrOnlyPkt = reqPktInfo.isLastOrOnlyPkt;
+        let hasErrOccurred  = respPktGenInfo.hasErrOccurred;
+
+        let shouldGenResp = False;
+        // let shouldDiscard = False;
+        let qpHasResp     = qpNeedGenResp(bth.trans);
+
+        let reloadPendingWorkReqCnt   = False;
+        let decrPendingWorkReqCnt     = False;
+        let shouldGenRespEvenNoAckReq = isLastOrOnlyPkt && isCoalesceWorkReqCntZeroReg;
+        if (reqStatus == RDMA_REQ_ST_NORMAL) begin
+            case ({ pack(isSendReq), pack(isWriteReq), pack(isReadReq), pack(isAtomicReq) })
+                4'b1000, 4'b0100: begin // Send/Write requests
+                    if (bth.ackReq || shouldGenRespEvenNoAckReq) begin
+                        shouldGenResp = qpHasResp;
+                        reloadPendingWorkReqCnt = True;
+                    end
+                    else begin
+                        decrPendingWorkReqCnt = isLastOrOnlyPkt;
+                    end
+                end
+                4'b0010: begin // Read requests
+                    shouldGenResp = qpHasResp;
+                    reloadPendingWorkReqCnt = True;
+                end
+                4'b0001: begin // Atomic requests
+                    if (respPktGenInfo.expectAtomicRespOrig) begin
+                        shouldGenResp = qpHasResp;
+                        reloadPendingWorkReqCnt = True;
+                    end
+                end
+                default: begin
+                    immFail(
+                        "unreachible case @ mkReqHandleRQ",
+                        $format(
+                            "isSendReq=", fshow(isSendReq),
+                            ", isWriteReq=", fshow(isWriteReq),
+                            ", isReadReq=", fshow(isReadReq),
+                            ", isAtomicReq=", fshow(isAtomicReq)
+                        )
+                    );
+                end
+            endcase
+
+            if (qpHasResp && !hasErrOccurred) begin
+                // The counter will record how many normal send/write requests
+                // without AckReq, and if more than MAX_QP_WR consecutive send/write requests
+                // without AckReq, enforce a response to avoid SQ deadlock.
+                if (reloadPendingWorkReqCnt) begin
+                    coalesceWorkReqCnt <= cntrl.getPendingWorkReqNum - 1;
+                    // cntrl.contextRQ.setPendingWorkReqCnt(cntrl.getPendingWorkReqNum - 1);
+                    isCoalesceWorkReqCntZeroReg <= isOne(cntrl.getPendingWorkReqNum);
+                end
+                else if (decrPendingWorkReqCnt) begin
+                    coalesceWorkReqCnt.decr(1);
+                    // cntrl.contextRQ.setPendingWorkReqCnt(cntrl.contextRQ.getPendingWorkReqCnt - 1);
+                    isCoalesceWorkReqCntZeroReg <= isOne(coalesceWorkReqCnt);
+                end
+                // $display(
+                //     "time=%0t:", $time, " bth.ackReq=", fshow(bth.ackReq),
+                //     ", coalesceWorkReqCnt=%0d", coalesceWorkReqCnt,
+                //     ", reloadPendingWorkReqCnt=", fshow(reloadPendingWorkReqCnt),
+                //     ", decrPendingWorkReqCnt=", fshow(decrPendingWorkReqCnt)
+                // );
+            end
+        end
+
+        // Even no response generated for some requests,
+        // they might need to wait for DMA write responses,
+        // so still need send to next stage
+        respPktGenInfo.shouldGenResp = shouldGenResp;
+
+        respGenCheck4OtherCasesQ.enq(tuple5(
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
+        ));
+        // $display(
+        //     "time=%0t: 19th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+        //     // ", shouldDiscard=", fshow(shouldDiscard),
+        //     ", shouldGenResp=", fshow(shouldGenResp),
+        //     ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
+
+    rule shouldGenResp4OtherCases if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
+        } = respGenCheck4OtherCasesQ.first;
+        respGenCheck4OtherCasesQ.deq;
+
+        let bth = reqPktInfo.bth;
+        // let rdmaHeader = pktMetaData.pktHeader;
+
+        let isSendReq       = reqPktInfo.isSendReq;
+        let isWriteReq      = reqPktInfo.isWriteReq;
+        let isReadReq       = reqPktInfo.isReadReq;
+        let isAtomicReq     = reqPktInfo.isAtomicReq;
+        let isLastOrOnlyPkt = reqPktInfo.isLastOrOnlyPkt;
+        // let hasErrOccurred = respPktGenInfo.hasErrOccurred;
+
+        let shouldGenResp = False;
+        let shouldDiscard = False;
+        let qpHasResp     = qpNeedGenResp(bth.trans);
+
+        case (reqStatus)
+            RDMA_REQ_ST_NORMAL: begin
+                shouldGenResp = respPktGenInfo.shouldGenResp;
+            end
+            RDMA_REQ_ST_DUP: begin
+                case ({ pack(isSendReq), pack(isWriteReq), pack(isReadReq), pack(isAtomicReq) })
+                    4'b1000, 4'b0100: begin // Duplicate send/Write requests
+                        if (bth.ackReq || isLastOrOnlyPkt) begin
+                            // Must generate responses for duplicate send/write requests
+                            // when last or only packets
+                            shouldGenResp = qpHasResp;
+                        end
+                    end
+                    4'b0010: begin // Duplicate read requests
+                        shouldGenResp = qpHasResp;
+                    end
+                    4'b0001: begin // Duplicate atomic requests
+                        // Duplicate atomic requests will be checked in later stages
+                    end
+                    default: begin
+                        immFail(
+                            "unreachible case @ mkReqHandleRQ",
+                            $format(
+                                "isSendReq=", fshow(isSendReq),
+                                ", isWriteReq=", fshow(isWriteReq),
+                                ", isReadReq=", fshow(isReadReq),
+                                ", isAtomicReq=", fshow(isAtomicReq)
+                            )
+                        );
+                    end
+                endcase
+            end
+            RDMA_REQ_ST_SEQ_ERR,
+            RDMA_REQ_ST_RNR    ,
+            RDMA_REQ_ST_INV_REQ,
+            RDMA_REQ_ST_INV_RD ,
+            RDMA_REQ_ST_RMT_ACC,
+            RDMA_REQ_ST_RMT_OP : begin
+                shouldGenResp = qpHasResp;
+            end
+            RDMA_REQ_ST_DISCARD     ,
+            RDMA_REQ_ST_ERR_FLUSH_RR: begin
+                shouldDiscard = True;
+            end
+            default: begin
+                immFail(
+                    "unreachible case @ mkReqHandleRQ",
+                    $format("reqStatus=", fshow(reqStatus))
+                );
+            end
+        endcase
+
+        // Set shouldGenResp even when hasErrOccurred
+        respPktGenInfo.shouldGenResp = shouldGenResp;
+
+        respCountQ.enq(tuple5(
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
+        ));
+        // $display(
+        //     "time=%0t: 20th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+        //     ", shouldDiscard=", fshow(shouldDiscard),
+        //     ", shouldGenResp=", fshow(shouldGenResp),
+        //     ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
+/*
     rule checkShouldGenResp if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
         let {
             pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo //, atomicEth
@@ -2297,7 +2487,6 @@ module mkReqHandleRQ#(
 
         let bth        = reqPktInfo.bth;
         let rdmaHeader = pktMetaData.pktHeader;
-        // let atomicEth  = extractAtomicEth(rdmaHeader.headerData, bth.trans);
 
         let isSendReq       = reqPktInfo.isSendReq;
         let isWriteReq      = reqPktInfo.isWriteReq;
@@ -2309,11 +2498,10 @@ module mkReqHandleRQ#(
         let shouldGenResp = False;
         let shouldDiscard = False;
         let qpHasResp     = qpNeedGenResp(bth.trans);
-        // let atomicAckOrig = tagged Invalid;
 
-        let reloadPendingWorkReqCnt = False;
-        let decrPendingWorkReqCnt = False;
-        let shouldGenRespEvenNoAckReq = isLastOrOnlyPkt && isPendingWorkReqCntZeroReg;
+        let reloadPendingWorkReqCnt   = False;
+        let decrPendingWorkReqCnt     = False;
+        let shouldGenRespEvenNoAckReq = isLastOrOnlyPkt && isCoalesceWorkReqCntZeroReg;
         case (reqStatus)
             RDMA_REQ_ST_NORMAL: begin
                 case ({ pack(isSendReq), pack(isWriteReq), pack(isReadReq), pack(isAtomicReq) })
@@ -2332,21 +2520,6 @@ module mkReqHandleRQ#(
                     end
                     4'b0001: begin // Atomic requests
                         if (respPktGenInfo.expectAtomicRespOrig) begin
-                            // TODO: move waiting for atomic operation responses to
-                            // the response generation stage
-                            // let atomicOpResp <- atomicSrv.response.get;
-                            // let atomicOpResp = atomicOpRespPipeIn.first;
-                            // atomicOpRespPipeIn.deq;
-
-                            // let atomicCache = AtomicCacheItem {
-                            //     atomicPSN   : bth.psn,
-                            //     atomicOpCode: bth.opcode,
-                            //     atomicEth   : atomicEth,
-                            //     atomicAckEth: AtomicAckEth { orig: atomicOpResp.original }
-                            // };
-                            // dupReadAtomicCache.insertAtomic(atomicCache);
-
-                            // atomicAckOrig = tagged Valid atomicOpResp.original;
                             shouldGenResp = qpHasResp;
                             reloadPendingWorkReqCnt = True;
                         end
@@ -2417,17 +2590,19 @@ module mkReqHandleRQ#(
             // without AckReq, and if more than MAX_QP_WR consecutive send/write requests
             // without AckReq, enforce a response to avoid SQ deadlock.
             if (reloadPendingWorkReqCnt) begin
-                pendingWorkReqCnt <= cntrl.getPendingWorkReqNum - 1;
-                isPendingWorkReqCntZeroReg <= False;
+                // coalesceWorkReqCnt <= cntrl.getPendingWorkReqNum - 1;
+                cntrl.setPendingWorkReqCnt(cntrl.getPendingWorkReqNum - 1);
+                isCoalesceWorkReqCntZeroReg <= False;
             end
             else if (decrPendingWorkReqCnt) begin
-                pendingWorkReqCnt.decr(1);
-                isPendingWorkReqCntZeroReg <= isOne(pendingWorkReqCnt);
+                // coalesceWorkReqCnt.decr(1);
+                cntrl.setPendingWorkReqCnt(cntrl.getPendingWorkReqCnt - 1);
+                isCoalesceWorkReqCntZeroReg <= isOne(cntrl.getPendingWorkReqCnt);
             end
         end
         // $display(
         //     "time=%0t:", $time, " bth.ackReq=", fshow(bth.ackReq),
-        //     ", pendingWorkReqCnt=%0d", pendingWorkReqCnt,
+        //     ", coalesceWorkReqCnt=%0d", coalesceWorkReqCnt,
         //     ", reloadPendingWorkReqCnt=", fshow(reloadPendingWorkReqCnt),
         //     ", decrPendingWorkReqCnt=", fshow(decrPendingWorkReqCnt)
         // );
@@ -2436,11 +2611,9 @@ module mkReqHandleRQ#(
         // they might need to wait for DMA write responses,
         // so still need send to next stage
         respPktGenInfo.shouldGenResp = shouldGenResp;
-        // respPktGenInfo.atomicAckOrig = atomicAckOrig;
 
-        // waitAtomicRespQ.enq(tuple5(
         respCountQ.enq(tuple5(
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo //, atomicEth
+            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo
         ));
         // $display(
         //     "time=%0t: 19th stage, bth.opcode=", $time, fshow(bth.opcode),
@@ -2450,7 +2623,7 @@ module mkReqHandleRQ#(
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-/*
+
     rule waitAtomicResp if (cntrl.isNonErr || cntrl.isERR); // This rule still runs at retry or error state
         let {
             pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, atomicEth
@@ -3499,6 +3672,14 @@ module mkReqHandleRQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
+    rule retryFlushPipelineQ if (
+        cntrl.isNonErr && preStageStateReg == RQ_PRE_STAGE_DONE &&
+        retryFlushStateReg != RQ_NOT_RETRY && !hasErrOccurredReg
+    );
+        clearRetryRelatedPipelineQ;
+    endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
     rule retryStageRnrRetryFlush if (
         cntrl.isNonErr && !hasErrOccurredReg && retryFlushStateReg == RQ_RNR_RETRY_FLUSH
     );
@@ -3550,8 +3731,7 @@ module mkReqHandleRQ#(
         cntrl.isNonErr && preStageStateReg == RQ_PRE_STAGE_DONE &&
         retryFlushStateReg != RQ_NOT_RETRY && !hasErrOccurredReg
     );
-        clearRetryRelatedPipelineQ;
-
+        // clearRetryRelatedPipelineQ;
         let reqStatus  = preStageReqStatusReg;
         let reqPktInfo = preStageReqPktInfoReg;
 

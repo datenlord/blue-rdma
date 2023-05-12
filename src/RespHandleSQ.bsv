@@ -585,10 +585,17 @@ module mkRespHandleSQ#(
             end
             WR_ACK_ILLEGAL: begin
                 respAction = pktStatus2RespActionSQ(pktMetaData.pktStatus);
-                // TODO: check more pktStatus
-                // if (respAction == SQ_ACT_ILLEGAL_RESP) begin
+                immAssert(
+                    respAction != SQ_ACT_UNKNOWN,
+                    "respAction assertion @ mkRespHandleSQ",
+                    $format(
+                        "respAction=", fshow(respAction),
+                        " should not be unknown when pktStatus=",
+                        fshow(pktMetaData.pktStatus)
+                    )
+                );
+
                 recvErrRespReg <= True;
-                // end
             end
             WR_ACK_ERR_FLUSH_WR: begin
                 respAction = SQ_ACT_FLUSH_WR;
@@ -888,7 +895,7 @@ module mkRespHandleSQ#(
         pendingPermCheckQ.deq;
 
         let bth  = respPktInfo.bth;
-        let aeth = respPktInfo.aeth;
+        // let aeth = respPktInfo.aeth;
 
         if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP) begin
             if (isValid(wcStatus)) begin
@@ -1399,10 +1406,10 @@ module mkRespHandleSQ#(
 
         let rdmaHeader  = pktMetaData.pktHeader;
         let bth         = extractBTH(rdmaHeader.headerData);
-        let aeth        = extractAETH(rdmaHeader.headerData);
+        // let aeth        = extractAETH(rdmaHeader.headerData);
         let respPktInfo = RespPktInfo {
             bth             : bth,
-            aeth            : aeth,
+            aeth            : dontCareValue, // aeth,
             // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
             isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
             isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),

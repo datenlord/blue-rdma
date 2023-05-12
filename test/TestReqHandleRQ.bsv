@@ -112,8 +112,8 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
         //     "time=%0t:", $time,
         //     " dut.rdmaRespDataStreamPipeOut.notEmpty=",
         //     fshow(dut.rdmaRespDataStreamPipeOut.notEmpty),
-        //     ", remainingDestReadAtomicReqCnt=%0d",
-        //     remainingDestReadAtomicReqCnt,
+        //     // ", remainingDestReadAtomicReqCnt=%0d",
+        //     // remainingDestReadAtomicReqCnt,
         //     ", errRespGenReg=", fshow(errRespGenReg)
         // );
 
@@ -141,8 +141,8 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
         //     "time=%0t:", $time,
         //     " dut.rdmaRespDataStreamPipeOut.notEmpty=",
         //     fshow(dut.rdmaRespDataStreamPipeOut.notEmpty),
-        //     ", remainingDestReadAtomicReqCnt=%0d",
-        //     remainingDestReadAtomicReqCnt,
+        //     // ", remainingDestReadAtomicReqCnt=%0d",
+        //     // remainingDestReadAtomicReqCnt,
         //     ", errRespGenReg=", fshow(errRespGenReg)
         // );
 

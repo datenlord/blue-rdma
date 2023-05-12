@@ -49,6 +49,10 @@ interface ContextRQ;
     method RdmaOpCode    getPreReqOpCode();
     method Action        setPreReqOpCode(RdmaOpCode preOpCode);
     method Action        restorePreReqOpCode(RdmaOpCode preOpCode);
+    // method PendingReqCnt getCoalesceWorkReqCnt();
+    // method Action        setCoalesceWorkReqCnt(PendingReqCnt coalesceWorkReqCnt);
+    // method PendingReqCnt getPendingDestReadAtomicReqCnt();
+    // method Action        setPendingDestReadAtomicReqCnt(PendingReqCnt pendingDestReadAtomicReqCnt);
     // method Epoch         getEpoch();
     // method Action        incEpoch();
     method MSN           getMSN();
@@ -153,6 +157,9 @@ module mkController(Controller);
     Reg#(ADDR)       nextDmaWriteAddrReg <- mkRegU;
     Reg#(PktNum)   sendWriteReqPktNumReg <- mkRegU; // TODO: remove it
     Reg#(RdmaOpCode)  preReqOpCodeReg[2] <- mkCReg(2, SEND_ONLY);
+
+    // Reg#(PendingReqCnt) coalesceWorkReqCntReg <- mkRegU;
+    // Reg#(PendingReqCnt) pendingDestReadAtomicReqCntReg <- mkRegU;
 
     // Reg#(Epoch)   epochReg <- mkReg(0);
     Reg#(MSN)       msnReg <- mkReg(0);
@@ -282,6 +289,8 @@ module mkController(Controller);
                 pendingRecvReqNumReg           <= qpReq.qpAttr.cap.maxRecvWR;
                 pendingReadAtomicReqNumReg     <= qpReq.qpAttr.maxReadAtomic;
                 pendingDestReadAtomicReqNumReg <= qpReq.qpAttr.maxDestReadAtomic;
+                // coalesceWorkReqCntReg           <= qpReq.qpAttr.cap.maxSendWR;
+                // pendingDestReadAtomicReqCntReg <= qpReq.qpAttr.maxDestReadAtomic;
                 // sqSigAllReg                    <= sqSigAll;
                 dqpnReg                        <= qpReq.qpAttr.dqpn;
                 pkeyReg                        <= qpReq.qpAttr.pkeyIndex;
@@ -432,6 +441,16 @@ module mkController(Controller);
             preReqOpCodeReg[1] <= preOpCode;
         endmethod
 
+        // method PendingReqCnt getCoalesceWorkReqCnt() if (inited) = coalesceWorkReqCntReg;
+        // method Action        setCoalesceWorkReqCnt(PendingReqCnt coalesceWorkReqCnt) if (inited);
+        //     coalesceWorkReqCntReg <= coalesceWorkReqCnt;
+        // endmethod
+        // method PendingReqCnt getPendingDestReadAtomicReqCnt() if (inited) = pendingDestReadAtomicReqCntReg;
+        // method Action        setPendingDestReadAtomicReqCnt(
+        //     PendingReqCnt pendingDestReadAtomicReqCnt
+        // ) if (inited);
+        //     pendingDestReadAtomicReqCntReg <= pendingDestReadAtomicReqCnt;
+        // endmethod
         // method Epoch  getEpoch() if (inited) = epochReg;
         // method Action incEpoch() if (inited);
         //     epochReg <= ~epochReg;

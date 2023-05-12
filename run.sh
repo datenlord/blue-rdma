@@ -13,97 +13,97 @@ mkdir -p tmp
 
 TEST_DIR=`realpath ./test`
 LOG_DIR=`realpath ./tmp`
-RUN_LOG=$TEST_DIR/run.log
+ALL_LOG=$TEST_DIR/run.log
 
 #cd test
-# echo "" > $RUN_LOG
+# echo "" > $ALL_LOG
 
-# make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestFixedLenSimDataStreamPipeOut 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestFixedLenSimDataStreamPipeOut 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=SimGenRdmaReqAndResp.bsv TOPMODULE=mkTestSimGenRdmaResp 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=SimGenRdmaReqAndResp.bsv TOPMODULE=mkTestSimGenRdmaResp 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestPipeOutArbiter 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestServerArbiter 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestPipeOutArbiter 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestServerArbiter 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestController.bsv TOPMODULE=mkTestCntrlInVec 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestController.bsv TOPMODULE=mkTestCntrlInVec 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestDupReadAtomicCache.bsv TOPMODULE=mkTestDupReadAtomicCache 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestDupReadAtomicCache.bsv TOPMODULE=mkTestCacheFIFO 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestDupReadAtomicCache.bsv TOPMODULE=mkTestDupReadAtomicCache 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestDupReadAtomicCache.bsv TOPMODULE=mkTestCacheFIFO 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestHeaderAndDataStreamConversion 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestPrependHeaderBeforeEmptyDataStream 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractHeaderWithPayloadLessThanOneFrag 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractHeaderLongerThanDataStream 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractAndPrependHeader 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestHeaderAndDataStreamConversion 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestPrependHeaderBeforeEmptyDataStream 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractHeaderWithPayloadLessThanOneFrag 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractHeaderLongerThanDataStream 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestExtractAndPrependPipeOut.bsv TOPMODULE=mkTestExtractAndPrependHeader 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculateRandomPktLen 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculatePktLenEqPMTU 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculateZeroPktLen 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestReceiveCNP 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculateRandomPktLen 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculatePktLenEqPMTU 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestCalculateZeroPktLen 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestInputPktHandle.bsv TOPMODULE=mkTestReceiveCNP 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataMRs 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataPDs 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataQPs 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestPermCheckMR 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataSrv 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestBramCache 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestTLB 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataMRs 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataPDs 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataQPs 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestPermCheckMR 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestMetaDataSrv 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestBramCache 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestTLB 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenNormalCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenZeroLenCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenDmaReadErrCase 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenNormalCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenZeroLenCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenDmaReadErrCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleNormalReqCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleDupReqCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleNoAckReqCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleTooManyReadAtomicReqCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleReqErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandlePermCheckFailCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleDmaReadErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleRnrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleSeqErrCase 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleNormalReqCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleDupReqCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleNoAckReqCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleTooManyReadAtomicReqCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleReqErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandlePermCheckFailCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleDmaReadErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleRnrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestReqHandleRQ.bsv TOPMODULE=mkTestReqHandleSeqErrCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleNormalRespCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleDupRespCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleGhostRespCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRespErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRetryErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleTimeOutErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandlePermCheckFailCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRnrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleSeqErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleNestedRetryCase 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleNormalRespCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleDupRespCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleGhostRespCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRespErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRetryErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleTimeOutErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandlePermCheckFailCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleRnrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleSeqErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRespHandleSQ.bsv TOPMODULE=mkTestRespHandleNestedRetryCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleSeqErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleImplicitRetryCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleRnrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleTimeOutCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleNestedRetryCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleExcRetryLimitErrCase 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleExcTimeOutLimitErrCase 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleSeqErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleImplicitRetryCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleRnrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleTimeOutCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleNestedRetryCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleExcRetryLimitErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestRetryHandleSQ.bsv TOPMODULE=mkTestRetryHandleExcTimeOutLimitErrCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestCacheFIFO2 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestScanFIFOF 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestSearchFIFOF 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestVectorSearch 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestCacheFIFO2 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestScanFIFOF 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestSearchFIFOF 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestVectorSearch 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestSegmentDataStream 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestPsnFunc 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestSegmentDataStream 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestPsnFunc 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseRQ 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseRQ 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseSQ 2>&1 | tee -a $RUN_LOG
-# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseSQ 2>&1 | tee -a $RUN_LOG
+# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseRQ 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseRQ 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseSQ 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseSQ 2>&1 | tee -a $ALL_LOG
 
 make -j8 -f Makefile.test all TESTDIR=$TEST_DIR LOGDIR=$LOG_DIR
-cat $LOG_DIR/*.log | tee $RUN_LOG
+cat $LOG_DIR/*.log | tee $ALL_LOG
 
 FAIL_KEYWORKS='Error\|ImmAssert'
 grep -w $FAIL_KEYWORKS $LOG_DIR/*.log | cat
-ERR_NUM=`grep -c -w $FAIL_KEYWORKS $RUN_LOG | cat`
+ERR_NUM=`grep -c -w $FAIL_KEYWORKS $ALL_LOG | cat`
 if [ $ERR_NUM -gt 0 ]; then
     echo "FAIL"
     false
