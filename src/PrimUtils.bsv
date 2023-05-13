@@ -1,4 +1,5 @@
-import Cntrs :: *;
+// import Cntrs :: *;
+import FIFOF :: *;
 
 typedef 2 TWO;
 
@@ -179,6 +180,72 @@ function FlagsType#(enumType) toFlag(enumType inputVal) provisos(
     return unpack(pack(inputVal));
 endfunction
 
+// _read SB (incr CF decr) SB _write
+interface CountCF#(type anytype);
+    method Action incrOne();
+    method Action decrOne();
+    method Action _write (anytype write_val);
+    method anytype _read();
+endinterface
+
+module mkCountCF#(anytype resetVal)(CountCF#(anytype)) provisos(
+    Arith#(anytype), Bits#(anytype, tSz)
+);
+    Reg#(anytype) cntReg <- mkReg(resetVal);
+    FIFOF#(Bool)   incrQ <- mkFIFOF;
+    FIFOF#(Bool)   decrQ <- mkFIFOF;
+
+    Reg#(Maybe#(anytype)) writeReg[2] <- mkCReg(2, tagged Invalid);
+    Reg#(Bool) incrReg[2] <- mkCReg(2, False);
+    Reg#(Bool) decrReg[2] <- mkCReg(2, False);
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule write if (writeReg[1] matches tagged Valid .writeVal);
+        cntReg <= writeVal;
+        incrQ.clear;
+        decrQ.clear;
+        writeReg[1] <= tagged Invalid;
+        incrReg[1]  <= False;
+        decrReg[1]  <= False;
+    endrule
+
+    (* fire_when_enabled *)
+    rule increment if (!isValid(writeReg[1]));
+        incrReg[0] <= True;
+        incrQ.deq;
+    endrule
+
+    (* fire_when_enabled *)
+    rule decrement if (!isValid(writeReg[1]));
+        decrReg[0] <= True;
+        decrQ.deq;
+    endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule incrAndDecr if (!isValid(writeReg[1]));
+        if (incrReg[1] && !decrReg[1]) begin
+            cntReg <= cntReg + 1;
+        end
+        else if (!incrReg[1] && decrReg[1]) begin
+            cntReg <= cntReg - 1;
+        end
+
+        incrReg[1] <= False;
+        decrReg[1] <= False;
+    endrule
+
+    method Action incrOne();
+        incrQ.enq(True);
+    endmethod
+    method Action decrOne();
+        decrQ.enq(True);
+    endmethod
+    method Action _write(anytype writeVal);
+        writeReg[0] <= tagged Valid writeVal;
+    endmethod
+    method anytype _read() = cntReg;
+endmodule
+/*
 // All Count interface methods of mkCountCF are CF
 module mkCountCF#(anytype resetVal)(Count#(anytype)) provisos(
     Arith#(anytype), ModArith#(anytype), Bits#(anytype, tSz)
@@ -187,7 +254,6 @@ module mkCountCF#(anytype resetVal)(Count#(anytype)) provisos(
     Reg#(anytype) incrReg[2] <- mkCReg(2, 0);
     Reg#(anytype) decrReg[2] <- mkCReg(2, 0);
 
-    // Reg#(Maybe#(anytype)) updateReg[2] <- mkCReg(2, tagged Invalid);
     Reg#(Maybe#(anytype)) writeReg[2] <- mkCReg(2, tagged Invalid);
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -213,10 +279,10 @@ module mkCountCF#(anytype resetVal)(Count#(anytype)) provisos(
     endmethod
     method Action update(anytype updateVal);
         error("update is not defined for mkCountCF");
-        // updateReg[0] <= updateVal;
     endmethod
     method Action _write(anytype writeVal);
         writeReg[0] <= tagged Valid writeVal;
     endmethod
-    method anytype _read = cntReg;
+    method anytype _read() = cntReg;
 endmodule
+*/

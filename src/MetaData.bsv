@@ -197,7 +197,6 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
     Add#(TMul#(MAX_MR_PER_PD, MAX_PD), 0, MAX_MR) // MAX_MR == MAX_MR_PER_PD * MAX_PD
 );
     TagVecSrv#(MAX_MR_PER_PD, MemRegion) mrTagVec <- mkTagVecSrv;
-    // FIFOF#(IndexCB) cbIndexQ <- mkFIFOF;
 
     function Tuple2#(LKEY, RKEY) genLocalAndRmtKey(IndexMR mrIndex, MemRegion mr);
         LKEY lkey = { pack(mrIndex), mr.lkeyPart };
@@ -205,26 +204,26 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
         return tuple2(lkey, rkey);
     endfunction
 
-    function IndexMR lkey2IndexMR(LKEY lkey) = unpack(truncateLSB(lkey));
-    function IndexMR rkey2IndexMR(RKEY rkey) = unpack(truncateLSB(rkey));
+    // function IndexMR lkey2IndexMR(LKEY lkey) = unpack(truncateLSB(lkey));
+    // function IndexMR rkey2IndexMR(RKEY rkey) = unpack(truncateLSB(rkey));
+    function IndexMR key2IndexMR(Bit#(KEY_WIDTH) key) = unpack(truncateLSB(key));
 
     interface srvPort = interface SrvPortMR;
         interface request = interface Put#(ReqMR);
             method Action put(ReqMR mrReq);
-                let mrIndex = mrReq.lkeyOrNot ?
-                    lkey2IndexMR(mrReq.lkey) : rkey2IndexMR(mrReq.rkey);
+                // let mrIndex = mrReq.lkeyOrNot ?
+                //     lkey2IndexMR(mrReq.lkey) : rkey2IndexMR(mrReq.rkey);
+                let mrReqKey = mrReq.lkeyOrNot ? mrReq.lkey : mrReq.rkey;
+                let mrIndex  = key2IndexMR(mrReqKey);
                 mrTagVec.srvPort.request.put(tuple3(
                     mrReq.allocOrNot, mrReq.mr, mrIndex
                 ));
-                // cbIndexQ.enq(mrReq.cbIndex);
             endmethod
         endinterface;
 
         interface response = interface Get#(RespMR);
             method ActionValue#(RespMR) get();
                 let { successOrNot, mrIndex, mr } <- mrTagVec.srvPort.response.get;
-                // let cbIndex = cbIndexQ.first;
-                // cbIndexQ.deq;
 
                 let { lkey, rkey } = genLocalAndRmtKey(mrIndex, mr);
                 let mrResp = RespMR {
@@ -232,7 +231,6 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
                     mr          : mr,
                     lkey        : lkey,
                     rkey        : rkey
-                    // cbIndex     : cbIndex
                 };
                 return mrResp;
             endmethod
@@ -240,12 +238,12 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
     endinterface;
 
     method Maybe#(MemRegion) getMemRegionByLKey(LKEY lkey);
-        IndexMR mrIndex = lkey2IndexMR(lkey);
+        let mrIndex = key2IndexMR(lkey);
         return mrTagVec.getItem(mrIndex);
     endmethod
 
     method Maybe#(MemRegion) getMemRegionByRKey(RKEY rkey);
-        IndexMR mrIndex = rkey2IndexMR(rkey);
+        let mrIndex = key2IndexMR(rkey);
         return mrTagVec.getItem(mrIndex);
     endmethod
 

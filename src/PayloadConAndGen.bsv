@@ -183,23 +183,22 @@ module mkPayloadGenerator#(
         // );
 
         if (shouldSegment) begin
-            // Bool isFragCntZero = isZero(pmtuFragCntReg);
             if (shouldSetFirstReg || curData.isFirst) begin
                 curData.isFirst = True;
                 shouldSetFirstReg <= False;
 
-                let nextPmtuFragCnt = pmtuFragNum - 2;
-                pmtuFragCntReg   <= nextPmtuFragCnt;
-                isFragCntZeroReg <= isZero(nextPmtuFragCnt);
+                // let nextPmtuFragCnt = pmtuFragNum - 2;
+                pmtuFragCntReg   <= pmtuFragNum - 2;
+                isFragCntZeroReg <= isTwo(pmtuFragNum);
             end
             else if (isFragCntZeroReg) begin
                 curData.isLast = True;
                 shouldSetFirstReg <= True;
             end
             else if (!curData.isLast) begin
-                let nextPmtuFragCnt = pmtuFragCntReg - 1;
-                pmtuFragCntReg   <= nextPmtuFragCnt;
-                isFragCntZeroReg <= isZero(nextPmtuFragCnt);
+                // let nextPmtuFragCnt = pmtuFragCntReg - 1;
+                pmtuFragCntReg   <= pmtuFragCntReg - 1;
+                isFragCntZeroReg <= isOne(pmtuFragCntReg);
             end
         end
 
@@ -256,9 +255,9 @@ module mkPayloadConsumer#(
     DmaWriteSrv dmaWriteSrv,
     PipeOut#(PayloadConReq) payloadConReqPipeIn
 )(PayloadConsumer);
-    FIFOF#(Tuple2#(PayloadConReq, Bool)) consumeReqQ <- mkFIFOF;
-    FIFOF#(PayloadConResp)              consumeRespQ <- mkFIFOF;
-    FIFOF#(PayloadConReq)             pendingConReqQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PayloadConReq, Bool, Bool)) consumeReqQ <- mkFIFOF;
+    FIFOF#(PayloadConResp)                    consumeRespQ <- mkFIFOF;
+    FIFOF#(PayloadConReq)                   pendingConReqQ <- mkFIFOF;
 
     // TODO: check payloadOutQ buffer size is enough for DMA write delay?
     FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
@@ -382,17 +381,18 @@ module mkPayloadConsumer#(
         endcase
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
-        consumeReqQ.enq(tuple2(consumeReq, isFragNumLessOrEqOne));
+        let isFragNumEqTwo       = isTwo(consumeReq.fragNum);
+        consumeReqQ.enq(tuple3(consumeReq, isFragNumLessOrEqOne, isFragNumEqTwo));
     endrule
 
     rule processReq if ((cntrl.isNonErr || cntrl.isERR) && !busyReg);
-        let { consumeReq, isFragNumLessOrEqOne } = consumeReqQ.first;
+        let { consumeReq, isFragNumLessOrEqOne, isFragNumEqTwo } = consumeReqQ.first;
         // $display("time=%0t: consumeReq=", $time, fshow(consumeReq));
 
-        let remainingFragNum       = consumeReq.fragNum - 2;
-        let isRemainingFragNumZero = isZero(remainingFragNum);
-        remainingFragNumReg       <= remainingFragNum;
-        isRemainingFragNumZeroReg <= isRemainingFragNumZero;
+        // let remainingFragNum       = consumeReq.fragNum - 2;
+        // let isRemainingFragNumZero = isZero(remainingFragNum);
+        remainingFragNumReg       <= consumeReq.fragNum - 2;
+        isRemainingFragNumZeroReg <= isFragNumEqTwo;
 
         case (consumeReq.consumeInfo) matches
             tagged DiscardPayloadInfo .discardInfo: begin
@@ -464,15 +464,16 @@ module mkPayloadConsumer#(
         let payload = payloadBufPipeOut.first;
         payloadBufPipeOut.deq;
 
-        let nextRemainingFragNum   = remainingFragNumReg - 1;
-        remainingFragNumReg       <= nextRemainingFragNum;
-        isRemainingFragNumZeroReg <= isZero(nextRemainingFragNum);
+        // let nextRemainingFragNum   = remainingFragNumReg - 1;
+        remainingFragNumReg       <= remainingFragNumReg - 1;
+        isRemainingFragNumZeroReg <= isOne(remainingFragNumReg);
         // $display(
-        //     "time=%0t: multi-packet response remainingFragNumReg=%0d, payload.isLast=",
-        //     $time, remainingFragNumReg, fshow(payload.isLast)
+        //     "time=%0t:", $time,
+        //     " multi-packet response remainingFragNumReg=%0d", remainingFragNumReg,
+        //     ", payload.isLast=", fshow(payload.isLast),
+        //     ", consumeReq=", fshow(consumeReq)
         // );
 
-        // if (isZero(remainingFragNumReg)) begin
         if (isRemainingFragNumZeroReg) begin
             immAssert(
                 payload.isLast,

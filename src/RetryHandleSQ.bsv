@@ -560,7 +560,7 @@ module mkRetryHandleSQ#(
         end
         else begin
             rnrWaitCntReg <= rnrWaitCntReg - 1;
-            isRnrWaitCntZeroReg <= isZero(rnrWaitCntReg);
+            isRnrWaitCntZeroReg <= isOne(rnrWaitCntReg);
         end
 
         // $display(

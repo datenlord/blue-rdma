@@ -196,7 +196,6 @@ module mkRespHandleSQ#(
     endrule
 
     let inNormalState = !retryFlushReg && !errOccurredReg && !recvErrRespReg;
-    // let inNormalStateAlt = !retryFlushReg && !errOccurredReg && !recvErrRespReg[1];
     let inRetryState = retryFlushReg && !errOccurredReg && !recvErrRespReg;
     // Error state must include controller error state
     let inErrState = errOccurredReg || cntrl.isERR;
@@ -562,7 +561,7 @@ module mkRespHandleSQ#(
             WR_ACK_EXPLICIT_WHOLE_RETRY, WR_ACK_EXPLICIT_PARTIAL_RETRY: begin
                 respAction = SQ_ACT_EXPLICIT_RETRY;
                 recvRetryRespReg <= True;
-                retryFlushReg <= True;
+                retryFlushReg    <= True;
             end
             WR_ACK_EXPLICIT_WHOLE_ERROR, WR_ACK_EXPLICIT_PARTIAL_ERROR: begin
                 respAction = SQ_ACT_ERROR_RESP;
@@ -574,7 +573,7 @@ module mkRespHandleSQ#(
             WR_ACK_COALESCE_RETRY: begin
                 respAction = SQ_ACT_IMPLICIT_RETRY;
                 recvRetryRespReg <= True;
-                retryFlushReg <= True;
+                retryFlushReg    <= True;
             end
             WR_ACK_DUPLICATE: begin
                 respAction = SQ_ACT_DUPLICATE_RESP;
@@ -1411,10 +1410,10 @@ module mkRespHandleSQ#(
             bth             : bth,
             aeth            : dontCareValue, // aeth,
             // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
-            isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
-            isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
-            isReadResp      : isReadRespRdmaOpCode(bth.opcode),
-            isAtomicResp    : isAtomicRespRdmaOpCode(bth.opcode),
+            isFirstOrOnlyPkt: True, // isFirstOrOnlyRdmaOpCode(bth.opcode),
+            isLastOrOnlyPkt : True, // isLastOrOnlyRdmaOpCode(bth.opcode),
+            isReadResp      : False, // isReadRespRdmaOpCode(bth.opcode),
+            isAtomicResp    : False, // isAtomicRespRdmaOpCode(bth.opcode),
             hasLocalErr     : False,
             shouldDiscard   : True,
             genWorkComp     : False
@@ -1455,10 +1454,19 @@ module mkRespHandleSQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule canonicalize if (cntrl.isRTS);
-        if (hasInternalErrReg[1] || hasTimeOutErrReg[1]) begin
-            errOccurredReg <= True;
-        end
+    rule canonicalize if (
+        cntrl.isRTS && (hasInternalErrReg[1] || hasTimeOutErrReg[1])
+    );
+        errOccurredReg       <= True;
+        hasInternalErrReg[1] <= False;
+        // hasTimeOutErrReg[1] is set to False in errFlushPktMetaDataAndPayload
+        $display(
+            "time=%0t:", $time,
+            " set errOccurredReg to True when hasInternalErrReg[1]=",
+            fshow(hasInternalErrReg[1]),
+            " and hasTimeOutErrReg[1]=",
+            fshow(hasTimeOutErrReg[1])
+        );
     endrule
 
     // (* no_implicit_conditions, fire_when_enabled *)
