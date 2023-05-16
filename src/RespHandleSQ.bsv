@@ -610,11 +610,35 @@ module mkRespHandleSQ#(
             end
         endcase
 
-        immAssert(
-            respAction != SQ_ACT_UNKNOWN,
-            "respAction assertion @ mkRespHandleSQ",
-            $format("respAction=", fshow(respAction), " should not be unknown")
-        );
+        if (inRetryState) begin
+            immAssert(
+                respAction == SQ_ACT_DISCARD_RESP,
+                "respAction retry flush assertion @ mkRespHandleSQ",
+                $format(
+                    "respAction=", fshow(respAction),
+                    " should be SQ_ACT_DISCARD_RESP when inRetryState=",
+                    fshow(inRetryState)
+                )
+            );
+        end
+        // else if (inErrState) begin
+        //     immAssert(
+        //         respAction == SQ_ACT_DISCARD_RESP || respAction == SQ_ACT_FLUSH_WR,
+        //         "respAction error flush assertion @ mkRespHandleSQ",
+        //         $format(
+        //             "respAction=", fshow(respAction),
+        //             " should be SQ_ACT_FLUSH_WR or SQ_ACT_DISCARD_RESP when inErrState=",
+        //             fshow(inErrState)
+        //         )
+        //     );
+        // end
+        else begin
+            immAssert(
+                respAction != SQ_ACT_UNKNOWN,
+                "respAction assertion @ mkRespHandleSQ",
+                $format("respAction=", fshow(respAction), " should not be unknown")
+            );
+        end
 
         pendingRespQ.enq(tuple6(
             pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
