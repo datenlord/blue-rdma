@@ -516,14 +516,14 @@ typedef Server#(PermCheckInfo, Bool) PermCheckMR;
 module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
     FIFOF#(PermCheckInfo) reqInQ <- mkFIFOF;
     FIFOF#(Bool) respOutQ <- mkFIFOF;
-    FIFOF#(Tuple3#(PermCheckInfo, Bool, Maybe#(MemRegion))) checkReqQ <- mkFIFOF;
+    // FIFOF#(Tuple3#(PermCheckInfo, Bool, Maybe#(MemRegion))) checkReqQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PermCheckInfo, Bool, Maybe#(MemRegion))) checkStepOneQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PermCheckInfo, Maybe#(MemRegion), Bool)) checkStepTwoQ <- mkFIFOF;
 
     function Bool checkPermByMR(PermCheckInfo permCheckInfo, MemRegion mr);
         let keyMatch = case (permCheckInfo.localOrRmtKey)
             True : (truncate(permCheckInfo.lkey) == mr.lkeyPart);
             False: (truncate(permCheckInfo.rkey) == mr.rkeyPart);
-            // False: (isValid(mr.rkeyPart) ?
-            //     truncate(permCheckInfo.rkey) == unwrapMaybe(mr.rkeyPart) : False);
         endcase;
 
         let accTypeMatch = compareAccessTypeFlags(permCheckInfo.accFlags, mr.accFlags);
@@ -556,7 +556,7 @@ module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
         return maybeMR;
     endfunction
 
-    rule checkReq;
+    rule recvReq;
         let permCheckInfo = reqInQ.first;
         reqInQ.deq;
 
@@ -582,9 +582,51 @@ module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
             );
         end
 
-        checkReqQ.enq(tuple3(permCheckInfo, isZeroDmaLen, maybeMR));
+        checkStepOneQ.enq(tuple3(permCheckInfo, isZeroDmaLen, maybeMR));
+        // checkReqQ.enq(tuple3(permCheckInfo, isZeroDmaLen, maybeMR));
     endrule
 
+    rule checkReqStepOne;
+        let { permCheckInfo, isZeroDmaLen, maybeMR } = checkStepOneQ.first;
+        checkStepOneQ.deq;
+
+        let stepOneResult = isZeroDmaLen;
+        if (!isZeroDmaLen) begin
+            if (maybeMR matches tagged Valid .mr) begin
+                let keyMatch = permCheckInfo.localOrRmtKey ?
+                    (truncate(permCheckInfo.lkey) == mr.lkeyPart) :
+                    (truncate(permCheckInfo.rkey) == mr.rkeyPart);
+
+                let accTypeMatch = compareAccessTypeFlags(
+                    permCheckInfo.accFlags, mr.accFlags
+                );
+
+                stepOneResult = keyMatch && accTypeMatch;
+            end
+        end
+
+        checkStepTwoQ.enq(tuple3(permCheckInfo, maybeMR, stepOneResult));
+    endrule
+
+    rule checkReqStepTwo;
+        let { permCheckInfo, maybeMR, stepOneResult } = checkStepTwoQ.first;
+        checkStepTwoQ.deq;
+
+        let stepTwoResult = stepOneResult;
+        if (stepOneResult) begin
+            if (maybeMR matches tagged Valid .mr) begin
+                stepTwoResult = checkAddrAndLenWithinRange(
+                    permCheckInfo.reqAddr,
+                    permCheckInfo.totalLen,
+                    mr.laddr,
+                    mr.len
+                );
+            end
+        end
+
+        respOutQ.enq(stepTwoResult);
+    endrule
+/*
     rule checkResp;
         let { permCheckInfo, isZeroDmaLen, maybeMR } = checkReqQ.first;
         checkReqQ.deq;
@@ -598,7 +640,7 @@ module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
 
         respOutQ.enq(checkResult);
     endrule
-
+*/
     return toGPServer(reqInQ, respOutQ);
 endmodule
 

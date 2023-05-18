@@ -167,7 +167,6 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     endrule
 endmodule
 
-
 (* synthesize *)
 module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     let minpktLen = 2048;

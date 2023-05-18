@@ -255,26 +255,36 @@ module mkPayloadConsumer#(
     DmaWriteSrv dmaWriteSrv,
     PipeOut#(PayloadConReq) payloadConReqPipeIn
 )(PayloadConsumer);
-    FIFOF#(Tuple3#(PayloadConReq, Bool, Bool)) consumeReqQ <- mkFIFOF;
-    FIFOF#(PayloadConResp)                    consumeRespQ <- mkFIFOF;
-    FIFOF#(PayloadConReq)                   pendingConReqQ <- mkFIFOF;
+    // Output FIFO for PipeOut
+    FIFOF#(PayloadConResp) consumeRespQ <- mkFIFOF;
+
+    // Pipeline FIFO
+    // FIFOF#(Tuple4#(PayloadConReq, PmtuFragNum, Bool, Bool)) consumeReqQ <- mkFIFOF;
+    FIFOF#(Tuple2#(PayloadConReq, Bool))              countReqFragQ <- mkFIFOF;
+    FIFOF#(Tuple4#(PayloadConReq, Bool, Bool, Bool)) pendingConReqQ <- mkFIFOF;
+    FIFOF#(PayloadConReq)                               genConRespQ <- mkFIFOF;
+    FIFOF#(Tuple2#(PayloadConReq, DataStream))       pendingDmaReqQ <- mkFIFOF;
 
     // TODO: check payloadOutQ buffer size is enough for DMA write delay?
     FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
     let payloadBufPipeOut <- mkConnectPipeOut2BramQ(payloadPipeIn, payloadBufQ);
 
     Reg#(PmtuFragNum) remainingFragNumReg <- mkRegU;
-    Reg#(Bool)  isRemainingFragNumZeroReg <- mkRegU;
-    Reg#(Bool) busyReg <- mkReg(False);
+    Reg#(Bool)  isRemainingFragNumZeroReg <- mkReg(False);
+    Reg#(Bool)       isFirstOrOnlyFragReg <- mkReg(True);
+    // Reg#(Bool) busyReg <- mkReg(False);
 
     rule clearAndReset if (cntrl.isReset);
-        consumeReqQ.clear;
         consumeRespQ.clear;
+        countReqFragQ.clear;
         pendingConReqQ.clear;
+        genConRespQ.clear;
+        pendingDmaReqQ.clear;
         payloadBufQ.clear;
 
-        busyReg <= False;
-
+        // busyReg <= False;
+        isFirstOrOnlyFragReg      <= True;
+        isRemainingFragNumZeroReg <= False;
         // $display("time=%0t: clearAndReset @ mkPayloadConsumer", $time);
     endrule
 
@@ -294,7 +304,7 @@ module mkPayloadConsumer#(
             );
         endaction
     endfunction
-
+/*
     function Action sendDmaWriteReqOrDiscard(
         PayloadConReq consumeReq, DataStream payload
     );
@@ -334,8 +344,7 @@ module mkPayloadConsumer#(
             endcase
         endaction
     endfunction
-
-    // TODO: should receive discard request even when error state
+*/
     rule recvReq if (cntrl.isNonErr || cntrl.isERR);
         let consumeReq = payloadConReqPipeIn.first;
         payloadConReqPipeIn.deq;
@@ -381,17 +390,161 @@ module mkPayloadConsumer#(
         endcase
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
-        let isFragNumEqTwo       = isTwo(consumeReq.fragNum);
-        consumeReqQ.enq(tuple3(consumeReq, isFragNumLessOrEqOne, isFragNumEqTwo));
+        countReqFragQ.enq(tuple2(consumeReq, isFragNumLessOrEqOne));
+        // let isFragNumEqTwo       = isTwo(consumeReq.fragNum);
+        // let fragNumMinusTwo      = consumeReq.fragNum - 2;
+        // consumeReqQ.enq(tuple4(
+        //     consumeReq, fragNumMinusTwo, isFragNumLessOrEqOne, isFragNumEqTwo
+        // ));
     endrule
 
+    rule countReqFrag if (cntrl.isNonErr || cntrl.isERR);
+        let { consumeReq, isFragNumLessOrEqOne } = countReqFragQ.first;
+
+        let isLastReqFrag = isFragNumLessOrEqOne ? True : isRemainingFragNumZeroReg;
+        if (isLastReqFrag) begin
+            countReqFragQ.deq;
+            isFirstOrOnlyFragReg      <= True;
+            isRemainingFragNumZeroReg <= False;
+        end
+        else begin
+            if (isFirstOrOnlyFragReg) begin
+                remainingFragNumReg       <= consumeReq.fragNum - 2;
+                isRemainingFragNumZeroReg <= isTwo(consumeReq.fragNum);
+                isFirstOrOnlyFragReg      <= False;
+            end
+            else begin
+                remainingFragNumReg       <= remainingFragNumReg - 1;
+                isRemainingFragNumZeroReg <= isOne(remainingFragNumReg);
+            end
+        end
+
+        pendingConReqQ.enq(tuple4(
+            consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFragReg, isLastReqFrag
+        ));
+        $display(
+            "time=%0t:", $time,
+            " consumeReq.fragNum=%0d", consumeReq.fragNum,
+            ", remainingFragNumReg=%0d", remainingFragNumReg,
+            ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
+            ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
+            ", isLastReqFrag=", fshow(isLastReqFrag)
+        );
+    endrule
+
+    rule consumePayload if (cntrl.isNonErr || cntrl.isERR);
+        let {
+            consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFrag, isLastReqFrag
+        } = pendingConReqQ.first;
+        pendingConReqQ.deq;
+
+        case (consumeReq.consumeInfo) matches
+            tagged DiscardPayloadInfo .discardInfo: begin
+                let payload = payloadBufPipeOut.first;
+                payloadBufPipeOut.deq;
+
+                if (isFragNumLessOrEqOne) begin
+                    checkIsOnlyPayloadFragment(payload, consumeReq.consumeInfo);
+                end
+
+                if (isFirstOrOnlyFrag) begin
+                    immAssert(
+                        payload.isFirst,
+                        "first payload assertion @ mkPayloadConsumer",
+                        $format(
+                            "payload.isFirst=", fshow(payload.isFirst),
+                            " should be true when isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
+                            " and consumeReq=", fshow(consumeReq)
+                        )
+                    );
+                end
+
+                if (isLastReqFrag) begin
+                    immAssert(
+                        payload.isLast,
+                        "last payload assertion @ mkPayloadConsumer",
+                        $format(
+                            "payload.isLast=", fshow(payload.isLast),
+                            " should be true when isLastReqFrag=", fshow(isLastReqFrag),
+                            " for discard consumeReq=", fshow(consumeReq.consumeInfo)
+                        )
+                    );
+                end
+            end
+            tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                genConRespQ.enq(consumeReq);
+
+                immAssert(
+                    isFragNumLessOrEqOne && isFirstOrOnlyFrag && isLastReqFrag,
+                    "only frag assertion @ mkPayloadConsumer",
+                    $format(
+                        "isFragNumLessOrEqOne=", fshow(isFragNumLessOrEqOne),
+                        ", isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
+                        ", isLastReqFrag=", fshow(isLastReqFrag),
+                        " should be all true when atomic consumeReq=",
+                        fshow(consumeReq)
+                    )
+                );
+
+                let payload = dontCareValue;
+                pendingDmaReqQ.enq(tuple2(consumeReq, payload));
+            end
+            tagged SendWriteReqReadRespInfo .sendWriteReqReadRespInfo: begin
+                let payload = payloadBufPipeOut.first;
+                payloadBufPipeOut.deq;
+                if (isFragNumLessOrEqOne) begin
+                    checkIsOnlyPayloadFragment(payload, consumeReq.consumeInfo);
+                    // $display(
+                    //     "time=%0t: single packet response consumeReq.fragNum=%0d",
+                    //     $time, consumeReq.fragNum
+                    // );
+                end
+
+                if (isFirstOrOnlyFrag) begin
+                    immAssert(
+                        payload.isFirst,
+                        "first payload assertion @ mkPayloadConsumer",
+                        $format(
+                            "payload.isFirst=", fshow(payload.isFirst),
+                            " should be true when isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
+                            " for consumeReq=", fshow(consumeReq)
+                        )
+                    );
+                end
+
+                if (isLastReqFrag) begin
+                    immAssert(
+                        payload.isLast,
+                        "last payload assertion @ mkPayloadConsumer",
+                        $format(
+                            "payload.isLast=", fshow(payload.isLast),
+                            " should be true when isLastReqFrag=", fshow(isLastReqFrag),
+                            " for consumeReq=", fshow(consumeReq)
+                        )
+                    );
+
+                    genConRespQ.enq(consumeReq);
+                end
+                pendingDmaReqQ.enq(tuple2(consumeReq, payload));
+            end
+            default: begin
+                immFail(
+                    "unreachible case @ mkPayloadConsumer",
+                    $format("consumeReq.consumeInfo=", fshow(consumeReq.consumeInfo))
+                );
+            end
+        endcase
+    endrule
+/*
     rule processReq if ((cntrl.isNonErr || cntrl.isERR) && !busyReg);
-        let { consumeReq, isFragNumLessOrEqOne, isFragNumEqTwo } = consumeReqQ.first;
+        let {
+            consumeReq, fragNumMinusTwo, isFragNumLessOrEqOne, isFragNumEqTwo
+        } = consumeReqQ.first;
         // $display("time=%0t: consumeReq=", $time, fshow(consumeReq));
 
         // let remainingFragNum       = consumeReq.fragNum - 2;
         // let isRemainingFragNumZero = isZero(remainingFragNum);
-        remainingFragNumReg       <= consumeReq.fragNum - 2;
+        remainingFragNumReg       <= fragNumMinusTwo;
         isRemainingFragNumZeroReg <= isFragNumEqTwo;
 
         case (consumeReq.consumeInfo) matches
@@ -402,7 +555,6 @@ module mkPayloadConsumer#(
                 if (isFragNumLessOrEqOne) begin
                     checkIsOnlyPayloadFragment(payload, consumeReq.consumeInfo);
                     consumeReqQ.deq;
-                    // pendingConReqQ.enq(consumeReq);
                 end
                 else begin
                     // remainingFragNumReg       <= remainingFragNum;
@@ -413,7 +565,9 @@ module mkPayloadConsumer#(
             tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
                 consumeReqQ.deq;
                 pendingConReqQ.enq(consumeReq);
-                sendDmaWriteReqOrDiscard(consumeReq, dontCareValue);
+                let payload = dontCareValue;
+                pendingDmaReqQ.enq(tuple2(consumeReq, payload));
+                // sendDmaWriteReqOrDiscard(consumeReq, payload);
             end
             tagged SendWriteReqReadRespInfo .sendWriteReqReadRespInfo: begin
                 let payload = payloadBufPipeOut.first;
@@ -447,8 +601,8 @@ module mkPayloadConsumer#(
                     //     $time, consumeReq.fragNum - 1
                     // );
                 end
-
-                sendDmaWriteReqOrDiscard(consumeReq, payload);
+                pendingDmaReqQ.enq(tuple2(consumeReq, payload));
+                // sendDmaWriteReqOrDiscard(consumeReq, payload);
             end
             default: begin
                 immFail(
@@ -460,7 +614,9 @@ module mkPayloadConsumer#(
     endrule
 
     rule consumePayload if ((cntrl.isNonErr || cntrl.isERR) && busyReg);
-        let { consumeReq, isFragNumLessOrEqOne } = consumeReqQ.first;
+        let {
+            consumeReq, fragNumMinusTwo, isFragNumLessOrEqOne, isFragNumEqTwo
+        } = consumeReqQ.first;
         let payload = payloadBufPipeOut.first;
         payloadBufPipeOut.deq;
 
@@ -493,13 +649,53 @@ module mkPayloadConsumer#(
             busyReg <= False;
         end
 
-        sendDmaWriteReqOrDiscard(consumeReq, payload);
+        pendingDmaReqQ.enq(tuple2(consumeReq, payload));
+        // sendDmaWriteReqOrDiscard(consumeReq, payload);
+    endrule
+*/
+    rule issueDmaReq if (cntrl.isNonErr);
+        let { consumeReq, payload } = pendingDmaReqQ.first;
+        pendingDmaReqQ.deq;
+
+        case (consumeReq.consumeInfo) matches
+            tagged SendWriteReqReadRespInfo .sendWriteReqReadRespInfo: begin
+                let dmaWriteReq = DmaWriteReq {
+                    metaData  : sendWriteReqReadRespInfo,
+                    dataStream: payload
+                };
+                // $display("time=%0t: dmaWriteReq=", $time, fshow(dmaWriteReq));
+                dmaWriteSrv.request.put(dmaWriteReq);
+            end
+            tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
+                // let { atomicRespDmaWriteMetaData, atomicRespPayload } = atomicRespInfo;
+                let dmaWriteReq = DmaWriteReq {
+                    metaData   : atomicRespInfo.atomicRespDmaWriteMetaData,
+                    dataStream : DataStream {
+                        data   : zeroExtendLSB(atomicRespInfo.atomicRespPayload),
+                        byteEn : genByteEn(fromInteger(valueOf(ATOMIC_WORK_REQ_LEN))),
+                        isFirst: True,
+                        isLast : True
+                    }
+                };
+                dmaWriteSrv.request.put(dmaWriteReq);
+            end
+            default: begin
+                immAssert(
+                    isDiscardPayload(consumeReq.consumeInfo),
+                    "isDiscardPayload assertion @ mkPayloadConsumer",
+                    $format(
+                        "consumeReq.consumeInfo=", fshow(consumeReq.consumeInfo),
+                        " should be DiscardPayload"
+                    )
+                );
+            end
+        endcase
     endrule
 
-    rule genResp if (cntrl.isNonErr);
+    rule genConResp if (cntrl.isNonErr);
         let dmaWriteResp <- dmaWriteSrv.response.get;
-        let consumeReq = pendingConReqQ.first;
-        pendingConReqQ.deq;
+        let consumeReq = genConRespQ.first;
+        genConRespQ.deq;
         // $display(
         //     "time=%0t: dmaWriteResp=", $time, fshow(dmaWriteResp),
         //     ", consumeReq=", fshow(consumeReq)
@@ -571,8 +767,14 @@ module mkPayloadConsumer#(
         let dmaWriteResp <- dmaWriteSrv.response.get;
     endrule
 
+    // rule flushPayloadBufPipeOut if (cntrl.isERR);
+    //     payloadBufPipeOut.deq;
+    // endrule
+
     rule flushPipelineQ if (cntrl.isERR);
+        payloadBufQ.clear;
         pendingConReqQ.clear;
+        pendingDmaReqQ.clear;
     endrule
 
     rule flushPayloadConResp if (cntrl.isERR);
