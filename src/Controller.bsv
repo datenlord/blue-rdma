@@ -48,13 +48,12 @@ interface ContextRQ;
     method Action        setSendWriteReqPktNum(PktNum sendWriteReqPktNum);
     method RdmaOpCode    getPreReqOpCode();
     method Action        setPreReqOpCode(RdmaOpCode preOpCode);
-    method Action        restorePreReqOpCode(RdmaOpCode preOpCode);
     // method PendingReqCnt getCoalesceWorkReqCnt();
     // method Action        setCoalesceWorkReqCnt(PendingReqCnt coalesceWorkReqCnt);
     // method PendingReqCnt getPendingDestReadAtomicReqCnt();
     // method Action        setPendingDestReadAtomicReqCnt(PendingReqCnt pendingDestReadAtomicReqCnt);
-    // method Epoch         getEpoch();
-    // method Action        incEpoch();
+    method Epoch         getEpoch();
+    method Action        incEpoch();
     method MSN           getMSN();
     method Action        setMSN(MSN msn);
     method Bool          getIsRespPktNumZero();
@@ -64,7 +63,9 @@ interface ContextRQ;
     method Action        setCurRespPSN(PSN curRespPsn);
     method PSN           getEPSN();
     method Action        setEPSN(PSN psn);
-    method Action        restoreEPSN(PSN psn);
+    method Action        restorePreReqOpCodeAndEPSN(RdmaOpCode preOpCode, PSN psn);
+    // method Action        restorePreReqOpCode(RdmaOpCode preOpCode);
+    // method Action        restoreEPSN(PSN psn);
 endinterface
 
 interface Controller;
@@ -122,7 +123,7 @@ module mkController(Controller);
     Reg#(Bool)   errFlushDoneReg <- mkRegU;
     Reg#(Bool) setStateErrReg[2] <- mkCReg(2, False);
 
-    Reg#(Maybe#(QpState)) setStateReg[2] <- mkCReg(2, tagged Invalid);
+    Reg#(Maybe#(QpState)) nextStateReg[2] <- mkCReg(2, tagged Invalid);
 
     // TODO: support QP access check
     Reg#(FlagsType#(MemAccessTypeFlag)) qpAccessFlagsReg <- mkRegU;
@@ -161,14 +162,33 @@ module mkController(Controller);
     // Reg#(PendingReqCnt) coalesceWorkReqCntReg <- mkRegU;
     // Reg#(PendingReqCnt) pendingDestReadAtomicReqCntReg <- mkRegU;
 
-    // Reg#(Epoch)   epochReg <- mkReg(0);
-    Reg#(MSN)       msnReg <- mkReg(0);
+    Reg#(Epoch) epochReg <- mkReg(0);
+    Reg#(MSN)     msnReg <- mkReg(0);
 
     Reg#(Bool) isRespPktNumZeroReg <- mkRegU;
     Reg#(PktNum)     respPktNumReg <- mkRegU;
     Reg#(PSN)        curRespPsnReg <- mkRegU;
     Reg#(PSN)           epsnReg[2] <- mkCRegU(2);
+
+    FIFOF#(Tuple2#(RdmaOpCode, PSN)) restoreQ <- mkFIFOF;
     // End ContextRQ related
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule resetAndClear if (stateReg == IBV_QPS_RESET);
+        preReqOpCodeReg[0] <= SEND_ONLY;
+        epochReg <= 0;
+        msnReg   <= 0;
+        restoreQ.clear;
+    endrule
+
+    (* fire_when_enabled *)
+    rule restore if (stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD);
+        let { preOpCode, epsn } = restoreQ.first;
+        restoreQ.deq;
+
+        preReqOpCodeReg[1] <= preOpCode;
+        epsnReg[1] <= epsn;
+    endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule canonicalize;
@@ -179,7 +199,7 @@ module mkController(Controller);
         );
 
         let nextState = stateReg;
-        if (setStateReg[1] matches tagged Valid .setState) begin
+        if (nextStateReg[1] matches tagged Valid .setState) begin
             nextState = setState;
         end
         // IBV_QPS_RESET has higher priority than IBV_QPS_ERR,
@@ -189,7 +209,7 @@ module mkController(Controller);
         end
 
         stateReg <= nextState;
-        setStateReg[1] <= tagged Invalid;
+        nextStateReg[1] <= tagged Invalid;
         setStateErrReg[1] <= False;
         // $display("time=%0t:", $time, " sqpnReg=%h, stateReg=", sqpnReg, fshow(stateReg));
     endrule
@@ -217,7 +237,7 @@ module mkController(Controller);
                 "SQPN assertion @ mkController",
                 $format("qpReq.qpn=%h should == sqpnReg=%h", qpReq.qpn, sqpnReg)
             );
-            setStateReg[0] <= tagged Valid qpReq.qpAttr.qpState;
+            nextStateReg[0] <= tagged Valid qpReq.qpAttr.qpState;
             qpResp.successOrNot = True;
         end
         else begin
@@ -269,7 +289,7 @@ module mkController(Controller);
                 qpResp.qpAttr.sqDraining        = stateReg == IBV_QPS_SQD;
             end
             REQ_QP_DESTROY: begin
-                setStateReg[0]                 <= tagged Valid IBV_QPS_RESET;
+                nextStateReg[0]                <= tagged Valid IBV_QPS_RESET;
 
                 qpResp.successOrNot             = True;
                 qpResp.qpAttr.curQpState        = stateReg;
@@ -277,7 +297,7 @@ module mkController(Controller);
             end
             REQ_QP_MODIFY: begin
                 // TODO: modify QP by QpAttrMaskFlag
-                setStateReg[0]                 <= tagged Valid qpReq.qpAttr.qpState;
+                nextStateReg[0]                <= tagged Valid qpReq.qpAttr.qpState;
                 // qpTypeReg                      <= qpType;
                 maxRnrCntReg                   <= qpReq.qpAttr.rnrRetry;
                 maxRetryCntReg                 <= qpReq.qpAttr.retryCnt;
@@ -437,9 +457,9 @@ module mkController(Controller);
         method Action     setPreReqOpCode(RdmaOpCode preOpCode) if (inited);
             preReqOpCodeReg[0] <= preOpCode;
         endmethod
-        method Action     restorePreReqOpCode(RdmaOpCode preOpCode) if (inited);
-            preReqOpCodeReg[1] <= preOpCode;
-        endmethod
+        // method Action     restorePreReqOpCode(RdmaOpCode preOpCode) if (inited);
+        //     preReqOpCodeReg[1] <= preOpCode;
+        // endmethod
 
         // method PendingReqCnt getCoalesceWorkReqCnt() if (inited) = coalesceWorkReqCntReg;
         // method Action        setCoalesceWorkReqCnt(PendingReqCnt coalesceWorkReqCnt) if (inited);
@@ -451,10 +471,11 @@ module mkController(Controller);
         // ) if (inited);
         //     pendingDestReadAtomicReqCntReg <= pendingDestReadAtomicReqCnt;
         // endmethod
+        method Epoch  getEpoch() = epochReg; // TODO: add inited condition
         // method Epoch  getEpoch() if (inited) = epochReg;
-        // method Action incEpoch() if (inited);
-        //     epochReg <= ~epochReg;
-        // endmethod
+        method Action incEpoch() if (inited);
+            epochReg <= ~epochReg;
+        endmethod
 
         method MSN    getMSN() if (inited) = msnReg;
         method Action setMSN(MSN msn) if (inited);
@@ -477,8 +498,14 @@ module mkController(Controller);
         method Action setEPSN(PSN psn) if (inited);
             epsnReg[0] <= psn;
         endmethod
-        method Action restoreEPSN(PSN psn) if (inited);
-            epsnReg[1] <= psn;
+        // method Action restoreEPSN(PSN psn) if (inited);
+        //     epsnReg[1] <= psn;
+        // endmethod
+
+        method Action restorePreReqOpCodeAndEPSN(
+            RdmaOpCode preOpCode, PSN psn
+        ) if (inited);
+            restoreQ.enq(tuple2(preOpCode, psn));
         endmethod
     endinterface;
 endmodule

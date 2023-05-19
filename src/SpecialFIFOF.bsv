@@ -27,7 +27,7 @@ interface ScanFIFOF#(numeric type qSz, type anytype);
     interface FIFOF#(anytype) fifof;
     interface ScanCntrl#(anytype) scanCntrl;
     interface PipeOut#(anytype) scanPipeOut;
-    // method UInt#(TLog#(TAdd#(qSz, 1))) count;
+    method UInt#(TLog#(TAdd#(qSz, 1))) size();
 endinterface
 
 typedef enum {
@@ -145,10 +145,10 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
             // nextEnqPtr = enqPtrReg + 1;
             // hasPush = True;
             dataVec[enqPtrReg] <= pushVal;
-            $display(
-                "time=%0t: push into ScanFIFOF, enqPtrReg=%h, itemCnt=%0d",
-                $time, enqPtrReg, itemCnt
-            );
+            // $display(
+            //     "time=%0t: push into ScanFIFOF, enqPtrReg=%h, itemCnt=%0d",
+            //     $time, enqPtrReg, itemCnt
+            // );
         end
 
         // if (popReg[1]) begin
@@ -742,7 +742,7 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
         // method Bool isEmpty() if (inScanMode) = emptyReg;
     endinterface;
 */
-    // method UInt#(cntSz) count = itemCnt;
+    method UInt#(cntSz) size() = unpack(itemCnt);
 endmodule
 
 interface SearchIfc2#(type anytype);

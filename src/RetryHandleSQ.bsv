@@ -26,7 +26,7 @@ typedef struct {
     PSN              retryStartPSN;
     RetryReason      retryReason;
     Maybe#(RnrTimer) retryRnrTimer;
-} RetryReq deriving(Bits);
+} RetryReq deriving(Bits, FShow);
 
 typedef enum {
     RETRY_HANDLER_RECV_RETRY_REQ,
@@ -242,6 +242,10 @@ module mkRetryHandleSQ#(
                 );
             end
         endcase
+        // $display(
+        //     "time=%0t: recvResetReq", $time,
+        //     ", resetReq=", fshow(resetReq)
+        // );
     endrule
 
     rule recvRetryReq if (cntrl.isRTS);
@@ -262,6 +266,8 @@ module mkRetryHandleSQ#(
 
         // hasNotifiedRetry has higher priority than shouldResetRetryCnt
         if (hasNotifiedRetry || shouldResetRetryCnt) begin
+            retryNotificationQ.enq(maybeRetryReq);
+
             // immAssert(
             //     hasNotifiedRetry && shouldResetRetryCnt,
             //     "hasNotifiedRetry && shouldResetRetryCnt assertion @ mkRetryHandleSQ",
@@ -272,7 +278,12 @@ module mkRetryHandleSQ#(
             //     )
             // );
 
-            retryNotificationQ.enq(maybeRetryReq);
+            // $display(
+            //     "time=%0t: recvRetryReq", $time,
+            //     ", hasNotifiedRetry=", fshow(hasNotifiedRetry),
+            //     ", shouldResetRetryCnt=", fshow(shouldResetRetryCnt),
+            //     ", maybeRetryReq=", fshow(maybeRetryReq)
+            // );
         end
     endrule
 
@@ -328,6 +339,12 @@ module mkRetryHandleSQ#(
 
         if (hasNotifiedTimeOut || hasRetryReq) begin
             retryActionQ.enq(maybeRetryReq);
+
+            // $display(
+            //     "time=%0t: handleNotifiedRetryAndTimeOut", $time,
+            //     ", hasNotifiedTimeOut=", fshow(hasNotifiedTimeOut),
+            //     ", hasRetryReq=", fshow(hasRetryReq)
+            // );
         end
     endrule
 
@@ -370,13 +387,13 @@ module mkRetryHandleSQ#(
             retryReasonReg <= retryReq.retryReason;
 
             updateRetryCnt = tagged Valid retryReq.retryReason;
-            $display(
-                "time=%0t: canonicalize", $time,
-                ", retryReqOrResetRetryCnt=", fshow(retryReqOrResetRetryCnt)
-            );
         end
 
         updateRetryCntQ.enq(updateRetryCnt);
+        // $display(
+        //     "time=%0t: handleRetryAction", $time,
+        //     ", retryReqOrResetRetryCnt=", fshow(retryReqOrResetRetryCnt)
+        // );
     endrule
 
     rule handleRetryCntUpdate if (cntrl.isRTS && !pauseRetryHandleReg);
@@ -410,9 +427,6 @@ module mkRetryHandleSQ#(
                 retryCntrlStateReg[1] <= RETRY_CNTRL_ST_INIT_RETRY;
             end
             prepareRetryRespQ.enq(tuple2(hasRetryErr, retryReason));
-        end
-        else begin
-            resetRetryCntInternal;
 
             immAssert(
                 pendingWorkReqNotEmpty,
@@ -423,6 +437,19 @@ module mkRetryHandleSQ#(
                     fshow(maybeRetryReason)
                 )
             );
+        end
+        else begin
+            resetRetryCntInternal;
+
+            // immAssert(
+            //     pendingWorkReqNotEmpty,
+            //     "pendingWorkReqNotEmpty assertion @ mkRetryHandleSQ",
+            //     $format(
+            //         "pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty),
+            //         " should be true when maybeRetryReason=",
+            //         fshow(maybeRetryReason)
+            //     )
+            // );
         end
     endrule
 

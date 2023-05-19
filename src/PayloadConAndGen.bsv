@@ -422,14 +422,14 @@ module mkPayloadConsumer#(
         pendingConReqQ.enq(tuple4(
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFragReg, isLastReqFrag
         ));
-        $display(
-            "time=%0t:", $time,
-            " consumeReq.fragNum=%0d", consumeReq.fragNum,
-            ", remainingFragNumReg=%0d", remainingFragNumReg,
-            ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
-            ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
-            ", isLastReqFrag=", fshow(isLastReqFrag)
-        );
+        // $display(
+        //     "time=%0t:", $time,
+        //     " consumeReq.fragNum=%0d", consumeReq.fragNum,
+        //     ", remainingFragNumReg=%0d", remainingFragNumReg,
+        //     ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
+        //     ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
+        //     ", isLastReqFrag=", fshow(isLastReqFrag)
+        // );
     endrule
 
     rule consumePayload if (cntrl.isNonErr || cntrl.isERR);

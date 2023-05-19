@@ -181,10 +181,10 @@ module mkWorkCompGenSQ#(
             needWorkCompWhenNormal: needWorkCompWhenNormal
         };
         dmaWaitingQ.enq(pendingWorkCompSQ);
-        $display(
-            "time=%0t: wcGenReqSQ=", $time, fshow(wcGenReqSQ),
-            ", needWorkCompWhenNormal=", fshow(needWorkCompWhenNormal)
-        );
+        // $display(
+        //     "time=%0t: wcGenReqSQ=", $time, fshow(wcGenReqSQ),
+        //     ", needWorkCompWhenNormal=", fshow(needWorkCompWhenNormal)
+        // );
     endrule
 /*
     rule waitDmaDoneSQ if (inNormalState);

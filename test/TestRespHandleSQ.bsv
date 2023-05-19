@@ -264,6 +264,14 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // - payloadConsumer.respPipeOut
     // - workCompPipeOut
 
+    // rule showPendingWorkReqCnt;
+    //     let pendingWorkReqCnt = pendingWorkReqBuf.size;
+    //     $display(
+    //         "time=%0t:", $time,
+    //         " pendingWorkReqCnt=%0d", pendingWorkReqCnt
+    //     );
+    // endrule
+
     // mkSink(pendingWorkReqPipeOut4WorkComp);
     // mkSink(workCompPipeOut);
     rule compareWorkReqAndWorkComp;
