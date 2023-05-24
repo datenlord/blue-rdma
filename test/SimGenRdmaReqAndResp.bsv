@@ -24,7 +24,7 @@ endinterface
 
 module mkSimGenRdmaReqAndSendWritePayloadPipeOut#(
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn,
-    QpType qpType,
+    TypeQP qpType,
     PMTU pmtu
 )(RdmaReqAndSendWritePayloadAndPendingWorkReq);
     let setExpectedPsnAsNextPSN = False;
@@ -62,7 +62,7 @@ endinterface
 
 module mkSimGenRdmaReq#(
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn,
-    QpType qpType,
+    TypeQP qpType,
     PMTU pmtu
 )(RdmaReqAndPendingWorkReq);
     let simReqGen <- mkSimGenRdmaReqAndSendWritePayloadPipeOut(
@@ -100,7 +100,7 @@ function Maybe#(RdmaOpCode) genMiddleOrLastRdmaOpCode(WorkReqOpCode wrOpCode, Bo
 endfunction
 
 function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(PendingWorkReq pendingWR, Controller cntrl, Bool isOnlyRespPkt, MSN msn);
-    let maybeTrans  = qpType2TransType(cntrl.getQpType);
+    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
     let maybeOpCode = genFirstOrOnlyRdmaOpCode(pendingWR.wr.opcode, isOnlyRespPkt);
     let isReadWR = isReadWorkReq(pendingWR.wr.opcode);
 
@@ -170,7 +170,7 @@ endfunction
 function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
     PendingWorkReq pendingWR, Controller cntrl, PSN psn, Bool isLastRespPkt, MSN msn
 );
-    let maybeTrans  = qpType2TransType(cntrl.getQpType);
+    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
     let maybeOpCode = genMiddleOrLastRdmaOpCode(pendingWR.wr.opcode, isLastRespPkt);
     let isReadWR = isReadWorkReq(pendingWR.wr.opcode);
     let isZeroLenWR = isZero(pendingWR.wr.len);
@@ -464,7 +464,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
     );
 
     rule genRespAck;
-        let maybeTrans  = qpType2TransType(cntrl.getQpType);
+        let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
         immAssert(
             isValid(maybeTrans),
             "maybeTrans assertion @ mkGenErrRdmaResp",

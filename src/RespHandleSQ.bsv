@@ -765,7 +765,7 @@ module mkRespHandleSQ#(
                     totalLen     : pendingWR.wr.len,
                     pdHandler    : pktMetaData.pdHandler,
                     isZeroDmaLen : isAtomicResp ? False : isZeroPayloadLen,
-                    accFlags     : toFlag(IBV_ACCESS_LOCAL_WRITE),
+                    accFlags     : enum2Flag(IBV_ACCESS_LOCAL_WRITE),
                     localOrRmtKey: True
                 };
                 permCheckMR.request.put(permCheckInfo);

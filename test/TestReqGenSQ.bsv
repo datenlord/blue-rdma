@@ -15,7 +15,7 @@ import Utils4Test :: *;
 (* synthesize *)
 module mkTestReqGenNormalCase(Empty);
     let minDmaLength = 1;
-    let maxDmaLength = 1024;
+    let maxDmaLength = 10241;
     let result <- mkTestReqGenNormalAndZeroLenCase(minDmaLength, maxDmaLength);
 endmodule
 
@@ -90,6 +90,16 @@ module mkTestReqGenNormalAndZeroLenCase#(
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
+    // mkSink(pendingWorkReqPipeOut4Comp);
+    // mkSink(workReqPipeOut4Ref);
+    // mkSink(rdmaHeaderPipeOut);
+    // mkSink(pendingWorkReqPipeOut4Ref);
+    // mkSink(filteredPayloadDataStreamPipeOut);
+    // mkSink(segDataStreamPipeOut4Ref);
+    // rule decrCountDonw;
+    //     countDown.decr;
+    // endrule
+
     rule compareWorkReq;
         let pendingWR = pendingWorkReqPipeOut4Comp.first;
         pendingWorkReqPipeOut4Comp.deq;
@@ -108,7 +118,36 @@ module mkTestReqGenNormalAndZeroLenCase#(
         );
         // $display("time=%0t: WR=", $time, fshow(pendingWR.wr));
     endrule
+/*
+    rule compareRdmaReqHeader;
+        let rdmaHeader = rdmaHeaderPipeOut.first;
+        rdmaHeaderPipeOut.deq;
 
+        let { transType, rdmaOpCode } =
+            extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
+        let bth = extractBTH(rdmaHeader.headerData);
+
+
+        let refPendingWR = pendingWorkReqPipeOut4Ref.first;
+        let wrStartPSN = unwrapMaybe(refPendingWR.startPSN);
+        let wrEndPSN = unwrapMaybe(refPendingWR.endPSN);
+        $display(
+            "time=%0t:", $time,
+            " bth.psn=%h, wrStartPSN=%h, wrEndPSN=%h",
+            bth.psn, wrStartPSN, wrEndPSN,
+            ", opcode=", fshow(rdmaOpCode),
+            ", workReqOpCode=", fshow(refPendingWR.wr.opcode)
+        );
+
+        if (isLastOrOnlyRdmaOpCode(bth.opcode)) begin
+            pendingWorkReqPipeOut4Ref.deq;
+        end
+
+        // It must compare header not payload,
+        // since WR might have zero length
+        countDown.decr;
+    endrule
+*/
     rule compareRdmaReqHeader;
         let rdmaHeader = rdmaHeaderPipeOut.first;
         rdmaHeaderPipeOut.deq;

@@ -628,7 +628,7 @@ module mkTestPermCheckMR(Empty);
 
     ADDR defaultAddr   = fromInteger(0);
     Length defaultLen  = fromInteger(valueOf(RDMA_MAX_LEN));
-    let defaultAccPerm = toFlag(IBV_ACCESS_REMOTE_WRITE);
+    let defaultAccPerm = enum2Flag(IBV_ACCESS_REMOTE_WRITE);
 
     rule allocPDs if (pdReqCnt < fromInteger(pdNum) && mrCheckStateReg == TEST_ST_FILL);
         pdReqCnt.incr(1);
@@ -1059,13 +1059,13 @@ module mkTestMetaDataSrv(Empty);
         let qpn = qpnQ4Modify.first;
         qpnQ4Modify.deq;
 
-        QpAttr qpAttr  = dontCareValue;
+        AttrQP qpAttr  = dontCareValue;
         qpAttr.qpState = IBV_QPS_INIT;
         let modifyReqQP = ReqQP {
             qpReqType   : REQ_QP_MODIFY,
             pdHandler   : dontCareValue,
             qpn         : qpn,
-            qpAttrMask  : dontCareValue,
+            qpAttrMask  : getReset2InitRequiredAttr,
             qpAttr      : qpAttr,
             qpInitAttr  : dontCareValue
         };

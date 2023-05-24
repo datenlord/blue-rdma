@@ -340,13 +340,15 @@ endfunction
 function Bool compareAccessTypeFlags(
     FlagsType#(MemAccessTypeFlag) flags1, FlagsType#(MemAccessTypeFlag) flags2
 );
-    return !isZero(pack(flags1 & flags2));
+    return containFlags(flags1, flags2);
+    // return !isZero(pack(flags1 & flags2));
 endfunction
 
 function Bool containAccessTypeFlag(
     FlagsType#(MemAccessTypeFlag) flags, MemAccessTypeFlag flag
 );
-    return !isZero(pack(flags & toFlag(flag)));
+    return containEnum(flags, flag);
+    // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
 // BTH related
@@ -685,7 +687,7 @@ function Bool checkAddrAndLenWithinRange(ADDR laddr, Length dlen, ADDR raddr, Le
     return addrHighPartEq && addrLowPartMatch && addrLenMatch;
 endfunction
 
-function Maybe#(TransType) qpType2TransType(QpType qpt);
+function Maybe#(TransType) qpType2TransType(TypeQP qpt);
     return case (qpt)
         IBV_QPT_RC      : tagged Valid TRANS_TYPE_RC;
         IBV_QPT_UC      : tagged Valid TRANS_TYPE_UC;
@@ -696,7 +698,7 @@ function Maybe#(TransType) qpType2TransType(QpType qpt);
     endcase;
 endfunction
 
-function Bool transTypeMatchQpType(TransType tt, QpType qpt);
+function Bool transTypeMatchQpType(TransType tt, TypeQP qpt);
     return case (tt)
         TRANS_TYPE_CNP: True;
         TRANS_TYPE_RC : (qpt == IBV_QPT_RC);
@@ -718,7 +720,7 @@ function Bool qpNeedGenResp(TransType transType);
     endcase;
 endfunction
 
-function Bool isSupportedReqOpCodeRQ(QpType qpt, RdmaOpCode opcode);
+function Bool isSupportedReqOpCodeRQ(TypeQP qpt, RdmaOpCode opcode);
     case (qpt)
         IBV_QPT_UC: return case (opcode)
             SEND_FIRST                    ,
@@ -1214,7 +1216,8 @@ endfunction
 function Bool containWorkReqFlag(
     FlagsType#(WorkReqSendFlag) flags, WorkReqSendFlag flag
 );
-    return !isZero(pack(flags & toFlag(flag)));
+    return containEnum(flags, flag);
+    // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
 function Tuple2#(PktNum, PmtuResidue) truncateLenByPMTU(Length len, PMTU pmtu);
@@ -1596,15 +1599,15 @@ function Rules genEmptyPipeOutRule(
 endfunction
 
 // TODO: move this module to Utils4Test
-module mkQpAttrPipeOut(PipeOut#(QpAttr));
-    FIFOF#(QpAttr) qpAttrQ <- mkFIFOF;
+module mkQpAttrPipeOut(PipeOut#(AttrQP));
+    FIFOF#(AttrQP) qpAttrQ <- mkFIFOF;
     Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) dqpnCnt <- mkCount(0);
 
     rule genQpAttr if (dqpnCnt < fromInteger(valueOf(MAX_QP)));
         QPN dqpn = zeroExtendLSB(dqpnCnt);
         dqpnCnt.incr(1);
 
-        let qpAttr = QpAttr {
+        let qpAttr = AttrQP {
             qpState          : dontCareValue,
             curQpState       : dontCareValue,
             pmtu             : IBV_MTU_1024,
@@ -1612,7 +1615,7 @@ module mkQpAttrPipeOut(PipeOut#(QpAttr));
             rqPSN            : 0,
             sqPSN            : 0,
             dqpn             : dqpn,
-            qpAccessFlags    : toFlag(IBV_ACCESS_REMOTE_WRITE) | toFlag(IBV_ACCESS_REMOTE_READ) | toFlag(IBV_ACCESS_REMOTE_ATOMIC),
+            qpAccessFlags    : enum2Flag(IBV_ACCESS_REMOTE_WRITE) | enum2Flag(IBV_ACCESS_REMOTE_READ) | enum2Flag(IBV_ACCESS_REMOTE_ATOMIC),
             cap              : QpCapacity {
                 maxSendWR    : fromInteger(valueOf(MAX_QP_WR)),
                 maxRecvWR    : fromInteger(valueOf(MAX_QP_WR)),

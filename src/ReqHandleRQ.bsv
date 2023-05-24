@@ -54,7 +54,7 @@ function Bool isNormalOrErrorReqStatus(RdmaReqStatus reqStatus);
 endfunction
 
 function Maybe#(QPN) getMaybeDestQpnRQ(Controller cntrl);
-    return case (cntrl.getQpType)
+    return case (cntrl.getTypeQP)
         IBV_QPT_RC      ,
         IBV_QPT_UC      ,
         IBV_QPT_XRC_SEND, // TODO: XRC RQ should have its own controller
@@ -192,7 +192,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
     Length payloadLen, Maybe#(Long) atomicOrigData,
     Controller cntrl, PSN psn, MSN msn, Bool isOnlyRespPkt
 );
-    let maybeTrans  = qpType2TransType(cntrl.getQpType);
+    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
     let maybeOpCode = genFirstOrOnlyRespRdmaOpCode(reqOpCode, reqStatus, isOnlyRespPkt);
     let maybeDQPN   = getMaybeDestQpnRQ(cntrl);
     let maybeAETH   = genAethByReqStatus(reqStatus, cntrl, msn);
@@ -261,7 +261,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus, Length payloadLen,
     Controller cntrl, PSN psn, MSN msn, Bool isLastRespPkt
 );
-    let maybeTrans  = qpType2TransType(cntrl.getQpType);
+    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
     let maybeOpCode = genMiddleOrLastRespRdmaOpCode(reqStatus, isLastRespPkt);
     let maybeDQPN   = getMaybeDestQpnRQ(cntrl);
     let maybeAETH   = genAethByReqStatus(reqStatus, cntrl, msn);
@@ -915,7 +915,7 @@ module mkReqHandleRQ#(
         let bth   = reqPktInfo.bth;
         let epoch = reqPktInfo.epoch;
 
-        let isSupportedReqOpCode = isSupportedReqOpCodeRQ(cntrl.getQpType, bth.opcode);
+        let isSupportedReqOpCode = isSupportedReqOpCodeRQ(cntrl.getTypeQP, bth.opcode);
 
         if (epoch == getEpoch) begin
             if (!hasErrHappened) begin
@@ -1231,7 +1231,7 @@ module mkReqHandleRQ#(
                     curPermCheckInfo.totalLen      = isZeroPayloadLen ? 0 : recvReq.len;
                     curPermCheckInfo.pdHandler     = pktMetaData.pdHandler;
                     curPermCheckInfo.isZeroDmaLen  = isZeroPayloadLen;
-                    curPermCheckInfo.accFlags      = toFlag(IBV_ACCESS_LOCAL_WRITE);
+                    curPermCheckInfo.accFlags      = enum2Flag(IBV_ACCESS_LOCAL_WRITE);
                     curPermCheckInfo.localOrRmtKey = True;
                 end
                 3'b010: begin // read and write
@@ -1242,7 +1242,7 @@ module mkReqHandleRQ#(
                     curPermCheckInfo.totalLen      = reth.dlen;
                     curPermCheckInfo.pdHandler     = pktMetaData.pdHandler;
                     curPermCheckInfo.isZeroDmaLen  = isZero(reth.dlen);
-                    curPermCheckInfo.accFlags      = toFlag(isReadReq ? IBV_ACCESS_REMOTE_READ : IBV_ACCESS_REMOTE_WRITE);
+                    curPermCheckInfo.accFlags      = enum2Flag(isReadReq ? IBV_ACCESS_REMOTE_READ : IBV_ACCESS_REMOTE_WRITE);
                     curPermCheckInfo.localOrRmtKey = False;
 
                     if (isWriteImmReq) begin
@@ -1283,7 +1283,7 @@ module mkReqHandleRQ#(
                     curPermCheckInfo.totalLen      = fromInteger(valueOf(ATOMIC_WORK_REQ_LEN));
                     curPermCheckInfo.pdHandler     = pktMetaData.pdHandler;
                     curPermCheckInfo.isZeroDmaLen  = False;
-                    curPermCheckInfo.accFlags      = toFlag(IBV_ACCESS_REMOTE_ATOMIC);
+                    curPermCheckInfo.accFlags      = enum2Flag(IBV_ACCESS_REMOTE_ATOMIC);
                     curPermCheckInfo.localOrRmtKey = False;
                 end
                 default: begin
@@ -2097,7 +2097,7 @@ module mkReqHandleRQ#(
         let isReadReq       = reqPktInfo.isReadReq;
         let isAtomicReq     = reqPktInfo.isAtomicReq;
         let isLastOrOnlyPkt = reqPktInfo.isLastOrOnlyPkt;
-        let hasReqStatusErr  = respPktGenInfo.hasReqStatusErr;
+        let hasReqStatusErr = respPktGenInfo.hasReqStatusErr;
 
         // let shouldDiscard = False;
         let shouldGenResp = False;
@@ -3419,7 +3419,7 @@ module mkReqHandleRQ#(
             // pktStatus    : PKT_ST_DISCARD
         };
         let reqStatus   = RDMA_REQ_ST_ERR_FLUSH_RR;
-        let maybeTrans  = qpType2TransType(cntrl.getQpType);
+        let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
 
         let bth = BTH {
             trans    : unwrapMaybe(maybeTrans),

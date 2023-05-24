@@ -130,7 +130,7 @@ endfunction
 
 typedef struct {
     Bit#(SizeOf#(enumType)) flags;
-} FlagsType#(type enumType) deriving(Bits, Bitwise);
+} FlagsType#(type enumType) deriving(Bits, Bitwise, Eq);
 
 instance FShow#(FlagsType#(enumType)) provisos(
     Bits#(enumType, tSz),
@@ -163,14 +163,13 @@ typeclass Flags#(type enumType);
     function Bool isOneHotOrZero(enumType inputVal);
 endtypeclass
 
-function FlagsType#(enumType) toFlag(enumType inputVal) provisos(
+function FlagsType#(enumType) enum2Flag(enumType inputVal) provisos(
     Bits#(enumType, tSz),
     Flags#(enumType)
 );
-    let checkOneHotOrZero = isOneHotOrZero(inputVal);
     // TODO: check inputVal is onehot or zero
     // immAssert(
-    //     1 >= numOnes,
+    //     isOneHotOrZero(inputVal),
     //     "numOnes assertion @ convert2Flag",
     //     $format(
     //         "inputVal=", fshow(inputVal),
@@ -178,6 +177,23 @@ function FlagsType#(enumType) toFlag(enumType inputVal) provisos(
     //     )
     // );
     return unpack(pack(inputVal));
+endfunction
+
+// Check flags1 contains flags2 or not
+function Bool containFlags(FlagsType#(enumType) flags1, FlagsType#(enumType) flags2) provisos(
+    Bits#(enumType, tSz),
+    Flags#(enumType)
+);
+    return (flags1 & flags2) == flags2;
+    // Bit#(tSz) bitWiseResult = pack((flags1 & flags2) ^ flags2);
+    // return isZero(bitWiseResult);
+endfunction
+
+function Bool containEnum(FlagsType#(enumType) flags, enumType enumVal) provisos(
+    Bits#(enumType, tSz),
+    Flags#(enumType)
+);
+    return !isZero(pack(flags & enum2Flag(enumVal)));
 endfunction
 
 // _read SB (incr CF decr) SB _write

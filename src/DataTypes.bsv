@@ -334,7 +334,7 @@ typedef enum {
     IBV_QPS_SQE,
     IBV_QPS_ERR,
     IBV_QPS_UNKNOWN
-} QpState deriving(Bits, Eq, FShow);
+} StateQP deriving(Bits, Eq, FShow);
 
 typedef enum {
     IBV_QPT_RC = 2,
@@ -344,7 +344,7 @@ typedef enum {
     IBV_QPT_XRC_SEND = 9,
     IBV_QPT_XRC_RECV = 10
     // IBV_QPT_DRIVER = 0xff
-} QpType deriving(Bits, Eq, FShow);
+} TypeQP deriving(Bits, Eq, FShow);
 
 typedef enum {
     IBV_ACCESS_NO_FLAGS      =  0, // Not defined in rdma-core
@@ -380,8 +380,8 @@ typedef struct {
 } QpCapacity deriving(Bits, FShow);
 
 typedef struct {
-    QpState                       qpState;
-    QpState                       curQpState;
+    StateQP                       qpState;
+    StateQP                       curQpState;
     PMTU                          pmtu;
     QKEY                          qkey;
     PSN                           rqPSN;
@@ -406,10 +406,10 @@ typedef struct {
     // uint8_t                       alt_port_num;
     // uint8_t                       alt_timeout;
     // uint32_t                      rate_limit;
-} QpAttr deriving(Bits, FShow);
+} AttrQP deriving(Bits, FShow);
 
 typedef struct {
-    QpType qpType;
+    TypeQP qpType;
     Bool   sqSigAll;
 } QpInitAttr deriving(Bits, FShow);
 

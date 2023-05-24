@@ -115,8 +115,8 @@ module mkTestReceiveCNP(Empty);
 endmodule
 
 module mkTestCalculatePktLen#(
-    QpType qpType,
-    PMTU pmtu,
+    TypeQP qpType,
+    PMTU   pmtu,
     Length minPayloadLen,
     Length maxPayloadLen
 )(Empty);
@@ -150,7 +150,7 @@ module mkTestCalculatePktLen#(
     // mkSink(pendingWorkReqPipeOut4Ref);
     // mkSink(pktMetaDataPipeOut);
     rule compareWorkReqLen;
-        let pendingWR = pendingWorkReqPipeOut4Ref.first;
+        let pendingWR   = pendingWorkReqPipeOut4Ref.first;
         let pktMetaData = pktMetaDataPipeOut.first;
         pktMetaDataPipeOut.deq;
 
@@ -201,7 +201,12 @@ module mkTestCalculatePktLen#(
         );
 
         countDown.decr;
-        // $display("time=%0t: pending WR=", $time, fshow(pendingWR));
+        // $display(
+        //     "time=%0t:", $time,
+        //     " received bth.opcode=", fshow(bth.opcode),
+        //     ", bth.psn=%h, bth.padCnt=%h, pktLenSum=%0d",
+        //     bth.psn, bth.padCnt, pktLenSum
+        // );
     endrule
 endmodule
 

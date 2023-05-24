@@ -150,18 +150,12 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
                 retryRnrTimer: retryRnrTimer
             };
             dut.srvPort.request.put(retryReq);
-            // dut.notifyRetryFromSQ(
-            //     firstRetryWR.wr.id,
-            //     retryStartPSN,
-            //     retryReason,
-            //     retryRnrTimer
-            // );
             retryHandleTestStateReg <= TEST_RETRY_TRIGGER_RESP;
         end
         else begin
             retryHandleTestStateReg <= TEST_RETRY_TIMEOUT_NOTIFY;
         end
-        $display("time=%0t: triggerRetry", $time);
+        // $display("time=%0t: triggerRetry", $time);
     endrule
 
     rule recvRetryResp if (
@@ -210,7 +204,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
         else begin
             retryHandleTestStateReg <= TEST_RETRY_STARTED;
         end
-        $display("time=%0t: waitUtilRetryStart", $time);
+        // $display("time=%0t: waitUtilRetryStart", $time);
     endrule
 
     rule triggerRetryRestart if (
@@ -236,13 +230,6 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
             retryRnrTimer: retryRnrTimer
         };
         dut.srvPort.request.put(retryReq);
-        // dut.notifyRetryFromSQ(
-        //     firstRetryWR.wr.id,
-        //     retryStartPSN,
-        //     retryReason,
-        //     retryRnrTimer
-        // );
-
         retryHandleTestStateReg <= TEST_RETRY_RESTART_RESP;
         // $display(
         //     "time=%0t:", $time,
@@ -268,23 +255,11 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule waitUtilRetryRestart if (
-        // cntrl.isRTS && (dut.isRetrying || dut.hasRetryErr) &&
         cntrl.isRTS && dut.isRetrying &&
         retryHandleTestStateReg == TEST_RETRY_WAIT_UNTIL_RESTART
     );
-        // if (retryCase == TEST_RETRY_CASE_EXC_LIMIT_ERR) begin
-        //     if (isZero(maxRetryCnt)) begin
-        //         retryHandleTestStateReg <= TEST_RETRY_SET_QP_ERR;
-        //     end
-        //     else begin
-        //         maxRetryCnt.decr(1);
-        //         retryHandleTestStateReg <= TEST_RETRY_TRIGGER_REQ;
-        //     end
-        // end
-        // else begin
         retryHandleTestStateReg <= TEST_RETRY_RESTARTED;
-        // end
-        $display("time=%0t: retryWait4Restart", $time);
+        // $display("time=%0t: retryWait4Restart", $time);
     endrule
 
     rule compare if (
@@ -371,27 +346,17 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
             retryHandleTestStateReg == TEST_RETRY_RESTARTED
         )
     );
-        // immAssert(
-        //     dut.isRetryDone,
-        //     "isRetryDone assertion @ mkTestRetryHandlerSQ",
-        //     $format(
-        //         "dut.isRetryDone=", fshow(dut.isRetryDone),
-        //         " should be true"
-        //     )
-        // );
-
         retryHandleTestStateReg <= TEST_RETRY_TRIGGER_REQ;
         pendingWorkReqBuf.fifof.clear;
-        // dut.resetRetryCntBySQ;
-        // dut.resetTimeOutBySQ;
         dut.resetRetryCntAndTimeOutBySQ(RETRY_HANDLER_RESET_RETRY_CNT_AND_TIMEOUT);
-        $display("time=%0t: retryDone", $time);
+        // $display("time=%0t: retryDone", $time);
     endrule
 endmodule
 
 typedef enum {
     TEST_RETRY_CREATE_QP,
     TEST_RETRY_INIT_QP,
+    TEST_RETRY_SET_QP_RTR,
     TEST_RETRY_SET_QP_RTS,
     TEST_RETRY_CHECK_QP_STATE,
     TEST_RETRY_TRIGGER_REQ,
@@ -401,12 +366,12 @@ typedef enum {
     TEST_RETRY_STARTED,
     TEST_RETRY_SET_QP_ERR,
     TEST_RETRY_RESET_QP
-} TestRetryErrState deriving(Bits, Eq);
+} TestRetryErrState deriving(Bits, Eq, FShow);
 
 typedef enum {
     TEST_RETRY_ERR_EXC_TIMEOUT_LIMIT, // Full retry
     TEST_RETRY_ERR_EXC_RETRY_LIMIT    // Partial retry
-} TestRetryErrCase deriving(Bits, Eq);
+} TestRetryErrCase deriving(Bits, Eq, FShow);
 
 (* synthesize *)
 module mkTestRetryHandleExcRetryLimitErrCase(Empty);
@@ -455,6 +420,15 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     let qpAttrPipeOut <- mkQpAttrPipeOut;
 
     rule createQP if (retryHandleTestStateReg == TEST_RETRY_CREATE_QP);
+        // immAssert(
+        //     cntrl.getQPS == IBV_QPS_UNKNOWN,
+        //     "cntrl state assertion @ mkTestRetryHandleRetryErrCase",
+        //     $format(
+        //         "cntrl.getQPS=", fshow(cntrl.getQPS),
+        //         " should be IBV_QPS_UNKNOWN"
+        //     )
+        // );
+
         let qpInitAttr = QpInitAttr {
             qpType  : qpType,
             sqSigAll: False
@@ -471,13 +445,14 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
 
         cntrl.srvPort.request.put(qpCreateReq);
         retryHandleTestStateReg <= TEST_RETRY_INIT_QP;
+        // $display("time=%0t:", $time, " create QP");
     endrule
 
     rule initQP if (retryHandleTestStateReg == TEST_RETRY_INIT_QP);
         let qpCreateResp <- cntrl.srvPort.response.get;
         immAssert(
             qpCreateResp.successOrNot,
-            "qpCreateResp.successOrNot assertion @ mkSimController",
+            "qpCreateResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
             $format(
                 "qpCreateResp.successOrNot=", fshow(qpCreateResp.successOrNot),
                 " should be true when qpCreateResp=", fshow(qpCreateResp)
@@ -490,24 +465,51 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
             qpReqType : REQ_QP_MODIFY,
             pdHandler : dontCareValue,
             qpn       : getDefaultQPN,
-            qpAttrMask: dontCareValue,
+            qpAttrMask: getReset2InitRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: dontCareValue
+        };
+        cntrl.srvPort.request.put(modifyReqQP);
+
+        retryHandleTestStateReg <= TEST_RETRY_SET_QP_RTR;
+        // $display("time=%0t:", $time, " init QP");
+    endrule
+
+    rule setCntrlRTR if (retryHandleTestStateReg == TEST_RETRY_SET_QP_RTR);
+        let qpInitResp <- cntrl.srvPort.response.get;
+        immAssert(
+            qpInitResp.successOrNot,
+            "qpInitResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
+            $format(
+                "qpInitResp.successOrNot=", fshow(qpInitResp.successOrNot),
+                " should be true when qpInitResp=", fshow(qpInitResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_RTR;
+        let modifyReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getInit2RtrRequiredAttr,
             qpAttr    : qpAttr,
             qpInitAttr: dontCareValue
         };
         cntrl.srvPort.request.put(modifyReqQP);
 
         retryHandleTestStateReg <= TEST_RETRY_SET_QP_RTS;
-        // $display("time=%0t:", $time, " init controller");
+        // $display("time=%0t:", $time, " set QP 2 RTR");
     endrule
 
     rule setCntrlRTS if (retryHandleTestStateReg == TEST_RETRY_SET_QP_RTS);
-        let qpCreateResp <- cntrl.srvPort.response.get;
+        let qpRtrResp <- cntrl.srvPort.response.get;
         immAssert(
-            qpCreateResp.successOrNot,
-            "qpCreateResp.successOrNot assertion @ mkSimController",
+            qpRtrResp.successOrNot,
+            "qpRtrResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
             $format(
-                "qpCreateResp.successOrNot=", fshow(qpCreateResp.successOrNot),
-                " should be true when qpCreateResp=", fshow(qpCreateResp)
+                "qpRtrResp.successOrNot=", fshow(qpRtrResp.successOrNot),
+                " should be true when qpRtrResp=", fshow(qpRtrResp)
             )
         );
 
@@ -517,7 +519,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
             qpReqType : REQ_QP_MODIFY,
             pdHandler : dontCareValue,
             qpn       : getDefaultQPN,
-            qpAttrMask: dontCareValue,
+            qpAttrMask: getRtr2RtsRequiredAttr,
             qpAttr    : qpAttr,
             qpInitAttr: dontCareValue
         };
@@ -530,27 +532,27 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     rule checkStateQP if (
         retryHandleTestStateReg == TEST_RETRY_CHECK_QP_STATE
     );
-        let qpModifyResp <- cntrl.srvPort.response.get;
+        let qpRtsResp <- cntrl.srvPort.response.get;
         immAssert(
-            qpModifyResp.successOrNot,
-            "qpModifyResp.successOrNot assertion @ mkSimController",
+            qpRtsResp.successOrNot,
+            "qpRtsResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
             $format(
-                "qpModifyResp.successOrNot=", fshow(qpModifyResp.successOrNot),
-                " should be true when qpModifyResp=", fshow(qpModifyResp)
+                "qpRtsResp.successOrNot=", fshow(qpRtsResp.successOrNot),
+                " should be true when qpRtsResp=", fshow(qpRtsResp)
             )
         );
 
         immAssert(
             cntrl.isRTS,
-            "cntrl.isRTS assertion @ mkSimController",
+            "cntrl.isRTS assertion @ mkTestRetryHandleRetryErrCase",
             $format(
                 "cntrl.isRTS=", fshow(cntrl.isRTS),
-                " should be true when qpModifyResp=", fshow(qpModifyResp)
+                " should be true when qpRtsResp=", fshow(qpRtsResp)
             )
         );
         immAssert(
             !dut.hasRetryErr,
-            "hasRetryErr assertion @ mkTestRetryHandlerSQ",
+            "hasRetryErr assertion @ mkTestRetryHandleRetryErrCase",
             $format(
                 "dut.hasRetryErr=", fshow(dut.hasRetryErr),
                 " should be false"
@@ -588,21 +590,14 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
                 retryRnrTimer: retryRnrTimer
             };
             dut.srvPort.request.put(retryReq);
-            // dut.notifyRetryFromSQ(
-            //     firstRetryWR.wr.id,
-            //     retryStartPSN,
-            //     retryReason,
-            //     retryRnrTimer
-            // );
             retryHandleTestStateReg <= TEST_RETRY_TRIGGER_RESP;
         end
         else begin
             retryHandleTestStateReg <= TEST_RETRY_TIMEOUT_NOTIFY;
         end
-
-        $display(
-            "time=%0t: triggerRetry", $time, ", maxRetryCnt=%0d", maxRetryCnt
-        );
+        // $display(
+        //     "time=%0t: triggerRetry", $time, ", maxRetryCnt=%0d", maxRetryCnt
+        // );
     endrule
 
     rule recvRetryResp if (
@@ -614,7 +609,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         if (isZero(maxRetryCnt)) begin
             immAssert(
                 retryResp == RETRY_HANDLER_RETRY_LIMIT_EXC,
-                "retryResp assertion @ mkTestRetryHandleSQ",
+                "retryResp assertion @ mkTestRetryHandleRetryErrCase",
                 $format(
                     "retryResp=", fshow(retryResp),
                     " should be RETRY_HANDLER_RETRY_LIMIT_EXC"
@@ -624,7 +619,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         else begin
             immAssert(
                 retryResp == RETRY_HANDLER_RECV_RETRY_REQ,
-                "retryResp assertion @ mkTestRetryHandleSQ",
+                "retryResp assertion @ mkTestRetryHandleRetryErrCase",
                 $format(
                     "retryResp=", fshow(retryResp),
                     " should be RETRY_HANDLER_RECV_RETRY_REQ"
@@ -663,25 +658,30 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         end
 
         retryHandleTestStateReg <= TEST_RETRY_DECR_RETRY_CNT;
-        $display("time=%0t: recvTimeOutNotification", $time);
+        // $display("time=%0t: recvTimeOutNotification", $time);
     endrule
 
     rule decrRetryCnt if (
         (dut.isRetrying || dut.hasRetryErr) &&
         retryHandleTestStateReg == TEST_RETRY_DECR_RETRY_CNT
     );
+        TestRetryErrState nextRetryHandleTestState = TEST_RETRY_STARTED;
         if (isZero(maxRetryCnt)) begin
-            retryHandleTestStateReg <= TEST_RETRY_SET_QP_ERR;
+            nextRetryHandleTestState = TEST_RETRY_SET_QP_ERR;
+            // retryHandleTestStateReg <= TEST_RETRY_SET_QP_ERR;
         end
         else begin
             maxRetryCnt.decr(1);
-            retryHandleTestStateReg <= TEST_RETRY_STARTED;
+            // retryHandleTestStateReg <= TEST_RETRY_STARTED;
         end
-        $display(
-            "time=%0t: decrRetryCnt", $time,
-            ", maxRetryCnt=%0d", maxRetryCnt,
-            ", dut.hasRetryErr=", fshow(dut.hasRetryErr)
-        );
+
+        retryHandleTestStateReg <= nextRetryHandleTestState;
+        // $display(
+        //     "time=%0t: decrRetryCnt", $time,
+        //     ", maxRetryCnt=%0d", maxRetryCnt,
+        //     ", nextRetryHandleTestState=", fshow(nextRetryHandleTestState),
+        //     ", dut.hasRetryErr=", fshow(dut.hasRetryErr)
+        // );
     endrule
 
     rule retryDone if (
@@ -690,7 +690,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     );
         retryHandleTestStateReg <= TEST_RETRY_TRIGGER_REQ;
         pendingWorkReqBuf.fifof.clear;
-        $display("time=%0t: retryDone", $time);
+        // $display("time=%0t: retryDone", $time);
     endrule
 
     rule drainRetryWR if (
@@ -745,7 +745,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         // let qpModifyResp <- cntrl.srvPort.response.get;
         // immAssert(
         //     qpModifyResp.successOrNot,
-        //     "qpModifyResp.successOrNot assertion @ mkSimController",
+        //     "qpModifyResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
         //     $format(
         //         "qpModifyResp.successOrNot=", fshow(qpModifyResp.successOrNot),
         //         " should be true when qpModifyResp=", fshow(qpModifyResp)
@@ -754,7 +754,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
 
         immAssert(
             cntrl.isERR,
-            "cntrl.isERR assertion @ mkSimController",
+            "cntrl.isERR assertion @ mkTestRetryHandleRetryErrCase",
             $format(
                 "cntrl.isERR=", fshow(cntrl.isERR), " should be true"
                 // " when qpModifyResp=", fshow(qpModifyResp)

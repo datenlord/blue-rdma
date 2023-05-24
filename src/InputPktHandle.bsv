@@ -75,7 +75,7 @@ endfunction
 
 // TODO: check XRC domain match
 function Bool validateHeader(TransType transType, QKEY qkey, Controller cntrl, Bool isRespPkt);
-    let transTypeMatch = transTypeMatchQpType(transType, cntrl.getQpType);
+    let transTypeMatch = transTypeMatchQpType(transType, cntrl.getTypeQP);
     let qpStateMatch = isRespPkt ? cntrl.isRTS : cntrl.isNonErr;
     // UD has no responses
     let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrl.getQKEY : True;
@@ -433,6 +433,16 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 );
             end
 
+            // immAssert(
+            //     cntrl.isStableRTS && isValidHeader,
+            //     "isStableRTS and isValidHeader assertion @ mkInputRdmaPktBufAndHeaderValidation",
+            //     $format(
+            //         "cntrl.isStableRTS=", fshow(cntrl.isStableRTS),
+            //         " isValidHeader=", fshow(isValidHeader),
+            //         " should both be true"
+            //     )
+            // );
+
             let validHeaderInfo = ValidHeaderInfo {
                 pdHandler      : pdHandler,
                 pmtu           : cntrl.getPMTU,
@@ -471,10 +481,25 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     cnpOutVec[qpIndex].enq(bth);
                 end
             end
+            // else begin
+            //     $display(
+            //         "time=%0t: found invalid header", $time,
+            //         ", isValidHeader=", fshow(isValidHeader)
+            //     );
+            // end
 
             isValidPkt = isValidHeader && !isCNP;
             isValidPktReg <= isValidPkt;
         end
+
+        // immAssert(
+        //     isValidPkt,
+        //     "isValidPkt assertion @ mkInputRdmaPktBufAndHeaderValidation",
+        //     $format(
+        //         "isValidPkt=", fshow(isValidPkt),
+        //         " should be true"
+        //     )
+        // );
 
         if (isValidPkt) begin
             payloadFragLenCalcQ.enq(payloadFrag);
@@ -534,6 +559,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         payloadPktLenCalcQ.deq;
 
         let { rdmaHeader, bth, validHeaderInfo } = rdmaHeaderPktLenCalcQ.first;
+
         let pdHandler       = validHeaderInfo.pdHandler;
         let pmtu            = validHeaderInfo.pmtu;
         let qpIndex         = getIndexQP(bth.dqpn);
@@ -605,7 +631,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         //     "time=%0t: pktLen=%0d, pktFragNum=%0d", $time, pktLen, pktFragNum,
         //     ", byteEn=%h", payloadFrag.byteEn, ", isByteEnAllOne=", fshow(isByteEnAllOne),
         //     ", pktValid=", fshow(pktValid),
-        //     ", payloadOutQ.notFull=", fshow(payloadOutQ.notFull)
+        //     // ", payloadOutQ.notFull=", fshow(payloadOutQ.notFull),
         //     // ", pktMetaDataOutQ.notFull=", fshow(pktMetaDataOutQ.notFull),
         //     ", DATA_STREAM_FRAG_BUF_SIZE=%0d", valueOf(DATA_STREAM_FRAG_BUF_SIZE),
         //     ", PKT_META_DATA_BUF_SIZE=%0d", valueOf(PKT_META_DATA_BUF_SIZE)

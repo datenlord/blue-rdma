@@ -342,9 +342,17 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
     interface srvMetaData = metaDataSrv;
 endmodule
 
-// TODO: change QP state as Reset -> Init -> RTR -> RTS
+typedef enum {
+    META_DATA_ALLOC_PD,
+    META_DATA_CREATE_QP,
+    META_DATA_INIT_QP,
+    META_DATA_SET_QP_RTR,
+    META_DATA_SET_QP_RTS,
+    META_DATA_NO_OP
+} InitMetaDataState deriving(Bits, Eq, FShow);
+
 module mkInitMetaData#(
-    MetaDataSrv metaDataSrv, QpInitAttr qpInitAttr, PipeOut#(QpAttr) qpAttrPipeIn
+    MetaDataSrv metaDataSrv, QpInitAttr qpInitAttr, PipeOut#(AttrQP) qpAttrPipeIn
 )(Empty);
     let pdNum = valueOf(MAX_PD);
     let qpNum = valueOf(MAX_QP);
@@ -361,14 +369,18 @@ module mkInitMetaData#(
     Count#(Bit#(TLog#(MAX_QP)))                 qpRespCnt <- mkCount(fromInteger(qpNum - 1));
     Count#(Bit#(TLog#(TDiv#(MAX_QP, MAX_PD)))) qpPerPdCnt <- mkCount(fromInteger(qpPerPD - 1));
 
-    Reg#(Bool)   pdInitDoneReg <- mkReg(False);
-    Reg#(Bool) qpCreateDoneReg <- mkReg(False);
-    Reg#(Bool)   qpInitDoneReg <- mkReg(False);
-    Reg#(Bool) qpModifyDoneReg <- mkReg(False);
+    Reg#(InitMetaDataState) initMetaDataStateReg <- mkReg(META_DATA_ALLOC_PD);
+    // Reg#(Bool)   pdInitDoneReg <- mkReg(False);
+    // Reg#(Bool) qpCreateDoneReg <- mkReg(False);
+    // Reg#(Bool)   qpInitDoneReg <- mkReg(False);
+    // Reg#(Bool) qpModifyDoneReg <- mkReg(False);
 
     Vector#(MAX_QP, Reg#(Bool)) qpModifyDoneRegVec <- replicateM(mkReg(False));
 
-    rule reqAllocPDs if (!isZero(pdReqCnt) && !pdInitDoneReg);
+    // rule reqAllocPDs if (!isZero(pdReqCnt) && !pdInitDoneReg);
+    rule reqAllocPDs if (
+        !isZero(pdReqCnt) && initMetaDataStateReg == META_DATA_ALLOC_PD
+    );
         pdReqCnt.decr(1);
 
         KeyPD pdKey = zeroExtend(pdKeyCnt);
@@ -382,9 +394,11 @@ module mkInitMetaData#(
         metaDataSrv.request.put(tagged Req4PD allocReqPD);
     endrule
 
-    rule respAllocPDs if (!pdInitDoneReg);
+    // rule respAllocPDs if (!pdInitDoneReg);
+    rule respAllocPDs if (initMetaDataStateReg == META_DATA_ALLOC_PD);
         if (isZero(pdRespCnt)) begin
-            pdInitDoneReg <= True;
+            // pdInitDoneReg <= True;
+            initMetaDataStateReg <= META_DATA_CREATE_QP;
         end
         else begin
             pdRespCnt.decr(1);
@@ -413,7 +427,10 @@ module mkInitMetaData#(
         end
     endrule
 
-    rule reqCreateQPs if (!isZero(qpReqCnt) && pdInitDoneReg && !qpCreateDoneReg);
+    // rule reqCreateQPs if (!isZero(qpReqCnt) && pdInitDoneReg && !qpCreateDoneReg);
+    rule reqCreateQPs if (
+        !isZero(qpReqCnt) && initMetaDataStateReg == META_DATA_CREATE_QP
+    );
         qpReqCnt.decr(1);
 
         if (isZero(qpPerPdCnt)) begin
@@ -437,11 +454,13 @@ module mkInitMetaData#(
         metaDataSrv.request.put(tagged Req4QP createReqQP);
     endrule
 
-    rule respCreateQPs if (pdInitDoneReg && !qpCreateDoneReg);
+    // rule respCreateQPs if (pdInitDoneReg && !qpCreateDoneReg);
+    rule respCreateQPs if (initMetaDataStateReg == META_DATA_CREATE_QP);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(qpNum);
             qpRespCnt <= fromInteger(qpNum - 1);
-            qpCreateDoneReg <= True;
+            // qpCreateDoneReg <= True;
+            initMetaDataStateReg <= META_DATA_INIT_QP;
         end
         else begin
             qpRespCnt.decr(1);
@@ -477,11 +496,14 @@ module mkInitMetaData#(
         end
     endrule
 
+    // rule reqInitQPs if (
+    //     !isZero(qpReqCnt) &&
+    //     pdInitDoneReg     &&
+    //     qpCreateDoneReg   &&
+    //     !qpInitDoneReg
+    // );
     rule reqInitQPs if (
-        !isZero(qpReqCnt) &&
-        pdInitDoneReg     &&
-        qpCreateDoneReg   &&
-        !qpInitDoneReg
+        !isZero(qpReqCnt) && initMetaDataStateReg == META_DATA_INIT_QP
     );
         qpReqCnt.decr(1);
 
@@ -494,18 +516,20 @@ module mkInitMetaData#(
             qpReqType   : REQ_QP_MODIFY,
             pdHandler   : dontCareValue,
             qpn         : qpn,
-            qpAttrMask  : dontCareValue,
+            qpAttrMask  : getReset2InitRequiredAttr,
             qpAttr      : qpAttr,
             qpInitAttr  : dontCareValue
         };
         metaDataSrv.request.put(tagged Req4QP initReqQP);
     endrule
 
-    rule respInitQPs if (pdInitDoneReg && qpCreateDoneReg && !qpInitDoneReg);
+    // rule respInitQPs if (pdInitDoneReg && qpCreateDoneReg && !qpInitDoneReg);
+    rule respInitQPs if (initMetaDataStateReg == META_DATA_INIT_QP);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(qpNum);
             qpRespCnt <= fromInteger(qpNum - 1);
-            qpInitDoneReg <= True;
+            // qpInitDoneReg <= True;
+            initMetaDataStateReg <= META_DATA_SET_QP_RTR;
         end
         else begin
             qpRespCnt.decr(1);
@@ -541,12 +565,88 @@ module mkInitMetaData#(
         end
     endrule
 
-    rule reqModifyQPs if (
-        !isZero(qpReqCnt) &&
-        pdInitDoneReg     &&
-        qpCreateDoneReg   &&
-        qpInitDoneReg     &&
-        !qpModifyDoneReg
+    // rule reqModifyQPs if (
+    //     !isZero(qpReqCnt) &&
+    //     pdInitDoneReg     &&
+    //     qpCreateDoneReg   &&
+    //     qpInitDoneReg     &&
+    //     !qpModifyDoneReg
+    // );
+    rule reqRtrQPs if (
+        !isZero(qpReqCnt) && initMetaDataStateReg == META_DATA_SET_QP_RTR
+    );
+        qpReqCnt.decr(1);
+
+        let qpn = qpnQ4Modify.first;
+        qpnQ4Modify.deq;
+
+        let qpAttr = qpAttrPipeIn.first;
+        qpAttrPipeIn.deq;
+
+        qpAttr.qpState = IBV_QPS_RTR;
+        let setRtrReqQP = ReqQP {
+            qpReqType   : REQ_QP_MODIFY,
+            pdHandler   : dontCareValue,
+            qpn         : qpn,
+            qpAttrMask  : getInit2RtrRequiredAttr,
+            qpAttr      : qpAttr,
+            qpInitAttr  : dontCareValue
+        };
+        metaDataSrv.request.put(tagged Req4QP setRtrReqQP);
+    endrule
+
+    // rule respModifyQPs if (
+    //     pdInitDoneReg   &&
+    //     qpCreateDoneReg &&
+    //     qpInitDoneReg   &&
+    //     !qpModifyDoneReg
+    // );
+    rule respRtrQPs if (initMetaDataStateReg == META_DATA_SET_QP_RTR);
+        if (isZero(qpRespCnt)) begin
+            // qpModifyDoneReg <= True;
+            initMetaDataStateReg <= META_DATA_SET_QP_RTS;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+        let maybeModifyRespQP <- metaDataSrv.response.get;
+        if (maybeModifyRespQP matches tagged Resp4QP .setRtrRespQP) begin
+            immAssert(
+                setRtrRespQP.successOrNot,
+                "setRtrRespQP.successOrNot assertion @ mkInitMetaData",
+                $format(
+                    "setRtrRespQP.successOrNot=", fshow(setRtrRespQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt,
+                    ", setRtrRespQP=", fshow(setRtrRespQP)
+                )
+            );
+            // $display(
+            //     "time=%0t: setRtrRespQP=", $time, fshow(setRtrRespQP),
+            //     " should be success, and setRtrRespQP.qpn=%h, qpRespCnt=%h",
+            //     $time, setRtrRespQP.qpn, qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeModifyRespQP assertion @ mkInitMetaData",
+                $format(
+                    "maybeModifyRespQP=", fshow(maybeModifyRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+    endrule
+
+    // rule reqModifyQPs if (
+    //     !isZero(qpReqCnt) &&
+    //     pdInitDoneReg     &&
+    //     qpCreateDoneReg   &&
+    //     qpInitDoneReg     &&
+    //     !qpModifyDoneReg
+    // );
+    rule reqRtsQPs if (
+        !isZero(qpReqCnt) && initMetaDataStateReg == META_DATA_SET_QP_RTS
     );
         qpReqCnt.decr(1);
 
@@ -557,45 +657,47 @@ module mkInitMetaData#(
         qpAttrPipeIn.deq;
 
         qpAttr.qpState = IBV_QPS_RTS;
-        let modifyReqQP = ReqQP {
+        let setRtsReqQP = ReqQP {
             qpReqType   : REQ_QP_MODIFY,
             pdHandler   : dontCareValue,
             qpn         : qpn,
-            qpAttrMask  : dontCareValue,
+            qpAttrMask  : getRtr2RtsRequiredAttr,
             qpAttr      : qpAttr,
             qpInitAttr  : dontCareValue
         };
-        metaDataSrv.request.put(tagged Req4QP modifyReqQP);
+        metaDataSrv.request.put(tagged Req4QP setRtsReqQP);
     endrule
 
-    rule respModifyQPs if (
-        pdInitDoneReg   &&
-        qpCreateDoneReg &&
-        qpInitDoneReg   &&
-        !qpModifyDoneReg
-    );
+    // rule respModifyQPs if (
+    //     pdInitDoneReg   &&
+    //     qpCreateDoneReg &&
+    //     qpInitDoneReg   &&
+    //     !qpModifyDoneReg
+    // );
+    rule respRtsQPs if (initMetaDataStateReg == META_DATA_SET_QP_RTS);
         if (isZero(qpRespCnt)) begin
-            qpModifyDoneReg <= True;
+            // qpModifyDoneReg <= True;
+            initMetaDataStateReg <= META_DATA_NO_OP;
         end
         else begin
             qpRespCnt.decr(1);
         end
 
         let maybeModifyRespQP <- metaDataSrv.response.get;
-        if (maybeModifyRespQP matches tagged Resp4QP .modifyRespQP) begin
+        if (maybeModifyRespQP matches tagged Resp4QP .setRtsRespQP) begin
             immAssert(
-                modifyRespQP.successOrNot,
-                "modifyRespQP.successOrNot assertion @ mkInitMetaData",
+                setRtsRespQP.successOrNot,
+                "setRtsRespQP.successOrNot assertion @ mkInitMetaData",
                 $format(
-                    "modifyRespQP.successOrNot=", fshow(modifyRespQP.successOrNot),
+                    "setRtsRespQP.successOrNot=", fshow(setRtsRespQP.successOrNot),
                     " should be true when qpRespCnt=%0d", qpRespCnt,
-                    ", modifyRespQP=", fshow(modifyRespQP)
+                    ", setRtsRespQP=", fshow(setRtsRespQP)
                 )
             );
             // $display(
-            //     "time=%0t: modifyRespQP=", $time, fshow(modifyRespQP),
-            //     " should be success, and modifyRespQP.qpn=%h, qpRespCnt=%h",
-            //     $time, modifyRespQP.qpn, qpRespCnt
+            //     "time=%0t: setRtsRespQP=", $time, fshow(setRtsRespQP),
+            //     " should be success, and setRtsRespQP.qpn=%h, qpRespCnt=%h",
+            //     $time, setRtsRespQP.qpn, qpRespCnt
             // );
         end
         else begin

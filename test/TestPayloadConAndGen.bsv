@@ -49,6 +49,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         convertFifo2PipeOut(payloadConReqQ)
     );
 
+    Reg#(PSN) npsnReg <- mkReg(0);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     // PipeOut need to handle:
@@ -97,13 +98,15 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         let pktLen = pktLenPipeOut4Con.first;
         pktLenPipeOut4Con.deq;
 
-        let startPktSeqNum = cntrl.getNPSN;
+        // let startPktSeqNum = cntrl.getNPSN;
+        let startPktSeqNum = npsnReg;
         let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } = calcPktNumNextAndEndPSN(
             startPktSeqNum,
             zeroExtend(pktLen),
             cntrl.getPMTU
         );
-        cntrl.setNPSN(nextPktSeqNum);
+        // cntrl.setNPSN(nextPktSeqNum);
+        npsnReg <= nextPktSeqNum;
 
         let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
             calcTotalFragNumByLength(zeroExtend(pktLen));
@@ -122,7 +125,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         payloadConReqPsnQ.enq(startPktSeqNum);
     endrule
 
-    rule comparePayloadConResp; // if (cntrl.isNonErr);
+    rule comparePayloadConResp;
         let payloadConResp = payloadConsumer.respPipeOut.first;
         payloadConsumer.respPipeOut.deq;
 
