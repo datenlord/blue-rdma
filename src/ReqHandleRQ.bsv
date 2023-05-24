@@ -1097,6 +1097,8 @@ module mkReqHandleRQ#(
 
         let bth   = reqPktInfo.bth;
         let epoch = reqPktInfo.epoch;
+
+        let retryStartState = tagged Invalid;
         if (epoch == getEpoch) begin
             // Trigger retry flush
             if (!hasErrHappened) begin
@@ -1105,12 +1107,12 @@ module mkReqHandleRQ#(
                     incEpoch;
                     // cntrl.contextRQ.restorePreReqOpCode(preOpCode);
                     // cntrl.contextRQ.restoreEPSN(bth.psn);
-                    retryStartReg[0] <= tagged Valid RQ_RNR_RETRY_FLUSH;
+                    retryStartState = tagged Valid RQ_RNR_RETRY_FLUSH;
                     // retryStateReg <= RQ_RNR_RETRY_FLUSH;
                 end
                 else if (reqStatus == RDMA_REQ_ST_SEQ_ERR) begin
                     incEpoch;
-                    retryStartReg[0] <= tagged Valid RQ_SEQ_RETRY_FLUSH;
+                    retryStartState = tagged Valid RQ_SEQ_RETRY_FLUSH;
                     // retryStateReg <= RQ_SEQ_RETRY_FLUSH;
                 end
             end
@@ -1124,7 +1126,8 @@ module mkReqHandleRQ#(
             );
         end
 
-        minRnrTimerReg <= cntrl.getMinRnrTimer;
+        retryStartReg[0] <= retryStartState;
+        minRnrTimerReg   <= cntrl.getMinRnrTimer;
         // reqPermInfoBuildQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
         qpAccPermCheckQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
         // $display(
@@ -3553,11 +3556,10 @@ module mkReqHandleRQ#(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryStart if (
-        cntrl.isNonErr && retryStateReg == RQ_NOT_RETRY && !hasErrHappened
+        retryStartReg[1] matches tagged Valid .retryStartState &&&
+        cntrl.isNonErr &&& retryStateReg == RQ_NOT_RETRY &&& !hasErrHappened
     );
-        if (retryStartReg[1] matches tagged Valid .retryStartState) begin
-            retryStateReg <= retryStartState;
-        end
+        retryStateReg    <= retryStartState;
         retryStartReg[1] <= tagged Invalid;
     endrule
 
