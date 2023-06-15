@@ -1,19 +1,24 @@
 include ../Makefile.base
 
-XDCDIR ?= xdc
+TCLDIR ?= xdc
 CLK ?= rdma_clock
 VLOGDIR ?= verilog
 OUTPUTDIR ?= output
 ONLYSYNTH ?= 1
-TARGETFILE ?= ../src/QP.bsv
-TOPMODULE ?= mkTransportLayerRDMA
+PARTNAME = xcvu13p-fhgb2104-2-i
+TARGETFILE ?= ../src/QueuePair.bsv
+TOPMODULE ?= mkQP
+# TARGETFILE ?= ../src/QP.bsv
+# TOPMODULE ?= mkTransportLayerRDMA
 
 export TOP = $(TOPMODULE)
 export RTL = $(VLOGDIR)
-export XDC = $(XDCDIR)
+export XDC = $(TCLDIR)
+export IPS = $(SRCDIR)/ip/$(PARTNAME)
 export CLOCKS = $(CLK)
 export OUTPUT = $(OUTPUTDIR)
 export SYNTHONLY = $(ONLYSYNTH)
+export PART = $(PARTNAME)
 
 compile:
 	mkdir -p $(BUILDDIR)

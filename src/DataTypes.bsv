@@ -123,8 +123,6 @@ typedef PipeOut#(DataStream) DataStreamPipeOut;
 
 typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
 typedef Server#(DmaWriteReq, DmaWriteResp) DmaWriteSrv;
-// typedef Client#(DmaReadReq, DmaReadResp)   DmaReadClt;
-// typedef Client#(DmaWriteReq, DmaWriteResp) DmaWriteClt;
 
 typedef ScanFIFOF#(MAX_QP_WR, PendingWorkReq) PendingWorkReqBuf;
 typedef PipeOut#(RecvReq)                     RecvReqBuf;

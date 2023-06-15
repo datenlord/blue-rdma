@@ -1241,7 +1241,7 @@ module mkReqHandleRQ#(
                     curPermCheckInfo.reqAddr       = reth.va;
                     curPermCheckInfo.totalLen      = reth.dlen;
                     curPermCheckInfo.pdHandler     = pktMetaData.pdHandler;
-                    curPermCheckInfo.isZeroDmaLen  = isZero(reth.dlen);
+                    curPermCheckInfo.isZeroDmaLen  = isZeroR(reth.dlen);
                     curPermCheckInfo.accFlags      = enum2Flag(isReadReq ? IBV_ACCESS_REMOTE_READ : IBV_ACCESS_REMOTE_WRITE);
                     curPermCheckInfo.localOrRmtKey = False;
 
@@ -1682,20 +1682,16 @@ module mkReqHandleRQ#(
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
                     // Exact remaining length is not necessory, zero or non-zero is enough
                     remainingDmaWriteLen = lenSubtractPktLen(permCheckInfo.totalLen, pktPayloadLen, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPktLen(permCheckInfo.totalLen, pktPayloadLen, cntrl.getPMTU);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
                     remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(permCheckInfo.totalLen, oneAsPSN, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPMTU(permCheckInfo.totalLen, cntrl.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
                     remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(cntrl.contextRQ.getRemainingDmaWriteLen, oneAsPSN, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPMTU(cntrl.contextRQ.getRemainingDmaWriteLen, cntrl.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     // Exact remaining length is not necessory, zero or non-zero is enough
                     remainingDmaWriteLen = lenSubtractPktLen(cntrl.contextRQ.getRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPktLen(cntrl.contextRQ.getRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
                 end
                 default: begin
                     immFail(
@@ -1815,19 +1811,15 @@ module mkReqHandleRQ#(
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = zeroExtend(pktPayloadLen);
-                    // enoughDmaSpace       = lenGtEqPktLen(permCheckInfo.totalLen, pktPayloadLen, cntrl.getPMTU);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPMTU(permCheckInfo.totalLen, cntrl.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPsnMultiplyPMTU(cntrl.contextRQ.getTotalDmaWriteLen, oneAsPSN, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPktLen(cntrl.contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
-                    // enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
                     isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin

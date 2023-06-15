@@ -650,7 +650,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             let pktLen = pktLenCheckInfo.pktLen;
             let pmtu   = pktLenCheckInfo.pmtu;
 
-            let isZeroPayloadLen = isZero(pktLen);
+            let isZeroPayloadLen = isZeroR(pktLen);
             let isPktLenEqPMTU   = pktLenEqPMTU(pktLen, pmtu);
             let isPktLenGtPMTU   = pktLenGtPMTU(pktLen, pmtu);
 

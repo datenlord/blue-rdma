@@ -806,7 +806,7 @@ module mkAtomicSrv#(Controller cntrl)(AtomicSrv);
     return toGPServer(atomicOpReqQ, atomicOpRespQ);
 endmodule
 
-interface DmaArbiter4QP;
+interface DmaArbiterInsideQP;
     interface DmaReadSrv  dmaReadSrv4RQ;
     interface DmaWriteSrv dmaWriteSrv4RQ;
     interface DmaReadSrv  dmaReadSrv4SQ;
@@ -816,7 +816,7 @@ endinterface
 module mkDmaArbiterInsideQP#(
     DmaReadSrv  dmaReadSrv,
     DmaWriteSrv dmaWriteSrv
-)(DmaArbiter4QP);
+)(DmaArbiterInsideQP);
     FIFOF#(DmaReadReq)     dmaReadReqQ4RQ <- mkFIFOF;
     FIFOF#(DmaReadResp)   dmaReadRespQ4RQ <- mkFIFOF;
     FIFOF#(DmaWriteReq)   dmaWriteReqQ4RQ <- mkFIFOF;

@@ -136,9 +136,9 @@ module mkRespHandleSQ#(
     FIFOF#(Tuple5#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, WorkCompReqType)) pendingPermQueryQ <- mkFIFOF;
     FIFOF#(Tuple6#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, WorkCompReqType, Bool)) pendingRetryCheckQ <- mkFIFOF;
     FIFOF#(Tuple7#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType, Bool)) pendingPermCheckQ <- mkFIFOF;
-    // FIFOF#(Tuple6#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType)) pendingLenCalcQ <- mkFIFOF;
     FIFOF#(Tuple6#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType)) pendingAddrCalcQ <- mkFIFOF;
     FIFOF#(Tuple7#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType, ADDR)) pendingLenCalcQ <- mkFIFOF;
+    FIFOF#(Tuple8#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType, RespLenCheckResult, Length)) pendingSpaceCalcQ <- mkFIFOF;
     FIFOF#(Tuple7#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType, RespLenCheckResult)) pendingLenCheckQ <- mkFIFOF;
     FIFOF#(Tuple7#(PendingWorkReq, RdmaPktMetaData, RespPktInfo, RespActionSQ, Maybe#(WorkCompStatus), WorkCompReqType, ADDR)) pendingDmaReqQ <- mkFIFOF;
     FIFOF#(Tuple2#(RespPktInfo, WorkCompGenReqSQ)) pendingWorkCompQ <- mkFIFOF;
@@ -179,6 +179,7 @@ module mkRespHandleSQ#(
         pendingPermCheckQ.clear;
         pendingAddrCalcQ.clear;
         pendingLenCalcQ.clear;
+        pendingSpaceCalcQ.clear;
         pendingLenCheckQ.clear;
         pendingDmaReqQ.clear;
         pendingWorkCompQ.clear;
@@ -470,6 +471,7 @@ module mkRespHandleSQ#(
                         checkPerm4NormalReadAtomicResp, \
                         calcReadRespAddr, \
                         calcReadRespLen, \
+                        calcEnoughDmaSpace, \
                         checkReadRespLen, \
                         issueDmaReq, \
                         genWorkComp, \
@@ -1028,7 +1030,7 @@ module mkRespHandleSQ#(
         //     ", WR ID=%h", pendingWR.wr.id
         // );
     endrule
-
+/*
     rule calcReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction,
@@ -1107,6 +1109,172 @@ module mkRespHandleSQ#(
         //     ", WR ID=%h", pendingWR.wr.id
         // );
     endrule
+*/
+    rule calcReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pendingWR, pktMetaData, respPktInfo, respAction,
+            wcStatus, wcReqType, nextReadRespWriteAddr
+        } = pendingLenCalcQ.first;
+        pendingLenCalcQ.deq;
+
+        let bth           = respPktInfo.bth;
+        let isReadResp    = respPktInfo.isReadResp;
+        let pktPayloadLen = pktMetaData.pktPayloadLen;
+        let isFirstPkt    = isFirstRdmaOpCode(bth.opcode);
+        let isMidPkt      = isMiddleRdmaOpCode(bth.opcode);
+        let isLastPkt     = isLastRdmaOpCode(bth.opcode);
+        let isOnlyPkt     = isOnlyRdmaOpCode(bth.opcode);
+
+        let remainingReadRespLen  = remainingReadRespLenReg;
+        let oneAsPSN              = 1;
+
+        if (isReadResp) begin
+            case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
+                4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
+                    remainingReadRespLen = pendingWR.wr.len - zeroExtend(pktPayloadLen);
+                end
+                4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
+                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(pendingWR.wr.len, oneAsPSN, cntrl.getPMTU);
+                end
+                4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
+                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
+                end
+                4'b0001: begin // isLastRdmaOpCode(bth.opcode)
+                    remainingReadRespLen = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
+                end
+                default: begin
+                    immFail(
+                        "unreachible case @ mkRespHandleSQ",
+                        $format(
+                            "isOnlyPkt=", fshow(isOnlyPkt),
+                            "isFirstPkt=", fshow(isFirstPkt),
+                            "isMidPkt=", fshow(isMidPkt),
+                            "isLastPkt=", fshow(isLastPkt)
+                        )
+                    );
+                end
+            endcase
+
+            if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
+                remainingReadRespLenReg <= remainingReadRespLen;
+            end
+        end
+
+        let respLenCheckResult = RespLenCheckResult {
+            enoughDmaSpace       : False,
+            isLastPayloadLenZero : True,
+            nextReadRespWriteAddr: nextReadRespWriteAddr,
+            remainingReadRespLen : remainingReadRespLen
+        };
+        pendingSpaceCalcQ.enq(tuple8(
+            pendingWR, pktMetaData, respPktInfo, respAction, wcStatus,
+            wcReqType, respLenCheckResult, remainingReadRespLenReg
+        ));
+        // $display(
+        //     "time=%0t: 8th stage, bth.psn=%h", $time, bth.psn,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", respAction=", fshow(respAction),
+        //     ", wcStatus=", fshow(wcStatus),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
+        //     ", readRespPktNum=%0d", readRespPktNum,
+        //     ", WR ID=%h", pendingWR.wr.id
+        // );
+    endrule
+
+    rule calcEnoughDmaSpace if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+        let {
+            pendingWR, pktMetaData, respPktInfo, respAction, wcStatus,
+            wcReqType, respLenCheckResult, preRemainingDmaWriteLen
+        } = pendingSpaceCalcQ.first;
+        pendingSpaceCalcQ.deq;
+
+        let bth           = respPktInfo.bth;
+        let isReadResp    = respPktInfo.isReadResp;
+        let pktPayloadLen = pktMetaData.pktPayloadLen;
+        let isFirstPkt    = isFirstRdmaOpCode(bth.opcode);
+        let isMidPkt      = isMiddleRdmaOpCode(bth.opcode);
+        let isLastPkt     = isLastRdmaOpCode(bth.opcode);
+        let isOnlyPkt     = isOnlyRdmaOpCode(bth.opcode);
+        Length pmtuLen    = zeroExtend(calcPmtuLen(cntrl.getPMTU));
+
+        let enoughDmaSpace        = True;
+        let isLastPayloadLenZero  = False;
+
+        if (isReadResp) begin
+            case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
+                4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
+                    // Just truncate the total length and then compare with the payload length
+                    enoughDmaSpace       = lenGtEqPktLen(pendingWR.wr.len, pktPayloadLen, cntrl.getPMTU);
+                    if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
+                        immAssert(
+                            pmtuLen >= pendingWR.wr.len,
+                            "enoughDmaSpace for only packets @ mkRespHandleSQ",
+                            $format(
+                                "pendingWR.wr.len=%0d should not larger than pmtuLen=%0d, when isOnlyPkt=",
+                                pendingWR.wr.len, pmtuLen, fshow(isOnlyPkt)
+                            )
+                        );
+                    end
+                end
+                4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
+                    enoughDmaSpace       = lenGtEqPMTU(pendingWR.wr.len, cntrl.getPMTU);
+                end
+                4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
+                    enoughDmaSpace       = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.getPMTU);
+                end
+                4'b0001: begin // isLastRdmaOpCode(bth.opcode)
+                    // Just truncate the remaining DMA length and then compare with the payload length
+                    enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
+                    isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
+                    if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
+                        immAssert(
+                            pmtuLen >= preRemainingDmaWriteLen,
+                            "enoughDmaSpace for last packets @ mkRespHandleSQ",
+                            $format(
+                                "preRemainingDmaWriteLen=%0d should not larger than pmtuLen=%0d, when isLastPkt=",
+                                preRemainingDmaWriteLen, pmtuLen, fshow(isLastPkt)
+                            )
+                        );
+                    end
+                end
+                default: begin
+                    immFail(
+                        "unreachible case @ mkRespHandleSQ",
+                        $format(
+                            "isOnlyPkt=", fshow(isOnlyPkt),
+                            "isFirstPkt=", fshow(isFirstPkt),
+                            "isMidPkt=", fshow(isMidPkt),
+                            "isLastPkt=", fshow(isLastPkt)
+                        )
+                    );
+                end
+            endcase
+        end
+
+        // let respLenCheckResult = RespLenCheckResult {
+        //     enoughDmaSpace       : enoughDmaSpace,
+        //     isLastPayloadLenZero : isLastPayloadLenZero,
+        //     nextReadRespWriteAddr: nextReadRespWriteAddr,
+        //     remainingReadRespLen : remainingReadRespLen
+        // };
+        respLenCheckResult.enoughDmaSpace = enoughDmaSpace;
+        respLenCheckResult.isLastPayloadLenZero = isLastPayloadLenZero;
+        pendingLenCheckQ.enq(tuple7(
+            pendingWR, pktMetaData, respPktInfo, respAction,
+            wcStatus, wcReqType, respLenCheckResult
+        ));
+        // $display(
+        //     "time=%0t: 9th stage, bth.psn=%h", $time, bth.psn,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", respAction=", fshow(respAction),
+        //     ", wcStatus=", fshow(wcStatus),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
+        //     ", readRespPktNum=%0d", readRespPktNum,
+        //     ", WR ID=%h", pendingWR.wr.id
+        // );
+    endrule
 
     rule checkReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
         let {
@@ -1143,7 +1311,7 @@ module mkRespHandleSQ#(
             wcStatus, wcReqType, nextReadRespWriteAddr
         ));
         // $display(
-        //     "time=%0t: 9th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 10th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", enoughDmaSpace=", fshow(enoughDmaSpace),
@@ -1271,7 +1439,7 @@ module mkRespHandleSQ#(
         };
         pendingWorkCompQ.enq(tuple2(respPktInfo, workCompGenReq));
         // $display(
-        //     "time=%0t: 10th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 11th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
@@ -1313,7 +1481,7 @@ module mkRespHandleSQ#(
         end
 
         // $display(
-        //     "time=%0t: 11th stage, bth.psn=%h", $time, bth.psn,
+        //     "time=%0t: 12th stage, bth.psn=%h", $time, bth.psn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     // ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),

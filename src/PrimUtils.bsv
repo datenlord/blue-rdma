@@ -1,4 +1,3 @@
-// import Cntrs :: *;
 import FIFOF :: *;
 
 typedef 2 TWO;
@@ -7,6 +6,19 @@ function Bool isZero(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
     // TODO: consider using fold
     Bool ret = unpack(|bits);
     return !ret;
+endfunction
+
+function Bool isZeroR(Bit#(nSz) bits) provisos(
+    NumAlias#(TDiv#(nSz, 2), halfSz)
+);
+    if (valueOf(halfSz) > 1) begin
+        Tuple2#(Bit#(TSub#(nSz, halfSz)), Bit#(halfSz)) pair = split(bits);
+        let { left, right } = pair;
+        return isZeroR(left) && isZeroR(right);
+    end
+    else begin
+        return isZero(bits);
+    end
 endfunction
 
 function Bool isLessOrEqOne(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));

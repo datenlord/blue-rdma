@@ -121,6 +121,79 @@ module mkServerArbiter#(
     return resultSrvVec;
 endmodule
 
+module mkClientArbiter#(
+    Vector#(portSz, Client#(reqType, respType)) clientVec,
+    function Bool isReqFinished(reqType request),
+    function Bool isRespFinished(respType response)
+)(Client#(reqType, respType)) provisos(
+    // FShow#(reqType), FShow#(respType),
+    Bits#(reqType, reqSz),
+    Bits#(respType, respSz),
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    FIFOF#(reqType)   reqQ <- mkFIFOF;
+    FIFOF#(respType) respQ <- mkFIFOF;
+
+    function Bool isPipePayloadFinished(Tuple2#(Bit#(TLog#(portSz)), reqType) reqWithIdx);
+        let { reqIdx, inputReq } = reqWithIdx;
+        return isReqFinished(inputReq);
+    endfunction
+
+    Vector#(
+        portSz, FIFOF#(Tuple2#(Bit#(TLog#(portSz)), reqType))
+    ) inputReqWithIdxVec <- replicateM(mkFIFOF);
+    FIFOF#(Bit#(TLog#(portSz)))  preGrantIdxQ <- mkFIFOF;
+    Reg#(Bool) shouldSaveGrantIdxReg <- mkReg(True);
+
+    let leafArbiterVec <- mkLeafBinaryPipeOutArbiterVec(
+        map(convertFifo2PipeOut, inputReqWithIdxVec),
+        isPipePayloadFinished
+    );
+    let finalReqWithIdxPipeOut <- mkBinaryPipeOutArbiterTree(
+        leafArbiterVec, isPipePayloadFinished
+    );
+
+    for (Integer idx = 0; idx < valueOf(portSz); idx = idx + 1) begin
+        rule extractReq;
+            let req <- clientVec[idx].request.get;
+            inputReqWithIdxVec[idx].enq(tuple2(fromInteger(idx), req));
+        endrule
+    end
+
+    rule issueArbitratedReq;
+        let { reqIdx, inputReq } = finalReqWithIdxPipeOut.first;
+        finalReqWithIdxPipeOut.deq;
+        reqQ.enq(inputReq);
+
+        if (shouldSaveGrantIdxReg) begin
+            preGrantIdxQ.enq(reqIdx);
+        end
+        shouldSaveGrantIdxReg <= isReqFinished(inputReq);
+    endrule
+
+    rule dispatchResponse;
+        let preGrantIdx = preGrantIdxQ.first;
+        let resp = respQ.first;
+        respQ.deq;
+
+        let respFinished = isRespFinished(resp);
+        clientVec[preGrantIdx].response.put(resp);
+        if (respFinished) begin
+            preGrantIdxQ.deq;
+        end
+
+        // $display(
+        //     "time=%0t:", $time,
+        //     " dispatch resp=", fshow(resp),
+        //     ", preGrantIdx=%0d", preGrantIdx,
+        //     ", respFinished=", fshow(respFinished)
+        // );
+    endrule
+
+    return toGPClient(reqQ, respQ);
+endmodule
+
 function Bit#(nSz) arbitrateBits(
     Bit#(nSz) priorityBits, Bit#(nSz) requestBits
 ); // provisos(Add#(1, anysize, nSz));
@@ -184,63 +257,7 @@ module mkBinaryPipeOutArbiter#(
         //     requestBits, curGrantOneHotReg, newGrantOneHot, curGrantIdx, priorityOneHotReg
         // );
     endrule
-/*
-    Reg#(Bit#(TWO)) priorityOneHotReg <- mkReg(1);
-    Reg#(Bit#(TWO)) curGrantOneHotReg <- mkReg(1);
 
-    function Bool portHasReqFunc(PipeOut#(anytype) pipeIn) = pipeIn.notEmpty;
-
-    function Bit#(TWO) arbitrateBinaryBits(
-        Bit#(TWO) priorityBits, Bit#(TWO) requestBits
-    );
-        let curGrant = priorityBits & requestBits;
-        if (isZero(curGrant)) begin
-            curGrant = requestBits;
-        end
-        return curGrant;
-    endfunction
-
-    // (* no_implicit_conditions, fire_when_enabled *)
-    (* fire_when_enabled *)
-    rule binaryArbitrate;
-        let requestVec = map(portHasReqFunc, inputPipeOutVec);
-        Bit#(TWO) requestBits = pack(requestVec);
-
-        // let newGrantOneHot = arbitrateByDoubleBits(priorityOneHotReg, requestBits);
-        let newGrantOneHot = arbitrateBinaryBits(priorityOneHotReg, requestBits);
-
-        let curGrantIdx = msb(curGrantOneHotReg);
-        if (needArbitrationReg) begin
-            curGrantIdx = msb(newGrantOneHot);
-            curGrantOneHotReg <= newGrantOneHot;
-            priorityOneHotReg <= ~newGrantOneHot;
-        end
-
-        immAssert(
-            countOnes(priorityOneHotReg) == 1,
-            "priorityOneHotReg assertion @ mkBinaryPipeOutArbiter",
-            $format("priorityOneHotReg=%h", priorityOneHotReg, " should be onehot")
-        );
-        immAssert(
-            countOnes(curGrantOneHotReg) == 1,
-            "curGrantOneHotReg assertion @ mkBinaryPipeOutArbiter",
-            $format("curGrantOneHotReg=%h", curGrantOneHotReg, " should be onehot")
-        );
-
-        let inputPayload = inputPipeOutVec[curGrantIdx].first;
-        inputPipeOutVec[curGrantIdx].deq;
-        pipeOutQ.enq(inputPayload);
-
-        needArbitrationReg <= isPipePayloadFinished(inputPayload);
-
-        // $display(
-        //     "time=%0t:", $time,
-        //     " needArbitrationReg=", fshow(needArbitrationReg),
-        //     ", requestBits=%h, curGrantOneHotReg=%h, newGrantOneHot=%h, curGrantIdx=%h, priorityOneHotReg=%h",
-        //     requestBits, curGrantOneHotReg, newGrantOneHot, curGrantIdx, priorityOneHotReg
-        // );
-    endrule
-*/
     return convertFifo2PipeOut(pipeOutQ);
 endmodule
 
@@ -346,32 +363,17 @@ module mkFixedBinaryPipeOutArbiter#(
     method Bool notEmpty() = isNotEmpty;
 endmodule
 
-// // pipeIn1 has priority over pipeIn2
-// function PipeOut#(anytype) mkFixedBinaryPipeOutArbiter(
-//     PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
-// );
-//     let notEmpty = pipeIn1.notEmpty || pipeIn2.notEmpty;
-//     let resultIfc = interface PipeOut#(anytype);
-//         method anytype first() if (notEmpty);
-//             if (pipeIn1.notEmpty) begin
-//                 return pipeIn1.first;
-//             end
-//             else begin
-//                 return pipeIn2.first;
-//             end
-//         endmethod
+interface ServerProxy#(type reqType, type respType);
+    interface Server#(reqType, respType) srvPort;
+    interface Client#(reqType, respType) cltPort;
+endinterface
 
-//         method Action deq() if (notEmpty);
-//             if (pipeIn1.notEmpty) begin
-//                 pipeIn1.deq;
-//             end
-//             else begin
-//                 pipeIn2.deq;
-//             end
-//         endmethod
+module mkServerProxy(ServerProxy#(reqType, respType)) provisos(
+    Bits#(reqType, reqSz), Bits#(respType, respSz)
+);
+    FIFOF#(reqType)   reqQ <- mkFIFOF;
+    FIFOF#(respType) respQ <- mkFIFOF;
 
-//         method Bool notEmpty() = notEmpty;
-//     endinterface;
-
-//     return resultIfc;
-// endfunction
+    interface cltPort = toGPClient(reqQ, respQ);
+    interface srvPort = toGPServer(reqQ, respQ);
+endmodule

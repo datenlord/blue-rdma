@@ -528,31 +528,56 @@ function Bool lenGtEqPktLen(Length len, PktLen pktLen, PMTU pmtu);
         IBV_MTU_256 : begin
             // 8 = log2(256)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 9)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 9];
-            (!isZero(lenHighPart) || (len[8 : 0] >= pktLen[8 : 0]));
+            (!isZeroR(lenHighPart) || (len[8 : 0] >= pktLen[8 : 0]));
         end
         IBV_MTU_512 : begin
             // 9 = log2(512)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 10)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 10];
-            (!isZero(lenHighPart) || (len[9 : 0] >= pktLen[9 : 0]));
+            (!isZeroR(lenHighPart) || (len[9 : 0] >= pktLen[9 : 0]));
         end
         IBV_MTU_1024: begin
             // 10 = log2(1024)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 11)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 11];
-            (!isZero(lenHighPart) || (len[10 : 0] >= pktLen[10 : 0]));
+            (!isZeroR(lenHighPart) || (len[10 : 0] >= pktLen[10 : 0]));
         end
         IBV_MTU_2048: begin
             // 11 = log2(2048)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 12)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 12];
-            (!isZero(lenHighPart) || (len[11 : 0] >= pktLen[11 : 0]));
+            (!isZeroR(lenHighPart) || (len[11 : 0] >= pktLen[11 : 0]));
         end
         IBV_MTU_4096: begin
             // 12 = log2(4096)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 13)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 13];
-            (!isZero(lenHighPart) || (len[12 : 0] >= pktLen[12 : 0]));
+            (!isZeroR(lenHighPart) || (len[12 : 0] >= pktLen[12 : 0]));
         end
     endcase;
 endfunction
 /*
+function Bool lenGtEqPktLen4LastOrOnlyPkt(Length len, PktLen pktLen, PMTU pmtu);
+    return case (pmtu)
+        IBV_MTU_256 : begin
+            // 8 = log2(256)
+            (len[8 : 0] >= pktLen[8 : 0]);
+        end
+        IBV_MTU_512 : begin
+            // 9 = log2(512)
+            (len[9 : 0] >= pktLen[9 : 0]);
+        end
+        IBV_MTU_1024: begin
+            // 10 = log2(1024)
+            (len[10 : 0] >= pktLen[10 : 0]);
+        end
+        IBV_MTU_2048: begin
+            // 11 = log2(2048)
+            (len[11 : 0] >= pktLen[11 : 0]);
+        end
+        IBV_MTU_4096: begin
+            // 12 = log2(4096)
+            (len[12 : 0] >= pktLen[12 : 0]);
+        end
+    endcase;
+endfunction
+
 function Bool lenEqPktLen(Length len, PktLen pktLen, PMTU pmtu);
     return case (pmtu)
         IBV_MTU_256 : begin
@@ -588,27 +613,27 @@ function Bool lenGtEqPMTU(Length len, PMTU pmtu);
         IBV_MTU_256 : begin
             // 8 = log2(256)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 8)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 8];
-            (!isZero(lenHighPart)); // truncate len[7 : 0]
+            (!isZeroR(lenHighPart)); // truncate len[7 : 0]
         end
         IBV_MTU_512 : begin
             // 9 = log2(512)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 9)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 9];
-            (!isZero(lenHighPart)); // truncate len[8 : 0]
+            (!isZeroR(lenHighPart)); // truncate len[8 : 0]
         end
         IBV_MTU_1024: begin
             // 10 = log2(1024)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 10)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 10];
-            (!isZero(lenHighPart)); // truncate len[9 : 0]
+            (!isZeroR(lenHighPart)); // truncate len[9 : 0]
         end
         IBV_MTU_2048: begin
             // 11 = log2(2048)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 11)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 11];
-            (!isZero(lenHighPart)); // truncate len[10 : 0]
+            (!isZeroR(lenHighPart)); // truncate len[10 : 0]
         end
         IBV_MTU_4096: begin
             // 12 = log2(4096)
             Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 12)) lenHighPart = truncateLSB(len); // [valueOf(RDMA_MAX_LEN_WIDTH)-1 : 12];
-            (!isZero(lenHighPart)); // truncate len[11 : 0]
+            (!isZeroR(lenHighPart)); // truncate len[11 : 0]
         end
     endcase;
 endfunction
