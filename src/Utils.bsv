@@ -390,7 +390,7 @@ function PSN calcPsnDiff(PSN psnA, PSN psnB);
 endfunction
 
 function Bool isDefaultPKEY(PKEY pkey);
-    return isAllOnes(pkey);
+    return isAllOnesR(pkey);
 endfunction
 
 function ADDR addrAddPsnMultiplyPMTU(ADDR addr, PSN psn, PMTU pmtu);
@@ -1531,11 +1531,13 @@ module mkPipeOutMux#(
     rule outputPipeIn1 if (sel);
         pipeMuxOutQ.enq(pipeIn1.first);
         pipeIn1.deq;
+        // $display("time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel));
     endrule
 
     rule outputPipeIn2 if (!sel);
         pipeMuxOutQ.enq(pipeIn2.first);
         pipeIn2.deq;
+        // $display("time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel));
     endrule
 
     return convertFifo2PipeOut(pipeMuxOutQ);

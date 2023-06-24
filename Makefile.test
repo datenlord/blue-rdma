@@ -22,7 +22,8 @@ TESTBENCHS = \
 SimDma.bsv                       = mkTestFixedLenSimDataStreamPipeOut
 SimGenRdmaReqAndResp.bsv         = mkTestSimGenRdmaResp
 TestArbitration.bsv              = mkTestPipeOutArbiter \
-                                    mkTestServerArbiter
+                                    mkTestServerArbiter \
+                                    mkTestClientArbiter
 TestController.bsv               = mkTestCntrlInVec
 TestDupReadAtomicCache.bsv       = mkTestDupReadAtomicCache \
                                     mkTestCacheFIFO
@@ -44,6 +45,9 @@ TestMetaData.bsv                 = mkTestMetaDataMRs \
                                     mkTestTLB
 TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
                                     mkTestPayloadGenSegmentAndPaddingCase
+TestQueuePair.bsv                = mkTestSimExtractNormalRdmaHeader \
+                                    mkTestQueuePairTimeOutErrCase \
+                                    mkTestQueuePairNormalCase
 TestReqGenSQ.bsv                 = mkTestReqGenNormalCase \
                                     mkTestReqGenZeroLenCase \
                                     mkTestReqGenDmaReadErrCase

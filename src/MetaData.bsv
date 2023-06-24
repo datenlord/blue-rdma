@@ -71,7 +71,7 @@ module mkTagVecSrv(TagVecSrv#(vSz, anytype)) provisos(
         let { insertOrRemove, insertVal, removeIdx } = reqQ.first;
         // reqQ.deq;
 
-        let almostFull  = isAllOnes(removeMSB(itemCnt));
+        let almostFull  = isAllOnesR(removeMSB(itemCnt));
         let almostEmpty = isOne(itemCnt);
         let maybeIndex  = findElem(False, readVReg(tagVec));
 
@@ -626,39 +626,8 @@ module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
 
         respOutQ.enq(stepTwoResult);
     endrule
-/*
-    rule checkResp;
-        let { permCheckInfo, isZeroDmaLen, maybeMR } = checkReqQ.first;
-        checkReqQ.deq;
 
-        let checkResult = isZeroDmaLen;
-        if (!isZeroDmaLen) begin
-            if (maybeMR matches tagged Valid .mr) begin
-                checkResult = checkPermByMR(permCheckInfo, mr);
-            end
-        end
-
-        respOutQ.enq(checkResult);
-    endrule
-*/
     return toGPServer(reqInQ, respOutQ);
-endmodule
-
-typedef Vector#(portSz, PermCheckMR) PermCheckArbiter#(numeric type portSz);
-
-module mkPermCheckAribter#(PermCheckMR permCheckMR)(PermCheckArbiter#(portSz)) provisos(
-    Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
-);
-    function Bool isPermCheckReqFinished(PermCheckInfo req) = True;
-    function Bool isPermCheckRespFinished(Bool resp) = True;
-
-    PermCheckArbiter#(portSz) arbiter <- mkServerArbiter(
-        permCheckMR,
-        isPermCheckReqFinished,
-        isPermCheckRespFinished
-    );
-    return arbiter;
 endmodule
 
 // MetaDataSrv related
@@ -703,38 +672,7 @@ module mkMetaDataSrv#(
     Reg#(ReqPD) pdReqReg <- mkRegU;
     Reg#(ReqQP) qpReqReg <- mkRegU;
     Reg#(MetaDataSrvState) stateReg <- mkReg(META_DATA_RECV_REQ);
-/*
-    rule issueMetaDataReq if (stateReg == META_DATA_RECV_REQ);
-        let metaDataReq = metaDataReqQ.first;
-        metaDataReqQ.deq;
 
-        case (metaDataReq) matches
-            tagged Req4MR .mrReq: begin
-                let pdIndex = getIndexPD(mrReq.mr.pdHandler);
-                let maybeMRs = pdMetaData.getMRs4PD(mrReq.mr.pdHandler);
-                if (maybeMRs matches tagged Valid .mrMetaData) begin
-                    mrMetaData.srvPort.request.put(mrReq);
-                end
-                mrReqReg <= mrReq;
-                stateReg <= META_DATA_MR_RESP;
-            end
-            tagged Req4PD .pdReq: begin
-                pdMetaData.srvPort.request.put(pdReq);
-                pdReqReg <= pdReq;
-                stateReg <= META_DATA_PD_RESP;
-            end
-            tagged Req4QP .qpReq: begin
-                let isValidPD = pdMetaData.isValidPD(qpReq.pdHandler);
-                if (isValidPD) begin
-                    qpMetaData.srvPort.request.put(qpReq);
-                end
-                qpReqReg <= qpReq;
-                stateReg <= META_DATA_QP_RESP;
-            end
-        endcase
-        // busyReg <= True;
-    endrule
-*/
     // Do not use pipeline to avoid conflict requests
     rule recvMetaDataReq if (stateReg == META_DATA_RECV_REQ);
         let metaDataReq = metaDataReqQ.first;

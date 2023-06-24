@@ -226,10 +226,10 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
             $format("wcStatus=", fshow(wcStatus), " should not be success")
         );
         cntrl.setStateErr;
-        $display(
-            "time=%0t:", $time,
-            " set Controller to error state, wcStatus=", fshow(wcStatus)
-        );
+        // $display(
+        //     "time=%0t:", $time,
+        //     " set Controller to error state, wcStatus=", fshow(wcStatus)
+        // );
     endrule
 
     rule genWorkCompReq4RQ;
@@ -296,7 +296,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
 
             workCompGenReqQ4RQ.enq(workCompReq);
 
-            $display("time=%0t: workCompReq=", $time, fshow(workCompReq));
+            // $display("time=%0t: workCompReq=", $time, fshow(workCompReq));
         end
     endrule
 
@@ -313,8 +313,8 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
             workCompRQ.id == recvReqID,
             "workCompRQ.id assertion @ mkTestWorkCompGenRQ",
             $format(
-                "WC id=", fshow(workCompRQ.id),
-                " not match expected WC recvReqID=", fshow(recvReqID))
+                "WC ID=", fshow(workCompRQ.id),
+                " not match expected recvReqID=", fshow(recvReqID))
         );
 
         immAssert(

@@ -542,8 +542,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             )
         );
         let fragLen         = unwrapMaybe(payloadFragLen);
-        let isByteEnNonZero = !isZero(fragLen);
-        let isByteEnAllOne  = isAllOnes(payloadFrag.byteEn);
+        let isByteEnNonZero = !isZeroR(fragLen);
+        let isByteEnAllOne  = isAllOnesR(payloadFrag.byteEn);
         ByteEnBitNum fragLenWithOutPad = fragLen - zeroExtend(bthPadCnt);
 
         payloadPktLenCalcQ.enq(tuple5(
@@ -580,7 +580,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         let pktFragNum = pktFragNumReg;
         let pktValid = False;
 
-        PktLen fragLenExt = zeroExtend(fragLen);
+        // PktLen fragLenExt = zeroExtend(fragLen);
         PktLen fragLenExtWithOutPad = zeroExtend(fragLenWithOutPad);
         case ({ pack(payloadFrag.isFirst), pack(payloadFrag.isLast) })
             2'b11: begin // payloadFrag.isFirst && payloadFrag.isLast

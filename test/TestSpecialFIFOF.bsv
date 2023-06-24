@@ -194,10 +194,10 @@ module mkTestSearchFIFOF(Empty);
             qElemPipeOut4Q.deq;
 
             searchQ.fifof.enq(curEnqData);
-            $display(
-                "time=%0t: curEnqData=%h when in fill mode",
-                $time, curEnqData
-            );
+            // $display(
+            //     "time=%0t: curEnqData=%h when in fill mode",
+            //     $time, curEnqData
+            // );
         end
         else begin
             searchTestStateReg <= TEST_Q_ACT;
@@ -206,7 +206,7 @@ module mkTestSearchFIFOF(Empty);
     endrule
 
     rule compareSearch if (searchTestStateReg == TEST_Q_ACT);
-        if (isAllOnes(itemCnt)) begin
+        if (isAllOnesR(itemCnt)) begin
             itemCnt <= 0;
             searchTestStateReg <= TEST_Q_POP;
         end
@@ -372,7 +372,7 @@ module mkTestVectorSearch(Empty);
     endfunction
 
     rule fillSearchQ if (searchTestStateReg == TEST_Q_FILL);
-        if (isAllOnes(elemCnt)) begin
+        if (isAllOnesR(elemCnt)) begin
             elemCnt <= 0;
             searchTestStateReg <= TEST_Q_ACT;
         end
@@ -392,7 +392,7 @@ module mkTestVectorSearch(Empty);
     endrule
 
     rule compareSearch if (searchTestStateReg == TEST_Q_ACT);
-        if (isAllOnes(elemCnt)) begin
+        if (isAllOnesR(elemCnt)) begin
             elemCnt <= 0;
             searchTestStateReg <= TEST_Q_POP;
         end
@@ -438,7 +438,7 @@ module mkTestVectorSearch(Empty);
     endrule
 
     rule compareDeq if (searchTestStateReg == TEST_Q_POP);
-        if (isAllOnes(elemCnt)) begin
+        if (isAllOnesR(elemCnt)) begin
             elemCnt <= 0;
             searchTestStateReg <= TEST_Q_FILL;
         end

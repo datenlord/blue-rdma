@@ -451,338 +451,7 @@ function Maybe#(Tuple3#(HeaderData, HeaderByteNum, Bool)) genMiddleOrLastReqHead
         return tagged Invalid;
     end
 endfunction
-/*
-function Maybe#(RdmaHeader) genFirstOrOnlyReqHeader(WorkReq wr, Controller cntrl, PSN psn, Bool isOnlyReqPkt);
-    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
-    let maybeOpCode = genFirstOrOnlyReqRdmaOpCode(wr.opcode, isOnlyReqPkt);
-    let maybeDQPN   = getMaybeDestQpnSQ(wr, cntrl);
 
-    let isReadOrAtomicWR = isReadOrAtomicWorkReq(wr.opcode);
-    if (
-        maybeTrans  matches tagged Valid .trans  &&&
-        maybeOpCode matches tagged Valid .opcode &&&
-        maybeDQPN   matches tagged Valid .dqpn
-    ) begin
-        let bth = BTH {
-            trans    : trans,
-            opcode   : opcode,
-            solicited: wr.solicited,
-            migReq   : unpack(0),
-            padCnt   : (isOnlyReqPkt && !isReadOrAtomicWR) ? calcPadCnt(wr.len) : 0,
-            tver     : unpack(0),
-            pkey     : cntrl.getPKEY,
-            fecn     : unpack(0),
-            becn     : unpack(0),
-            resv6    : unpack(0),
-            dqpn     : dqpn,
-            ackReq   : cntrl.getSigAll || (isOnlyReqPkt && workReqRequireAck(wr)),
-            resv7    : unpack(0),
-            psn      : psn
-        };
-
-        let xrceth = genXRCETH(wr, cntrl);
-        let deth = genDETH(wr, cntrl);
-        let reth = genRETH(wr);
-        let atomicEth = genAtomicEth(wr);
-        let immDt = genImmDt(wr);
-        let ieth = genIETH(wr);
-
-        // If WR has zero length, then no payload, no matter what kind of opcode
-        let hasPayload = workReqHasPayload(wr);
-        case (wr.opcode)
-            IBV_WR_RDMA_WRITE: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC,
-                    IBV_QPT_UC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_RDMA_WRITE_WITH_IMM: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC,
-                    IBV_QPT_UC: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)), pack(unwrapMaybe(immDt))}) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth))}),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC,
-                    IBV_QPT_UC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB(pack(bth)),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_UD: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(deth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(DETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND_WITH_IMM: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC,
-                    IBV_QPT_UC: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB(pack(bth)),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_UD: tagged Valid genRdmaHeader(
-                        // UD always has only pkt
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(deth)), pack(unwrapMaybe(immDt)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(DETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND_WITH_INV: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(ieth)) }) :
-                            zeroExtendLSB(pack(bth)),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isOnlyReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(ieth)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        isOnlyReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_RDMA_READ: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        False // Read requests have no payload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
-                        False // Read requests have no payload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_ATOMIC_CMP_AND_SWP  ,
-            IBV_WR_ATOMIC_FETCH_AND_ADD: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(atomicEth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH)),
-                        False // Atomic requests have no payload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(atomicEth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH)),
-                        False // Atomic requests have no payload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            default: return tagged Invalid;
-        endcase
-    end
-    else begin
-        return tagged Invalid;
-    end
-endfunction
-
-function Maybe#(RdmaHeader) genMiddleOrLastReqHeader(WorkReq wr, Controller cntrl, PSN psn, Bool isLastReqPkt);
-    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
-    let maybeOpCode = genMiddleOrLastReqRdmaOpCode(wr.opcode, isLastReqPkt);
-    let maybeDQPN   = getMaybeDestQpnSQ(wr, cntrl);
-
-    if (
-        maybeTrans  matches tagged Valid .trans  &&&
-        maybeOpCode matches tagged Valid .opcode &&&
-        maybeDQPN   matches tagged Valid .dqpn
-    ) begin
-        let bth = BTH {
-            trans    : trans,
-            opcode   : opcode,
-            solicited: wr.solicited,
-            migReq   : unpack(0),
-            padCnt   : isLastReqPkt ? calcPadCnt(wr.len) : 0,
-            tver     : unpack(0),
-            pkey     : cntrl.getPKEY,
-            fecn     : unpack(0),
-            becn     : unpack(0),
-            resv6    : unpack(0),
-            dqpn     : dqpn,
-            ackReq   : cntrl.getSigAll || (isLastReqPkt && workReqRequireAck(wr)),
-            resv7    : unpack(0),
-            psn      : psn
-        };
-
-        let xrceth = genXRCETH(wr, cntrl);
-        let immDt = genImmDt(wr);
-        let ieth = genIETH(wr);
-
-        let hasPayload = True;
-        case (wr.opcode)
-            IBV_WR_RDMA_WRITE:begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB(pack(bth)),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_RDMA_WRITE_WITH_IMM: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(immDt))}) :
-                            zeroExtendLSB(pack(bth)),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        zeroExtendLSB(pack(bth)),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND_WITH_IMM: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB(pack(bth)),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            IBV_WR_SEND_WITH_INV: begin
-                return case (cntrl.getTypeQP)
-                    IBV_QPT_RC: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(ieth)) }) :
-                            zeroExtendLSB(pack(bth)),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    IBV_QPT_XRC_SEND: tagged Valid genRdmaHeader(
-                        isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(ieth)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
-                        hasPayload
-                    );
-                    default: tagged Invalid;
-                endcase;
-            end
-            default: return tagged Invalid;
-        endcase
-    end
-    else begin
-        return tagged Invalid;
-    end
-endfunction
-*/
 typedef struct {
     PSN            curPSN;
     PendingWorkReq pendingWR;
@@ -969,10 +638,15 @@ module mkReqGenSQ#(
                 isNewWorkReq, isReliableConnection, isUnreliableDatagram
             ));
             // $display(
-            //     "time=%0t: recvWorkReq", $time,
+            //     "time=%0t:", $time,
+            //     "  1st stage recvWorkReq, shouldDeqPendingWR=", fshow(shouldDeqPendingWR),
             //     ", curPendingWR=", fshow(curPendingWR)
             // );
         end
+        // $display(
+        //     "time=%0t: 1st stage recvWorkReq", $time,
+        //     ", shouldDeqPendingWR=", fshow(shouldDeqPendingWR)
+        // );
     endrule
 
     rule issuePayloadGenReq if (cntrl.isStableRTS && isNormalStateReg);
@@ -1008,7 +682,7 @@ module mkReqGenSQ#(
         };
         workReqPktNumQ.enq(tuple3(curPendingWR, totalReqPktNum, workReqInfo));
         // $display(
-        //     "time=%0t: issuePayloadGenReq", $time,
+        //     "time=%0t: 2nd stage issuePayloadGenReq", $time,
         //     ", WR ID=%h, curPendingWR.wr.len=%0d",
         //     curPendingWR.wr.id, curPendingWR.wr.len,
         //     // ", workReqInfo=", fshow(workReqInfo),
@@ -1048,7 +722,7 @@ module mkReqGenSQ#(
 
         workReqPsnQ.enq(tuple2(curPendingWR, workReqInfo));
         // $display(
-        //     "time=%0t: calcPktNum4NewWorkReq", $time,
+        //     "time=%0t: 3rd stage calcPktNum4NewWorkReq", $time,
         //     ", WR ID=%h, curPendingWR.wr.len=%0d",
         //     curPendingWR.wr.id, curPendingWR.wr.len,
         //     ", isNewWorkReq=", fshow(isNewWorkReq),
@@ -1064,13 +738,18 @@ module mkReqGenSQ#(
         let totalPktNum  = unwrapMaybe(curPendingWR.pktNum);
         let isOnlyPkt    = unwrapMaybe(curPendingWR.isOnlyReqPkt);
 
+        let startPktSeqNum = cntrl.getNPSN;
+        let { nextPktSeqNum, endPktSeqNum } = calcNextAndEndPSN(
+            startPktSeqNum, totalPktNum, isOnlyPkt, cntrl.getPMTU
+        );
+
         if (isNewWorkReq) begin
-            let startPktSeqNum = cntrl.getNPSN;
-            let { nextPktSeqNum, endPktSeqNum } = calcNextAndEndPSN(
-                startPktSeqNum, totalPktNum, isOnlyPkt, cntrl.getPMTU
-            );
             immAssert(
-                endPktSeqNum >= startPktSeqNum && (endPktSeqNum + 1 == nextPktSeqNum),
+                (endPktSeqNum + 1 == nextPktSeqNum) &&
+                (
+                    endPktSeqNum == startPktSeqNum ||
+                    psnInRangeExclusive(endPktSeqNum, startPktSeqNum, nextPktSeqNum)
+                ),
                 "startPSN, endPSN, nextPSN assertion @ mkReqGenSQ",
                 $format(
                     "endPSN=%h should >= startPSN=%h, and endPSN=%h + 1 should == nextPSN=%h",
@@ -1081,9 +760,9 @@ module mkReqGenSQ#(
             cntrl.setNPSN(nextPktSeqNum);
             let hasOnlyReqPkt = isOnlyPkt || isReadWorkReq(curPendingWR.wr.opcode);
 
-            curPendingWR.startPSN = tagged Valid startPktSeqNum;
-            curPendingWR.endPSN = tagged Valid endPktSeqNum;
-            // curPendingWR.pktNum = tagged Valid totalPktNum;
+            curPendingWR.startPSN     = tagged Valid startPktSeqNum;
+            curPendingWR.endPSN       = tagged Valid endPktSeqNum;
+            // curPendingWR.pktNum       = tagged Valid totalPktNum;
             curPendingWR.isOnlyReqPkt = tagged Valid hasOnlyReqPkt;
 
             // $display(
@@ -1095,7 +774,12 @@ module mkReqGenSQ#(
         end
 
         workReqCheckQ.enq(tuple2(curPendingWR, workReqInfo));
-        workReqOutQ.enq(tuple2(curPendingWR, workReqInfo));
+        // $display(
+        //     "time=%0t: 4th stage calcPktSeqNum4NewWorkReq", $time,
+        //     ", WR ID=%h", curPendingWR.wr.id
+        //     // ", startPSN=%h, endPSN=%h, nextPktSeqNum=%h",
+        //     // startPktSeqNum, endPktSeqNum, nextPktSeqNum
+        // );
     endrule
 
     rule checkPendingWorkReq if (cntrl.isStableRTS && isNormalStateReg);
@@ -1123,8 +807,9 @@ module mkReqGenSQ#(
         if (isValidWorkReq) begin // Discard UD with payload more than one packets
             reqCountQ.enq(tuple2(curPendingWR, workReqInfo));
         end
+        workReqOutQ.enq(tuple2(curPendingWR, workReqInfo));
         // $display(
-        //     "time=%0t: checkPendingWorkReq", $time,
+        //     "time=%0t: 5th stage checkPendingWorkReq", $time,
         //     ", WR ID=%h", curPendingWR.wr.id,
         //     ", isValidWorkReq=", fshow(isValidWorkReq)
         // );
@@ -1140,6 +825,11 @@ module mkReqGenSQ#(
         if (isNewWorkReq && isReliableConnection) begin
             // Only for RC and XRC output new WR as pending WR, not retry WR
             pendingWorkReqOutQ.enq(curPendingWR);
+            $display(
+                "time=%0t: 6th-2 stage outputNewPendingWorkReq", $time,
+                ", isReliableConnection=", fshow(isReliableConnection),
+                ", pending WR=", fshow(curPendingWR)
+            );
         end
     endrule
 
@@ -1203,7 +893,7 @@ module mkReqGenSQ#(
         };
         reqHeaderPrepareQ.enq(tuple2(reqPktHeaderInfo, workReqInfo));
         // $display(
-        //     "time=%0t: countReqPkt", $time,
+        //     "time=%0t: 6th-1 stage countReqPkt", $time,
         //     ", WR ID=%h", pendingWR.wr.id,
         //     ", totalPktNum=%0d", totalPktNum,
         //     ", remainingPktNum=%0d", remainingPktNum,
@@ -1268,7 +958,7 @@ module mkReqGenSQ#(
 
         pendingReqHeaderQ.enq(tuple4(pendingWR, workReqInfo, maybeReqHeaderGenInfo, curPSN));
         // $display(
-        //     "time=%0t: prepareReqHeaderGen", $time,
+        //     "time=%0t: 7th stage prepareReqHeaderGen", $time,
         //     ", WR ID=%h", pendingWR.wr.id,
         //     // ", output PendingWorkReq=", fshow(pendingWR),
         //     // ", maybeReqHeaderGenInfo=", fshow(maybeReqHeaderGenInfo),
@@ -1300,7 +990,7 @@ module mkReqGenSQ#(
         end
         reqHeaderGenQ.enq(tuple4(pendingWR, maybeReqHeader, maybePayloadGenResp, triggerPSN));
         // $display(
-        //     "time=%0t: genReqHeader", $time,
+        //     "time=%0t: 8th stage genReqHeader", $time,
         //     ", WR ID=%h", pendingWR.wr.id,
         //     // ", reqHeader=", fshow(reqHeader),
         //     ", curPSN=%h", triggerPSN
@@ -1343,6 +1033,12 @@ module mkReqGenSQ#(
             workCompGenReqOutQ.enq(errWorkCompGenReq);
             isNormalStateReg <= False;
         end
+        // $display(
+        //     "time=%0t: 9th stage genReqHeader", $time,
+        //     ", WR ID=%h", pendingWR.wr.id,
+        //     // ", reqHeader=", fshow(reqHeader),
+        //     ", curPSN=%h", triggerPSN
+        // );
     endrule
 
     rule errFlushWR if (cntrl.isERR || (cntrl.isRTS && !isNormalStateReg));

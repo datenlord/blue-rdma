@@ -790,10 +790,10 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
         let workReqID = retryPendingWR.wr.id;
 
         if (workReqID == retryWorkReqIdReg) begin
-            $display(
-                "time=%0t:", $time,
-                " retry restart for WR=%h", retryWorkReqIdReg
-            );
+            // $display(
+            //     "time=%0t:", $time,
+            //     " retry restart for WR=%h", retryWorkReqIdReg
+            // );
             retryTestState <= TEST_RESP_HANDLE_NORMAL_RESP_GEN;
         end
         else begin

@@ -499,7 +499,7 @@ typedef struct {
 instance FShow#(WorkReq);
     function Fmt fshow(WorkReq wr);
         return $format(
-            "WorkReq { id=%h", wr.id, ", opcode=", fshow(wr.opcode), ", flags=", fshow(wr.flags),
+            "WorkReq { ID=%h", wr.id, ", opcode=", fshow(wr.opcode), ", flags=", fshow(wr.flags),
             ", raddr=%h, rkey=%h, len=%0d, laddr=%h, lkey=%h, sqpn=%h",
             wr.raddr, wr.rkey, wr.len, wr.laddr, wr.lkey, wr.sqpn,
             ", solicited=", fshow(wr.solicited), ", comp=", fshow(wr.comp), ", swap=", fshow(wr.swap),

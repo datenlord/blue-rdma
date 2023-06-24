@@ -35,9 +35,23 @@ function Bool isTwo(Bit#(nSz) bits) provisos(Add#(2, anysize, nSz));
     return isZero(bits >> 2) && unpack(bits[1]) && !unpack(lsb(bits));
 endfunction
 
-function Bool isAllOnes(Bit#(nSz) bits);
-    Bool ret = unpack(&bits);
-    return ret;
+// function Bool isAllOnes(Bit#(nSz) bits);
+//     Bool ret = unpack(&bits);
+//     return ret;
+// endfunction
+
+function Bool isAllOnesR(Bit#(nSz) bits) provisos(
+    NumAlias#(TDiv#(nSz, 2), halfSz)
+);
+    if (valueOf(halfSz) > 1) begin
+        Tuple2#(Bit#(TSub#(nSz, halfSz)), Bit#(halfSz)) pair = split(bits);
+        let { left, right } = pair;
+        return isAllOnesR(left) && isAllOnesR(right);
+    end
+    else begin
+        Bool ret = unpack(&bits);
+        return ret;
+    end
 endfunction
 
 function Bool isLargerThanOne(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));

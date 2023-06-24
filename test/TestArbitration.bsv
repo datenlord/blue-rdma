@@ -13,26 +13,79 @@ import Utils4Test :: *;
 typedef 16 CLIENT_NUM;
 // typedef 8 MAX_FRAG_NUM;
 
-typedef Bit#(TLog#(CLIENT_NUM)) ClientIndex;
-typedef Tuple2#(Bit#(TLog#(CLIENT_NUM)), Bool) ReqType;
-typedef Tuple2#(Bit#(TLog#(CLIENT_NUM)), Bool) RespType;
-typedef Tuple2#(Bit#(TLog#(CLIENT_NUM)), Bool) PayloadType;
+typedef Bit#(TLog#(CLIENT_NUM))    ClientIndex;
+typedef Tuple2#(ClientIndex, Bool) ReqType;
+typedef Tuple2#(ClientIndex, Bool) RespType;
+typedef Tuple2#(ClientIndex, Bool) PayloadType;
 
-module mkEchoSrv(
-    Server#(ReqType, RespType)
-);
+module mkEchoClt#(Integer clientID)(Client#(ReqType, RespType));
+    ClientIndex clientIdx = fromInteger(clientID);
+
+    FIFOF#(ReqType)   reqQ <- mkFIFOF;
+    FIFOF#(RespType) respQ <- mkFIFOF;
+
+    Count#(ClientIndex)  reqFragCnt <- mkCount(clientIdx);
+    Count#(ClientIndex) respFragCnt <- mkCount(clientIdx);
+
+    rule issueReq;
+        let isLast = isZero(reqFragCnt);
+
+        if (isLast) begin
+            reqFragCnt.update(clientIdx);
+        end
+        else begin
+            reqFragCnt.decr(1);
+        end
+
+        reqQ.enq(tuple2(clientIdx, isLast));
+    endrule
+
+    rule recvResp;
+        let { recvClientIdx, isLast} = respQ.first;
+        respQ.deq;
+
+        let isLastRef = isZero(respFragCnt);
+
+        immAssert(
+            clientIdx == recvClientIdx,
+            "clientIdx assertion @ mkEchoClt",
+            $format(
+                "clientIdx=%0d should == recvClientIdx=%0d",
+                clientIdx, recvClientIdx,
+                ", respFragCnt=%0d", respFragCnt
+            )
+        );
+        immAssert(
+            isLast == isLastRef,
+            "isLast assertion @ mkEchoClt",
+            $format(
+                "isLast=", fshow(isLast), " should == isLastRef=", fshow(isLastRef),
+                ", respFragCnt=%0d", respFragCnt
+            )
+        );
+
+        if (isLastRef) begin
+            respFragCnt.update(clientIdx);
+        end
+        else begin
+            respFragCnt.decr(1);
+        end
+    endrule
+
+    return toGPClient(reqQ, respQ);
+endmodule
+
+module mkEchoSrv(Server#(ReqType, RespType));
     let maxClientIdx = valueOf(CLIENT_NUM) - 1;
 
-    FIFOF#(ReqType) reqQ <- mkFIFOF;
+    FIFOF#(ReqType)   reqQ <- mkFIFOF;
     FIFOF#(RespType) respQ <- mkFIFOF;
     FIFOF#(ReqType) pendingReqQ <- mkFIFOF;
 
     Count#(ClientIndex) reqFragCnt <- mkCount(fromInteger(maxClientIdx));
-    // Count#(ClientIndex) respFragCnt <- mkCount(0);
     Count#(ClientIndex) expectClientIdxCnt <- mkCount(fromInteger(maxClientIdx));
-    // Reg#(Bool) busyReg <- mkReg(False);
 
-    rule getReq;
+    rule recvReq;
         let { clientIdx, isLast } = reqQ.first;
         reqQ.deq;
 
@@ -92,11 +145,11 @@ module mkEchoSrv(
     return toGPServer(reqQ, respQ);
 endmodule
 
+function Bool reqFinished(ReqType req) = getTupleSecond(req);
+function Bool respFinished(RespType resp) = getTupleSecond(resp);
+
 (* synthesize *)
 module mkTestServerArbiter(Empty);
-    function Bool reqFinished(ReqType req) = getTupleSecond(req);
-    function Bool respFinished(RespType resp) = getTupleSecond(resp);
-
     function genClientFragCnt(idx);
         return mkCount(fromInteger(idx));
     endfunction
@@ -177,6 +230,68 @@ module mkTestServerArbiter(Empty);
             // );
         endrule
     end
+endmodule
+
+(* synthesize *)
+module mkTestClientArbiter(Empty);
+    function genClient(idx);
+        return mkEchoClt(idx);
+    endfunction
+
+    let maxClientIdx = valueOf(CLIENT_NUM) - 1;
+
+    Count#(ClientIndex) reqFragCnt <- mkCount(fromInteger(maxClientIdx));
+    Count#(ClientIndex) expectedClientIdxCnt <- mkCount(fromInteger(maxClientIdx));
+
+    Vector#(CLIENT_NUM, Client#(ReqType, RespType)) clientVec <- genWithM(genClient);
+
+    Client#(ReqType, RespType) dut <- mkClientArbiter(
+        clientVec, reqFinished, respFinished
+    );
+
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule recvReq;
+        let { clientIdx, isLast } <- dut.request.get;
+
+        let isLastRef = isZero(reqFragCnt);
+        if (isLastRef) begin
+            reqFragCnt.update(clientIdx - 1);
+            expectedClientIdxCnt.update(clientIdx - 1);
+            countDown.decr;
+        end
+        else begin
+            reqFragCnt.decr(1);
+        end
+
+        dut.response.put(tuple2(clientIdx, isLast));
+
+        immAssert(
+            clientIdx == expectedClientIdxCnt,
+            "clientIdx assertion @ mkTestClientArbiter",
+            $format(
+                "clientIdx=%0d should == expectedClientIdxCnt=%0d",
+                clientIdx, expectedClientIdxCnt,
+                ", reqFragCnt=%0d", reqFragCnt
+            )
+        );
+        immAssert(
+            isLast == isLastRef,
+            "isLast assertion @ mkTestClientArbiter",
+            $format(
+                "isLast=", fshow(isLast), " should == isLastRef=", fshow(isLastRef),
+                ", reqFragCnt=%0d", reqFragCnt
+            )
+        );
+
+        // $display(
+        //     "time=%0t:", $time,
+        //     " clientIdx=%0d should == expectedClientIdxCnt=%0d",
+        //     clientIdx, expectedClientIdxCnt,
+        //     ", isLast=", fshow(isLast), " should == isLastRef=", fshow(isLastRef),
+        //     ", reqFragCnt=%0d", reqFragCnt
+        // );
+    endrule
 endmodule
 
 (* synthesize *)

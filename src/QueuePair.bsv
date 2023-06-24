@@ -24,6 +24,63 @@ import SpecialFIFOF :: *;
 import WorkCompGen :: *;
 import Utils :: *;
 
+typedef Client#(DmaReadReq, DmaReadResp)        DmaReadClt;
+typedef Client#(DmaWriteReq, DmaWriteResp)      DmaWriteClt;
+typedef ServerProxy#(DmaReadReq, DmaReadResp)   DmaReadProxy;
+typedef ServerProxy#(DmaWriteReq, DmaWriteResp) DmaWriteProxy;
+typedef Client#(PermCheckInfo, Bool)            PermCheckClt;
+typedef ServerProxy#(PermCheckInfo, Bool)       PermCheckProxy;
+
+typedef Vector#(portSz, PermCheckClt) PermCheckCltVec#(numeric type portSz);
+
+module mkPermCheckCltArbiter#(PermCheckCltVec#(portSz) permCheckCltVec)(PermCheckClt) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isPermCheckReqFinished(PermCheckInfo req) = True;
+    function Bool isPermCheckRespFinished(Bool resp) = True;
+
+    let arbitratedClient <- mkClientArbiter(
+        permCheckCltVec,
+        isPermCheckReqFinished,
+        isPermCheckRespFinished
+    );
+    return arbitratedClient;
+endmodule
+
+typedef Vector#(portSz, DmaReadClt) DmaReadCltVec#(numeric type portSz);
+typedef Vector#(portSz, DmaWriteClt) DmaWriteCltVec#(numeric type portSz);
+
+module mkDmaReadCltAribter#(DmaReadCltVec#(portSz) dmaReadCltVec)(DmaReadClt) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isDmaReadReqLastFrag(DmaReadReq req) = True;
+    function Bool isDmaReadRespLastFrag(DmaReadResp resp) = resp.dataStream.isLast;
+
+    let arbitratedClient <- mkClientArbiter(
+        dmaReadCltVec,
+        isDmaReadReqLastFrag,
+        isDmaReadRespLastFrag
+    );
+    return arbitratedClient;
+endmodule
+
+module mkDmaWriteCltAribter#(DmaWriteCltVec#(portSz) dmaWriteCltVec)(DmaWriteClt) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isDmaWriteReqLastFrag(DmaWriteReq req) = req.dataStream.isLast;
+    function Bool isDmaWriteRespLastFrag(DmaWriteResp resp) = True;
+
+    let arbitratedClient <- mkClientArbiter(
+        dmaWriteCltVec,
+        isDmaWriteReqLastFrag,
+        isDmaWriteRespLastFrag
+    );
+    return arbitratedClient;
+endmodule
+
 module mkNewPendingWorkReqPipeOut#(
     PipeOut#(WorkReq) workReqPipeIn
 )(PipeOut#(PendingWorkReq));
@@ -145,11 +202,6 @@ module mkRQ#(
     interface workCompStatusPipeOutRQ = workCompGenRQ.workCompStatusPipeOutRQ;
 endmodule
 
-typedef Client#(DmaReadReq, DmaReadResp)   DmaReadClt;
-typedef Client#(DmaWriteReq, DmaWriteResp) DmaWriteClt;
-typedef Client#(PermCheckInfo, Bool) PermCheckClt;
-typedef ServerProxy#(PermCheckInfo, Bool) PermCheckProxy;
-
 interface DmaArbiter4QP;
     interface DmaReadClt  dmaReadClt;
     interface DmaWriteClt dmaWriteClt;
@@ -159,6 +211,37 @@ interface DmaArbiter4QP;
     interface DmaWriteSrv dmaWriteSrv4SQ;
 endinterface
 
+module mkDmaArbiter4QP(DmaArbiter4QP);
+    ServerProxy#(DmaReadReq, DmaReadResp)    dmaReadProxy <- mkServerProxy;
+    ServerProxy#(DmaWriteReq, DmaWriteResp) dmaWriteProxy <- mkServerProxy;
+
+    function Bool isDmaReadReqLastFrag(DmaReadReq req) = True;
+    function Bool isDmaReadRespLastFrag(DmaReadResp resp) = resp.dataStream.isLast;
+
+    Vector#(2, DmaReadSrv) dmaReadSrvVec <- mkServerArbiter(
+        dmaReadProxy.srvPort,
+        isDmaReadReqLastFrag,
+        isDmaReadRespLastFrag
+    );
+
+    function Bool isDmaWriteReqLastFrag(DmaWriteReq req) = req.dataStream.isLast;
+    function Bool isDmaWriteRespLastFrag(DmaWriteResp resp) = True;
+
+    Vector#(2, DmaWriteSrv) dmaWriteSrvVec <- mkServerArbiter(
+        dmaWriteProxy.srvPort,
+        isDmaWriteReqLastFrag,
+        isDmaWriteRespLastFrag
+    );
+
+    interface dmaReadClt     = dmaReadProxy.cltPort;
+    interface dmaWriteClt    = dmaWriteProxy.cltPort;
+
+    interface dmaReadSrv4RQ  = dmaReadSrvVec[0];
+    interface dmaWriteSrv4RQ = dmaWriteSrvVec[0];
+    interface dmaReadSrv4SQ  = dmaReadSrvVec[1];
+    interface dmaWriteSrv4SQ = dmaWriteSrvVec[1];
+endmodule
+/*
 module mkDmaArbiter4QP(DmaArbiter4QP);
     FIFOF#(DmaReadReq)     dmaReadReqQ4Clt <- mkFIFOF;
     FIFOF#(DmaReadResp)   dmaReadRespQ4Clt <- mkFIFOF;
@@ -235,11 +318,36 @@ module mkDmaArbiter4QP(DmaArbiter4QP);
     interface dmaReadSrv4SQ  = toGPServer(dmaReadReqQ4SQ,  dmaReadRespQ4SQ);
     interface dmaWriteSrv4SQ = toGPServer(dmaWriteReqQ4SQ, dmaWriteRespQ4SQ);
 endmodule
-
+*/
 interface RdmaPktMetaDataAndPayloadPipeIn;
     interface Put#(RdmaPktMetaData) pktMetaData;
     interface Put#(DataStream) payload;
 endinterface
+
+instance Connectable#(
+    RdmaPktMetaDataAndPayloadPipeOut, RdmaPktMetaDataAndPayloadPipeIn
+);
+    module mkConnection#(
+        RdmaPktMetaDataAndPayloadPipeOut pipeOut,
+        RdmaPktMetaDataAndPayloadPipeIn pipeIn
+    )(Empty);
+        mkConnection(toGet(pipeOut.pktMetaData), pipeIn.pktMetaData);
+        mkConnection(toGet(pipeOut.payload), pipeIn.payload);
+        // rule pktMetaDataPipe;
+        //     let pktMetaData = pipeOut.pktMetaData.first;
+        //     pipeOut.pktMetaData.deq;
+        //     pipeIn.pktMetaData.put(pktMetaData);
+        //     // $display("time=%0t:", $time, " mkConnection, pktMetaData=", fshow(pktMetaData));
+        // endrule
+
+        // rule payloadPipe;
+        //     let payload = pipeOut.payload.first;
+        //     pipeOut.payload.deq;
+        //     pipeIn.payload.put(payload);
+        //     // $display("time=%0t:", $time, " mkConnection, payload=", fshow(payload));
+        // endrule
+    endmodule
+endinstance
 
 interface RdmaPktMetaDataAndPayloadPipe;
     interface RdmaPktMetaDataAndPayloadPipeOut pktPipeOut;
@@ -261,37 +369,29 @@ module mkRdmaPktMetaDataAndPayloadPipe(RdmaPktMetaDataAndPayloadPipe);
     endinterface;
 endmodule
 
-interface QP;
-// #(
-//     Controller cntrl,
-//     PipeOut#(RecvReq) recvReqPipeIn,
-//     PipeOut#(WorkReq) workReqPipeIn,
-//     DmaReadSrv dmaReadSrv,
-//     DmaWriteSrv dmaWriteSrv,
-//     PermCheckMR permCheck4RQ,
-//     PermCheckMR permCheck4SQ,
-//     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn,
-//     RdmaPktMetaDataAndPayloadPipeOut respPktPipeIn
-// )
+interface QueuePair;
     // Input
+    interface SrvPortQP     srvPortQP;
     interface Put#(RecvReq) recvReqIn;
     interface Put#(WorkReq) workReqIn;
-    interface DmaReadClt    dmaReadClt;
-    interface DmaWriteClt   dmaWriteClt;
+    // interface DmaReadClt    dmaReadClt;
+    // interface DmaWriteClt   dmaWriteClt;
+    interface DmaReadClt    dmaReadClt4RQ;
+    interface DmaWriteClt   dmaWriteClt4RQ;
+    interface DmaReadClt    dmaReadClt4SQ;
+    interface DmaWriteClt   dmaWriteClt4SQ;
     interface PermCheckClt  permCheckClt4RQ;
     interface PermCheckClt  permCheckClt4SQ;
     interface RdmaPktMetaDataAndPayloadPipeIn reqPktPipeIn;
     interface RdmaPktMetaDataAndPayloadPipeIn respPktPipeIn;
     // Output
-    // method Controller getCntrl();
-    interface SrvPortQP          srvPortQP;
     interface DataStreamPipeOut  rdmaReqRespPipeOut;
     interface PipeOut#(WorkComp) workCompPipeOutRQ;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
 endinterface
 
 (* synthesize *)
-module mkQP(QP);
+module mkQP(QueuePair);
     // TODO: change WR and RR queues to mkSizedFIFOF
     FIFOF#(RecvReq) recvReqQ <- mkFIFOF;
     FIFOF#(WorkReq) workReqQ <- mkFIFOF;
@@ -299,7 +399,11 @@ module mkQP(QP);
     let workReqBufPipeOut = convertFifo2PipeOut(workReqQ);
 
     let cntrl <- mkController;
-    let dmaArbiter <- mkDmaArbiter4QP;
+    // let dmaArbiter <- mkDmaArbiter4QP;
+    DmaReadProxy   dmaReadProxy4SQ   <- mkServerProxy;
+    DmaWriteProxy  dmaWriteProxy4SQ  <- mkServerProxy;
+    DmaReadProxy   dmaReadProxy4RQ   <- mkServerProxy;
+    DmaWriteProxy  dmaWriteProxy4RQ  <- mkServerProxy;
     PermCheckProxy permCheckProxy4RQ <- mkServerProxy;
     PermCheckProxy permCheckProxy4SQ <- mkServerProxy;
 
@@ -308,8 +412,10 @@ module mkQP(QP);
 
     let rq <- mkRQ(
         cntrl,
-        dmaArbiter.dmaReadSrv4RQ,
-        dmaArbiter.dmaWriteSrv4RQ,
+        // dmaArbiter.dmaReadSrv4RQ,
+        // dmaArbiter.dmaWriteSrv4RQ,
+        dmaReadProxy4RQ.srvPort,
+        dmaWriteProxy4RQ.srvPort,
         permCheckProxy4RQ.srvPort,
         recvReqBufPipeOut,
         reqPktPipe.pktPipeOut
@@ -317,8 +423,10 @@ module mkQP(QP);
 
     let sq <- mkSQ(
         cntrl,
-        dmaArbiter.dmaReadSrv4SQ,
-        dmaArbiter.dmaWriteSrv4SQ,
+        // dmaArbiter.dmaReadSrv4SQ,
+        // dmaArbiter.dmaWriteSrv4SQ,
+        dmaReadProxy4SQ.srvPort,
+        dmaWriteProxy4SQ.srvPort,
         permCheckProxy4SQ.srvPort,
         workReqBufPipeOut,
         respPktPipe.pktPipeOut,
@@ -342,17 +450,21 @@ module mkQP(QP);
         end
     endrule
 
+    // method Controller getCntrl() = cntrl;
+    interface srvPortQP       = cntrl.srvPort;
     interface recvReqIn       = toPut(recvReqQ);
     interface workReqIn       = toPut(workReqQ);
-    interface dmaReadClt      = dmaArbiter.dmaReadClt;
-    interface dmaWriteClt     = dmaArbiter.dmaWriteClt;
+    // interface dmaReadClt      = dmaArbiter.dmaReadClt;
+    // interface dmaWriteClt     = dmaArbiter.dmaWriteClt;
+    interface dmaReadClt4RQ   = dmaReadProxy4RQ.cltPort;
+    interface dmaWriteClt4RQ  = dmaWriteProxy4RQ.cltPort;
+    interface dmaReadClt4SQ   = dmaReadProxy4SQ.cltPort;
+    interface dmaWriteClt4SQ  = dmaWriteProxy4SQ.cltPort;
     interface permCheckClt4RQ = permCheckProxy4RQ.cltPort;
     interface permCheckClt4SQ = permCheckProxy4SQ.cltPort;
     interface reqPktPipeIn    = reqPktPipe.pktPipeIn;
     interface respPktPipeIn   = respPktPipe.pktPipeIn;
 
-    // method Controller getCntrl() = cntrl;
-    interface srvPortQP          = cntrl.srvPort;
     interface rdmaReqRespPipeOut = reqRespPipeOut;
     interface workCompPipeOutRQ  = rq.workCompPipeOutRQ;
     interface workCompPipeOutSQ  = sq.workCompPipeOutSQ;
@@ -431,8 +543,8 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
 
     let dmaReadSrv  <- mkDmaReadSrv;
     let dmaWriteSrv <- mkDmaWriteSrv;
-    DmaReadArbiter#(MAX_QP)   dmaReadSrvVec <- mkDmaReadAribter(dmaReadSrv);
-    DmaWriteArbiter#(MAX_QP) dmaWriteSrvVec <- mkDmaWriteAribter(dmaWriteSrv);
+    DmaReadSrvArbiter#(MAX_QP)   dmaReadSrvVec <- mkDmaReadAribter(dmaReadSrv);
+    DmaWriteSrvArbiter#(MAX_QP) dmaWriteSrvVec <- mkDmaWriteAribter(dmaWriteSrv);
 
     Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;

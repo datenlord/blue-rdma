@@ -310,6 +310,13 @@ module mkRetryHandleSQ#(
                 let triggerTimeOut = True;
                 timeOutTriggerQ.enq(triggerTimeOut);
                 resetTimeOutCntInternal;
+
+                // $display(
+                //     "time=%0t: checkTimeOut", $time,
+                //     ", isTimeOutCntHighPartZeroReg=", fshow(isTimeOutCntHighPartZeroReg),
+                //     ", isTimeOutCntLowPartZeroReg=", fshow(isTimeOutCntLowPartZeroReg),
+                //     ", triggerTimeOut=", fshow(triggerTimeOut)
+                // );
             end
             else begin
                 timeOutCntReg <= timeOutCntReg - 1;
@@ -487,7 +494,8 @@ module mkRetryHandleSQ#(
                 retryRespQ.enq(RETRY_HANDLER_RECV_RETRY_REQ);
             end
             // $display(
-            //     "time=%0t: retry request responded", $time, ", retryReason=", fshow(retryReason)
+            //     "time=%0t: retry request responded", $time,
+            //     ", retryReason=", fshow(retryReason)
             // );
         end
         // $display("time=%0t: sendRetryResp", $time);
@@ -570,7 +578,7 @@ module mkRetryHandleSQ#(
         //     "time=%0t: startPreRetry", $time,
         //     ", retryHandleStateReg=", fshow(retryHandleStateReg),
         //     ", retryErr=", fshow(retryErr),
-        //     ", retryReason=", fshow(retryReason)
+        //     ", retryReasonReg=", fshow(retryReasonReg)
         // );
     endrule
 
@@ -585,9 +593,8 @@ module mkRetryHandleSQ#(
         retryHandleStateReg <= RETRY_HANDLE_ST_RNR_WAIT;
 
         // $display(
-        //     "time=%0t: rnrCheck", $time,
-        //     ", retryReasonReg=", fshow(retryReasonReg),
-        //     ", hasNotifiedRetryReg[0]=", fshow(hasNotifiedRetryReg[0])
+        //     "time=%0t: retry rnrCheck", $time,
+        //     ", rnrTimer=%0d", rnrTimer
         // );
     endrule
 
@@ -649,7 +656,7 @@ module mkRetryHandleSQ#(
         );
 
         retryHandleStateReg <= RETRY_HANDLE_ST_MODIFY_PARTIAL_RETRY_WR;
-        // $display("time=%0t:", $time, " check partial retry WR ID=%h", firstRetryWR.wr.id);
+        // $display("time=%0t:", $time, " checkPartialRetry WR ID=%h", firstRetryWR.wr.id);
     endrule
 
     rule modifyPartialRetryWR if (
@@ -674,7 +681,7 @@ module mkRetryHandleSQ#(
         pendingWorkReqScanCntrl.modifyHead(firstRetryWR);
         retryHandleStateReg <= RETRY_HANDLE_ST_START_RETRY;
 
-        // $display("time=%0t:", $time, " partial retry WR ID=%h", firstRetryWR.wr.id);
+        // $display("time=%0t:", $time, " modifyPartialRetryWR WR ID=%h", firstRetryWR.wr.id);
     endrule
 
     rule startRetry if (
@@ -683,6 +690,10 @@ module mkRetryHandleSQ#(
     );
         pendingWorkReqScanCntrl.scanStart;
         retryHandleStateReg <= RETRY_HANDLE_ST_WAIT_RETRY_DONE;
+        // $display(
+        //     "time=%0t:", $time,
+        //     " startRetry, cntrl.isStableRTS=", fshow(cntrl.isStableRTS)
+        // );
     endrule
 
     rule waitRetryDone if (

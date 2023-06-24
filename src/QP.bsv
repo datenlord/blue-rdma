@@ -24,6 +24,135 @@ import SpecialFIFOF :: *;
 import WorkCompGen :: *;
 import Utils :: *;
 
+typedef Vector#(portSz, PermCheckMR) PermCheckSrvArbiter#(numeric type portSz);
+
+module mkPermCheckSrvArbiter#(PermCheckMR permCheckMR)(PermCheckSrvArbiter#(portSz)) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isPermCheckReqFinished(PermCheckInfo req) = True;
+    function Bool isPermCheckRespFinished(Bool resp) = True;
+
+    PermCheckSrvArbiter#(portSz) arbiter <- mkServerArbiter(
+        permCheckMR,
+        isPermCheckReqFinished,
+        isPermCheckRespFinished
+    );
+    return arbiter;
+endmodule
+
+interface DmaArbiterInsideQP;
+    interface DmaReadSrv  dmaReadSrv4RQ;
+    interface DmaWriteSrv dmaWriteSrv4RQ;
+    interface DmaReadSrv  dmaReadSrv4SQ;
+    interface DmaWriteSrv dmaWriteSrv4SQ;
+endinterface
+
+module mkDmaArbiterInsideQP#(
+    DmaReadSrv  dmaReadSrv,
+    DmaWriteSrv dmaWriteSrv
+)(DmaArbiterInsideQP);
+    FIFOF#(DmaReadReq)     dmaReadReqQ4RQ <- mkFIFOF;
+    FIFOF#(DmaReadResp)   dmaReadRespQ4RQ <- mkFIFOF;
+    FIFOF#(DmaWriteReq)   dmaWriteReqQ4RQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaWriteRespQ4RQ <- mkFIFOF;
+
+    FIFOF#(DmaReadReq)     dmaReadReqQ4SQ <- mkFIFOF;
+    FIFOF#(DmaReadResp)   dmaReadRespQ4SQ <- mkFIFOF;
+    FIFOF#(DmaWriteReq)   dmaWriteReqQ4SQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaWriteRespQ4SQ <- mkFIFOF;
+
+    // RQ has higher priority than SQ when issueing DMA requests
+    // and receiving DMA responses.
+    rule issueDmaReadReq;
+        if (dmaReadReqQ4RQ.notEmpty) begin
+            let rqDmaReadReq = dmaReadReqQ4RQ.first;
+            dmaReadReqQ4RQ.deq;
+            dmaReadSrv.request.put(rqDmaReadReq);
+        end
+        else if (dmaReadReqQ4SQ.notEmpty) begin
+            let sqDmaReadReq = dmaReadReqQ4SQ.first;
+            dmaReadReqQ4SQ.deq;
+            dmaReadSrv.request.put(sqDmaReadReq);
+        end
+    endrule
+
+    rule issueDmaWriteReq;
+        if (dmaWriteReqQ4RQ.notEmpty) begin
+            let rqDmaWriteReq = dmaWriteReqQ4RQ.first;
+            dmaWriteReqQ4RQ.deq;
+            dmaWriteSrv.request.put(rqDmaWriteReq);
+        end
+        else if (dmaWriteReqQ4SQ.notEmpty) begin
+            let sqDmaWriteReq = dmaWriteReqQ4SQ.first;
+            dmaWriteReqQ4SQ.deq;
+            dmaWriteSrv.request.put(sqDmaWriteReq);
+        end
+    endrule
+
+    rule recvDmaReadResp;
+        let dmaReadResp <- dmaReadSrv.response.get;
+        case (dmaReadResp.initiator)
+            DMA_INIT_RQ_RD    ,
+            DMA_INIT_RQ_WR    ,
+            DMA_INIT_RQ_DUP_RD,
+            DMA_INIT_RQ_ATOMIC: dmaReadRespQ4RQ.enq(dmaReadResp);
+            default           : dmaReadRespQ4SQ.enq(dmaReadResp);
+        endcase
+    endrule
+
+    rule recvDmaWriteResp;
+        let dmaWriteResp <- dmaWriteSrv.response.get;
+        case (dmaWriteResp.initiator)
+            DMA_INIT_RQ_RD    ,
+            DMA_INIT_RQ_WR    ,
+            DMA_INIT_RQ_DUP_RD,
+            DMA_INIT_RQ_ATOMIC: dmaWriteRespQ4RQ.enq(dmaWriteResp);
+            default           : dmaWriteRespQ4SQ.enq(dmaWriteResp);
+        endcase
+    endrule
+
+    interface dmaReadSrv4RQ  = toGPServer(dmaReadReqQ4RQ,  dmaReadRespQ4RQ);
+    interface dmaWriteSrv4RQ = toGPServer(dmaWriteReqQ4RQ, dmaWriteRespQ4RQ);
+    interface dmaReadSrv4SQ  = toGPServer(dmaReadReqQ4SQ,  dmaReadRespQ4SQ);
+    interface dmaWriteSrv4SQ = toGPServer(dmaWriteReqQ4SQ, dmaWriteRespQ4SQ);
+endmodule
+
+typedef Vector#(portSz, DmaReadSrv) DmaReadSrvArbiter#(numeric type portSz);
+typedef Vector#(portSz, DmaWriteSrv) DmaWriteSrvArbiter#(numeric type portSz);
+
+module mkDmaReadSrvArbiter#(DmaReadSrv dmaReadSrv)(DmaReadSrvArbiter#(portSz)) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isDmaReadReqLastFrag(DmaReadReq req) = True;
+    function Bool isDmaReadRespLastFrag(DmaReadResp resp) = resp.dataStream.isLast;
+
+    DmaReadSrvArbiter#(portSz) arbiter <- mkServerArbiter(
+        dmaReadSrv,
+        isDmaReadReqLastFrag,
+        isDmaReadRespLastFrag
+    );
+    return arbiter;
+endmodule
+
+module mkDmaWriteSrvArbiter#(DmaWriteSrv dmaWriteSrv)(
+    DmaWriteSrvArbiter#(portSz)
+) provisos(
+    Add#(1, anysize, portSz),
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+);
+    function Bool isDmaWriteReqLastFrag(DmaWriteReq req) = req.dataStream.isLast;
+    function Bool isDmaWriteRespLastFrag(DmaWriteResp resp) = True;
+
+    DmaWriteSrvArbiter#(portSz) arbiter <- mkServerArbiter(
+        dmaWriteSrv,
+        isDmaWriteReqLastFrag,
+        isDmaWriteRespLastFrag
+    );
+    return arbiter;
+endmodule
+
 module mkNewPendingWorkReqPipeOut#(
     PipeOut#(WorkReq) workReqPipeIn
 )(PipeOut#(PendingWorkReq));
@@ -277,7 +406,7 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
         convertFifo2PipeOut(inputWorkReqOrRecvReqQ)
     );
 
-    PermCheckArbiter#(TMul#(2, MAX_QP)) permCheckArbiter <- mkPermCheckAribter(permCheckMR);
+    PermCheckSrvArbiter#(TMul#(2, MAX_QP)) permCheckSrvArbiter <- mkPermCheckSrvArbiter(permCheckMR);
 
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaReqRespPipeIn
@@ -288,16 +417,16 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
 
     let dmaReadSrv  <- mkDmaReadSrv;
     let dmaWriteSrv <- mkDmaWriteSrv;
-    DmaReadArbiter#(MAX_QP)   dmaReadSrvVec <- mkDmaReadAribter(dmaReadSrv);
-    DmaWriteArbiter#(MAX_QP) dmaWriteSrvVec <- mkDmaWriteAribter(dmaWriteSrv);
+    DmaReadSrvArbiter#(MAX_QP)   dmaReadSrvVec <- mkDmaReadSrvArbiter(dmaReadSrv);
+    DmaWriteSrvArbiter#(MAX_QP) dmaWriteSrvVec <- mkDmaWriteSrvArbiter(dmaWriteSrv);
 
     Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpSendWorkCompPipeOutVec = newVector;
 
     for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
-        let permCheck4RQ = permCheckArbiter[2 * idx];
-        let permCheck4SQ = permCheckArbiter[2 * idx + 1];
+        let permCheck4RQ = permCheckSrvArbiter[2 * idx];
+        let permCheck4SQ = permCheckSrvArbiter[2 * idx + 1];
 
         IndexQP qpIndex = fromInteger(idx);
         let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);

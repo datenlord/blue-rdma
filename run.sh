@@ -24,6 +24,7 @@ ALL_LOG=$TEST_DIR/run.log
 
 # make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestPipeOutArbiter 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestServerArbiter 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestClientArbiter 2>&1 | tee -a $ALL_LOG
 
 # make -j8 TESTFILE=TestController.bsv TOPMODULE=mkTestCntrlInVec 2>&1 | tee -a $ALL_LOG
 
@@ -51,6 +52,10 @@ ALL_LOG=$TEST_DIR/run.log
 
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
+
+# make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestSimExtractNormalRdmaHeader 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairTimeOutErrCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairNormalCase 2>&1 | tee -a $ALL_LOG
 
 # make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenNormalCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestReqGenSQ.bsv TOPMODULE=mkTestReqGenZeroLenCase 2>&1 | tee -a $ALL_LOG

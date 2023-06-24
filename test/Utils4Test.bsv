@@ -20,6 +20,7 @@ import Utils :: *;
 
 typedef 0 DEFAULT_QPN;
 typedef 0 DEFAULT_QP_IDX;
+typedef 3 DEFAULT_RETRY_NUM;
 typedef 10000 MAX_CMP_CNT;
 
 function QPN getDefaultQPN();
@@ -690,29 +691,29 @@ endmodule
 
 module mkRandomReadWorkReq#(
     Length minLength, Length maxLength
-)(PipeOut#(WorkReq));
+)(Vector#(vSz, PipeOut#(WorkReq)));
     PipeOut#(WorkReqOpCode) readWorkReqOpCodePipeOut <-
         mkConstantPipeOut(IBV_WR_RDMA_READ);
     let wrFlags = IBV_SEND_NO_FLAGS;
-    Vector#(1, PipeOut#(WorkReq)) resultPipeOutVec <- mkSimGenWorkReqByOpCode(
+    Vector#(vSz, PipeOut#(WorkReq)) resultPipeOutVec <- mkSimGenWorkReqByOpCode(
         readWorkReqOpCodePipeOut, minLength, maxLength, wrFlags
     );
-    return resultPipeOutVec[0];
+    return resultPipeOutVec;
 endmodule
 
 module mkRandomReadOrAtomicWorkReq#(
     Length minLength, Length maxLength
-)(PipeOut#(WorkReq));
+)(Vector#(vSz, PipeOut#(WorkReq)));
     Vector#(3, WorkReqOpCode) workReqOpCodeVec = vec(
         IBV_WR_RDMA_READ,
         IBV_WR_ATOMIC_CMP_AND_SWP,
         IBV_WR_ATOMIC_FETCH_AND_ADD
     );
     let wrFlags = IBV_SEND_NO_FLAGS;
-    Vector#(1, PipeOut#(WorkReq)) resultPipeOutVec <- mkRandomWorkReqInRange(
+    Vector#(vSz, PipeOut#(WorkReq)) resultPipeOutVec <- mkRandomWorkReqInRange(
         workReqOpCodeVec, minLength, maxLength, wrFlags
     );
-    return resultPipeOutVec[0];
+    return resultPipeOutVec;
 endmodule
 
 module mkGenIllegalAtomicWorkReq(PipeOut#(WorkReq));
@@ -866,7 +867,7 @@ endmodule
 // Misc simulation modules
 
 module mkSimQpAttrPipeOut#(
-    PMTU pmtu, Bool setExpectedPsnAsNextPSN
+    PMTU pmtu, Bool setExpectedPsnAsNextPSN, Bool setZero2ExpectedPsnAndNextPSN
 )(PipeOut#(AttrQP));
     PSN minPSN = 0;
     PSN maxPSN = maxBound;
@@ -899,6 +900,11 @@ module mkSimQpAttrPipeOut#(
             epsn = npsn;
         end
 
+        if (setZero2ExpectedPsnAndNextPSN) begin
+            epsn = 0;
+            npsn = 0;
+        end
+
         let qpAttr = AttrQP {
             qpState          : dontCareValue,
             curQpState       : dontCareValue,
@@ -921,8 +927,8 @@ module mkSimQpAttrPipeOut#(
             maxDestReadAtomic: fromInteger(valueOf(MAX_QP_DST_RD_ATOM)),
             minRnrTimer      : 1, // minRnrTimer 1 - 0.01 milliseconds delay
             timeout          : 1, // maxTimeOut 0 - infinite, 1 - 8.192 usec (0.000008 sec)
-            retryCnt         : 3,
-            rnrRetry         : 3
+            retryCnt         : fromInteger(valueOf(DEFAULT_RETRY_NUM)),
+            rnrRetry         : fromInteger(valueOf(DEFAULT_RETRY_NUM))
         };
         qpAttrQ.enq(qpAttr);
     endrule
@@ -939,6 +945,150 @@ typedef enum {
     SIM_CNTRL_NO_OP
 } SimCntrlState deriving(Bits, Eq);
 
+module mkChange2CntrlStateRTS#(
+    SrvPortQP cntrlSrvPort, TypeQP qpType, PMTU pmtu,
+    Bool setExpectedPsnAsNextPSN, Bool setZero2ExpectedPsnAndNextPSN
+)(Empty);
+    let qpAttrPipeOut <- mkSimQpAttrPipeOut(
+        pmtu, setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    );
+    Reg#(SimCntrlState) simCntrlStateReg <- mkReg(SIM_CNTRL_CREATE_QP);
+
+    rule createQP if (simCntrlStateReg == SIM_CNTRL_CREATE_QP);
+        let qpInitAttr = QpInitAttr {
+            qpType  : qpType,
+            sqSigAll: False
+        };
+
+        let qpCreateReq = ReqQP {
+            qpReqType : REQ_QP_CREATE,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: dontCareValue,
+            qpAttr    : dontCareValue,
+            qpInitAttr: qpInitAttr
+        };
+
+        cntrlSrvPort.request.put(qpCreateReq);
+        simCntrlStateReg <= SIM_CNTRL_INIT_QP;
+    endrule
+
+    rule initQP if (simCntrlStateReg == SIM_CNTRL_INIT_QP);
+        let qpCreateResp <- cntrlSrvPort.response.get;
+        immAssert(
+            qpCreateResp.successOrNot,
+            "qpCreateResp.successOrNot assertion @ mkChange2CntrlStateRTS",
+            $format(
+                "qpCreateResp.successOrNot=", fshow(qpCreateResp.successOrNot),
+                " should be true when create QP"
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_INIT;
+
+        let qpInitReq = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getReset2InitRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: dontCareValue
+        };
+
+        cntrlSrvPort.request.put(qpInitReq);
+        simCntrlStateReg <= SIM_CNTRL_SET_QP_RTR;
+    endrule
+
+    rule setRTR if (simCntrlStateReg == SIM_CNTRL_SET_QP_RTR);
+        let qpInitResp <- cntrlSrvPort.response.get;
+
+        immAssert(
+            qpInitResp.successOrNot,
+            "qpInitResp.successOrNot assertion @ mkChange2CntrlStateRTS",
+            $format(
+                "qpInitResp.successOrNot=", fshow(qpInitResp.successOrNot),
+                " should be true when qpInitResp=", fshow(qpInitResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+
+        qpAttr.qpState = IBV_QPS_RTR;
+        let qpModifyReq = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getInit2RtrRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: dontCareValue
+        };
+
+        cntrlSrvPort.request.put(qpModifyReq);
+        simCntrlStateReg <= SIM_CNTRL_SET_QP_RTS;
+    endrule
+
+    rule setRTS if (simCntrlStateReg == SIM_CNTRL_SET_QP_RTS);
+        let qpRtrResp <- cntrlSrvPort.response.get;
+
+        immAssert(
+            qpRtrResp.successOrNot,
+            "qpRtrResp.successOrNot assertion @ mkChange2CntrlStateRTS",
+            $format(
+                "qpRtrResp.successOrNot=", fshow(qpRtrResp.successOrNot),
+                " should be true when qpRtrResp=", fshow(qpRtrResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttrPipeOut.deq;
+
+        qpAttr.qpState = IBV_QPS_RTS;
+        let qpModifyReq = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getRtr2RtsRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: dontCareValue
+        };
+
+        cntrlSrvPort.request.put(qpModifyReq);
+        simCntrlStateReg <= SIM_CNTRL_CHECK_RESP;
+    endrule
+
+    rule checkRtsResp if (simCntrlStateReg == SIM_CNTRL_CHECK_RESP);
+        let qpRtsResp <- cntrlSrvPort.response.get;
+
+        immAssert(
+            qpRtsResp.successOrNot,
+            "qpRtsResp.successOrNot assertion @ mkChange2CntrlStateRTS",
+            $format(
+                "qpRtsResp.successOrNot=", fshow(qpRtsResp.successOrNot),
+                " should be true when qpRtsResp=", fshow(qpRtsResp)
+            )
+        );
+        // $display(
+        //     "time=%0t: qpRtsResp=", $time, fshow(qpRtsResp),
+        //     " should be success, and qpRtsResp.qpn=%h",
+        //     qpRtsResp.qpn
+        // );
+        simCntrlStateReg <= SIM_CNTRL_NO_OP;
+    endrule
+endmodule
+
+module mkSimController#(
+    TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
+)(Controller);
+    let cntrl <- mkController;
+    let setZero2ExpectedPsnAndNextPSN = False;
+    let setCntrl2RTS <- mkChange2CntrlStateRTS(
+        cntrl.srvPort, qpType, pmtu,
+        setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    );
+    return cntrl;
+endmodule
+/*
 module mkSimController#(
     TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
 )(Controller);
@@ -1082,7 +1232,7 @@ module mkSimController#(
 
     return cntrl;
 endmodule
-
+*/
 module mkSimPermCheckMR#(Bool mrCheckPassOrFail)(PermCheckMR);
     FIFOF#(PermCheckInfo) checkReqQ <- mkFIFOF;
     FIFOF#(Bool) checkRespQ <- mkFIFOF;
@@ -1118,7 +1268,7 @@ module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
     method Bool notFull() = True;
 endmodule
 
-module mkSimGenRecvReq#(Controller cntrl)(Vector#(vSz, PipeOut#(RecvReq)));
+module mkSimGenRecvReq(Vector#(vSz, PipeOut#(RecvReq)));
     FIFOF#(RecvReq) recvReqQ <- mkFIFOF;
     PipeOut#(WorkReqID) recvReqIdPipeOut <- mkGenericRandomPipeOut;
 
@@ -1130,7 +1280,7 @@ module mkSimGenRecvReq#(Controller cntrl)(Vector#(vSz, PipeOut#(RecvReq)));
             len  : dontCareValue,
             laddr: dontCareValue,
             lkey : dontCareValue,
-            sqpn : cntrl.getSQPN
+            sqpn : getDefaultQPN
         };
         recvReqQ.enq(rr);
     endrule

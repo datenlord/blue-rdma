@@ -77,7 +77,7 @@ function Maybe#(WorkCompStatus) genWorkCompStatusFromReqStatusRQ(RdmaReqStatus r
 endfunction
 
 function Maybe#(RdmaOpCode) genFirstOrOnlyRespRdmaOpCode(
-    RdmaOpCode reqOpCode, RdmaReqStatus reqStatus, Bool isOnlyRespPkt
+    RdmaOpCode reqOpCode, RdmaReqStatus reqStatus, Bool isOnlyReadRespPkt
 );
     case (reqStatus)
         RDMA_REQ_ST_NORMAL,
@@ -97,7 +97,7 @@ function Maybe#(RdmaOpCode) genFirstOrOnlyRespRdmaOpCode(
                 RDMA_WRITE_LAST_WITH_IMMEDIATE,
                 RDMA_WRITE_ONLY               ,
                 RDMA_WRITE_ONLY_WITH_IMMEDIATE: tagged Valid ACKNOWLEDGE;
-                RDMA_READ_REQUEST             : tagged Valid (isOnlyRespPkt ? RDMA_READ_RESPONSE_ONLY : RDMA_READ_RESPONSE_FIRST);
+                RDMA_READ_REQUEST             : tagged Valid (isOnlyReadRespPkt ? RDMA_READ_RESPONSE_ONLY : RDMA_READ_RESPONSE_FIRST);
                 COMPARE_SWAP                  ,
                 FETCH_ADD                     : tagged Valid ATOMIC_ACKNOWLEDGE;
                 default                       : tagged Invalid;
@@ -190,10 +190,10 @@ endfunction
 function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus,
     Length payloadLen, Maybe#(Long) atomicOrigData,
-    Controller cntrl, PSN psn, MSN msn, Bool isOnlyRespPkt
+    Controller cntrl, PSN psn, MSN msn, Bool isOnlyReadRespPkt
 );
     let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
-    let maybeOpCode = genFirstOrOnlyRespRdmaOpCode(reqOpCode, reqStatus, isOnlyRespPkt);
+    let maybeOpCode = genFirstOrOnlyRespRdmaOpCode(reqOpCode, reqStatus, isOnlyReadRespPkt);
     let maybeDQPN   = getMaybeDestQpnRQ(cntrl);
     let maybeAETH   = genAethByReqStatus(reqStatus, cntrl, msn);
 
@@ -213,7 +213,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
             opcode   : opcode,
             solicited: False,
             migReq   : unpack(0),
-            padCnt   : isOnlyRespPkt ? calcPadCnt(payloadLen) : 0,
+            padCnt   : isOnlyReadRespPkt ? calcPadCnt(payloadLen) : 0,
             tver     : unpack(0),
             pkey     : cntrl.getPKEY,
             fecn     : unpack(0),
@@ -523,34 +523,7 @@ module mkReqHandleRQ#(
 
     function Epoch  getEpoch() = cntrl.contextRQ.getEpoch;
     function Action incEpoch() = cntrl.contextRQ.incEpoch;
-    //     action
-    //         epochReg <= ~epochReg;
-    //     endaction
-    // endfunction
-/*
-    function Action clearRetryRelatedPipelineQ();
-        action
-            supportedReqOpCodeCheckQ.clear;
-            // qpAccPermCheckQ.clear;
-            reqOpCodeSeqCheckQ.clear;
-            rnrCheckQ.clear;
-            // rnrTriggerQ.clear;
-        endaction
-    endfunction
 
-    function Bool isRetryFlushDone();
-        let reqPktInfo = preStageReqPktInfoReg;
-        let epoch      = reqPktInfo.epoch;
-        let isExpected = reqPktInfo.isExpected;
-
-        let retryFlushDone =
-            isExpected && epoch == getEpoch && (
-            retryStateReg == RQ_RNR_WAIT_DONE ||
-            retryStateReg == RQ_SEQ_RETRY_FLUSH
-        );
-        return retryFlushDone;
-    endfunction
-*/
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (cntrl.isReset);
         payloadConReqOutQ.clear;
@@ -772,13 +745,13 @@ module mkReqHandleRQ#(
                 )
             );
 
-            $display(
-                "time=%0t: found invalid request in 0.2nd pre-stage", $time,
-                ", bth.opcode=", fshow(bth.opcode),
-                ", bth.psn=%h", bth.psn,
-                ", isAccCheckPass=", fshow(isAccCheckPass),
-                ", reqStatus=", fshow(reqStatus)
-            );
+            // $display(
+            //     "time=%0t: found invalid request in 0.2nd pre-stage", $time,
+            //     ", bth.opcode=", fshow(bth.opcode),
+            //     ", bth.psn=%h", bth.psn,
+            //     ", isAccCheckPass=", fshow(isAccCheckPass),
+            //     ", reqStatus=", fshow(reqStatus)
+            // );
         end
         reqPktInfo.isAccCheckPass = isAccCheckPass;
 
@@ -826,7 +799,7 @@ module mkReqHandleRQ#(
                         checkReadResp, \
                         genRespHeader, \
                         genRespPkt, \
-                        genWorkCompReq, \
+                        genWorkCompRQ, \
                         errFlushRecvReq, \
                         errFlushIncomingReq" *)
                         // retryStageRnrRetryFlush, \
@@ -1898,18 +1871,18 @@ module mkReqHandleRQ#(
                             "reqStatus=", fshow(reqStatus), " should not be unknown"
                         )
                     );
-                    $display(
-                        "time=%0t:", $time,
-                        " bth.opcode=", fshow(bth.opcode), ", bth.psn=%h", bth.psn,
-                        ", permCheckInfo.totalLen=%0d", permCheckInfo.totalLen,
-                        ", remainingDmaWriteLen=%0d", remainingDmaWriteLen,
-                        ", totalDmaWriteLen=%0d", totalDmaWriteLen,
-                        ", noRemainingDmaWrite=", fshow(noRemainingDmaWrite),
-                        ", writeReqLenMatch=", fshow(writeReqLenMatch),
-                        ", enoughDmaSpace=", fshow(enoughDmaSpace),
-                        ", isLastPayloadLenZero=", fshow(isLastPayloadLenZero),
-                        ", reqStatus=", fshow(reqStatus)
-                    );
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     " bth.opcode=", fshow(bth.opcode), ", bth.psn=%h", bth.psn,
+                    //     ", permCheckInfo.totalLen=%0d", permCheckInfo.totalLen,
+                    //     ", remainingDmaWriteLen=%0d", remainingDmaWriteLen,
+                    //     ", totalDmaWriteLen=%0d", totalDmaWriteLen,
+                    //     ", noRemainingDmaWrite=", fshow(noRemainingDmaWrite),
+                    //     ", writeReqLenMatch=", fshow(writeReqLenMatch),
+                    //     ", enoughDmaSpace=", fshow(enoughDmaSpace),
+                    //     ", isLastPayloadLenZero=", fshow(isLastPayloadLenZero),
+                    //     ", reqStatus=", fshow(reqStatus)
+                    // );
                 end
                 else if (isSendReq && (isLastPkt || isOnlyPkt)) begin
                     // Update send request total length
@@ -2633,124 +2606,7 @@ module mkReqHandleRQ#(
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-/*
-    rule checkPendingResp if (cntrl.isNonErr || cntrl.isERR);
-        let {
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo,
-            respPktGenInfo, respPktHeaderInfo, atomicEth
-        } = respCheckQ.first;
-        respCheckQ.deq;
 
-        let bth                      = reqPktInfo.bth;
-        let isReadReq                = reqPktInfo.isReadReq;
-        let hasDmaReadRespErr        = hasDmaReadRespErrReg;
-        let hasReqStatusErr           = respPktGenInfo.hasReqStatusErr;
-        let expectReadRespPayload    = respPktGenInfo.expectReadRespPayload;
-        let expectAtomicRespOrig     = respPktGenInfo.expectAtomicRespOrig;
-        let expectDupAtomicCheckResp = respPktGenInfo.expectDupAtomicCheckResp;
-
-        if (!hasErrRespGenReg) begin
-            if (hasDmaReadRespErr) begin
-                // This case means previous duplicate operation had DMA read response error,
-                // But no error responses for duplicate requests.
-                // So it needs to generate an error response here.
-                if (isNormalOrErrorReqStatus(reqStatus)) begin
-                    reqStatus = RDMA_REQ_ST_RMT_OP;
-                    respPktGenInfo.shouldGenResp = True;
-                end
-                else if (reqStatus == RDMA_REQ_ST_DUP) begin
-                    reqStatus = RDMA_REQ_ST_DISCARD;
-                    respPktGenInfo.shouldGenResp = False;
-                end
-            end
-            else if (expectReadRespPayload) begin
-                immAssert(
-                    reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP,
-                    "reqStatus normal dup assertion @ ReqHandleRQ",
-                    $format(
-                        "reqStatus=", fshow(RDMA_REQ_ST_NORMAL),
-                        " should be RDMA_REQ_ST_NORMAL or RDMA_REQ_ST_DUP when expectReadRespPayload=",
-                        fshow(expectReadRespPayload)
-                    )
-                );
-                immAssert(
-                    isReadReq,
-                    "isReadReq assertion @ ReqHandleRQ",
-                    $format(
-                        "isReadReq=", fshow(isReadReq),
-                        " should be true when expectReadRespPayload=",
-                        fshow(expectReadRespPayload),
-                        " but bth.opcode=", fshow(bth.opcode)
-                    )
-                );
-
-                let payloadGenResp = payloadGenerator.respPipeOut.first;
-                payloadGenerator.respPipeOut.deq;
-
-                if (payloadGenResp.isRespErr) begin
-                    hasDmaReadRespErr = True;
-
-                    // Only change to error state when normal read requests have response error,
-                    // but if duplicate read requests have response error, it will postpone
-                    // the error response generation to next normal or error request.
-                    if (reqStatus == RDMA_REQ_ST_NORMAL) begin
-                        reqStatus = RDMA_REQ_ST_RMT_OP;
-                        readRespErrNotifyReg <= True;
-                        $display(
-                            "time=%0t:", $time,
-                            " set readRespErrNotifyReg",
-                            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-                            ", reqStatus=", fshow(reqStatus)
-                        );
-                    end
-                    else begin
-                        // Can not change to error state if duplicate read request have
-                        // error read response
-                        reqStatus = RDMA_REQ_ST_DISCARD;
-                        respPktGenInfo.shouldGenResp = False;
-                    end
-                end
-            end
-        end
-
-        let errReqStatus = isErrReqStatus(reqStatus);
-        if (hasErrRespGenReg || errReqStatus) begin
-            immAssert(
-                hasDmaReadRespErr || (
-                    !expectReadRespPayload &&
-                    !expectAtomicRespOrig  &&
-                    !expectDupAtomicCheckResp
-                ),
-                "respPktGenInfo assertion @ mkReqHandleRQ",
-                $format(
-                    "bth.psn=%h", bth.psn, ", bth.opcode=", fshow(bth.opcode),
-                    ", expectReadRespPayload=", fshow(expectReadRespPayload),
-                    ", expectAtomicRespOrig=", fshow(expectAtomicRespOrig),
-                    ", expectDupAtomicCheckResp=", fshow(expectDupAtomicCheckResp),
-                    ", all should be false when errReqStatus=", fshow(errReqStatus),
-                    ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-                    ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-                    ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                    ", reqStatus=", fshow(reqStatus)
-                )
-            );
-        end
-
-        hasDmaReadRespErrReg <= hasDmaReadRespErr;
-        dupAtomicReqPermQueryQ.enq(tuple7(
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, respPktHeaderInfo, atomicEth
-        ));
-        // $display(
-        //     "time=%0t: 26th stage, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
-    endrule
-*/
     // This rule still runs at retry or error state
     rule queryPerm4DupAtomicReq if (cntrl.isNonErr || cntrl.isERR);
         let {
@@ -2879,9 +2735,10 @@ module mkReqHandleRQ#(
             end
 
             if (respPktHeaderInfo.isFirstOrOnlyRespPkt) begin
+                let isOnlyReadRespPkt = reqPktInfo.isOnlyRespPkt && reqPktInfo.isReadReq;
                 let maybeFirstOrOnlyHeader = genFirstOrOnlyRespHeader(
                     bth.opcode, reqStatus, permCheckInfo.totalLen, respPktGenInfo.atomicAckOrig,
-                    cntrl, psn, msn, reqPktInfo.isOnlyRespPkt
+                    cntrl, psn, msn, isOnlyReadRespPkt
                 );
                 maybeHeader = maybeFirstOrOnlyHeader;
             end
@@ -2994,7 +2851,17 @@ module mkReqHandleRQ#(
 
                 if (maybeFirstOrOnlyHeader matches tagged Valid .firstOrOnlyHeader) begin
                     headerQ.enq(firstOrOnlyHeader);
-                    // $display("time=%0t: generate first or only response header", $time);
+                    // $display(
+                    //     "time=%0t: generate first or only response header", $time,
+                    //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+                    //     ", respPSN=%h", respPSN,
+                    //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+                    //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
+                    //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+                    //     ", hasErrRespGen=", fshow(hasErrRespGen),
+                    //     ", reqStatus=", fshow(reqStatus),
+                    //     ", firstOrOnlyHeader=", fshow(firstOrOnlyHeader)
+                    // );
                 end
             end
 
@@ -3080,7 +2947,11 @@ module mkReqHandleRQ#(
 
                 if (maybeMiddleOrLastHeader matches tagged Valid .middleOrLastHeader) begin
                     headerQ.enq(middleOrLastHeader);
-                    // $display("time=%0t: generate middle or last response header", $time);
+                    // $display(
+                    //     "time=%0t: generate middle or last response header", $time,
+                    //     ", respPSN=%h", respPSN,
+                    //     ", middleOrLastHeader=", fshow(middleOrLastHeader)
+                    // );
                 end
             end
         end
@@ -3089,7 +2960,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
         // $display(
-        //     "time=%0t: 30th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     "time=%0t: 30th stage genRespPkt, bth.opcode=", $time, fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
         //     ", respPSN=%h", respPSN,
         //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
@@ -3100,198 +2971,9 @@ module mkReqHandleRQ#(
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-/*
-    rule genRespHeader if (cntrl.isNonErr || cntrl.isERR);
-        let {
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, respPktHeaderInfo
-        } = respHeaderGenQ.first;
-        respHeaderGenQ.deq;
 
-        let bth = reqPktInfo.bth;
-        let psn = respPktHeaderInfo.psn;
-        let msn = respPktHeaderInfo.msn;
-
-        let maybeHeader = dontCareValue;
-        if (respPktHeaderInfo.isFirstOrOnlyRespPkt) begin
-            let maybeFirstOrOnlyHeader = genFirstOrOnlyRespHeader(
-                bth.opcode, reqStatus, permCheckInfo.totalLen, respPktGenInfo.atomicAckOrig,
-                cntrl, psn, msn, reqPktInfo.isOnlyRespPkt
-            );
-            maybeHeader = maybeFirstOrOnlyHeader;
-        end
-        else begin
-            let maybeMiddleOrLastHeader = genMiddleOrLastRespHeader(
-                bth.opcode, reqStatus, permCheckInfo.totalLen,
-                cntrl, psn, msn, respPktHeaderInfo.isLastOrOnlyRespPkt
-            );
-            maybeHeader = maybeMiddleOrLastHeader;
-        end
-
-        pendingRespQ.enq(tuple7(
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo,
-            respPktGenInfo, respPktHeaderInfo, maybeHeader
-        ));
-        // $display(
-        //     "time=%0t: 29th stage, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     // ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-        //     // ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
-    endrule
-
-    rule genRespPkt if (cntrl.isNonErr || cntrl.isERR);
-        let {
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo,
-            respPktGenInfo, respPktHeaderInfo, maybeHeader
-        } = pendingRespQ.first;
-        pendingRespQ.deq;
-
-        let bth = reqPktInfo.bth;
-        let psn = respPktHeaderInfo.psn;
-        let msn = respPktHeaderInfo.msn;
-
-        if (!hasErrRespGenReg) begin
-            // It is possible that maybeFirstOrOnlyHeader is valid
-            // but no need to generate responses
-            if (respPktHeaderInfo.isFirstOrOnlyRespPkt) begin
-                let maybeFirstOrOnlyHeader = maybeHeader;
-                // let maybeFirstOrOnlyHeader = genFirstOrOnlyRespHeader(
-                //     bth.opcode, reqStatus, permCheckInfo.totalLen, respPktGenInfo.atomicAckOrig,
-                //     cntrl, psn, msn, reqPktInfo.isOnlyRespPkt
-                // );
-                if (respPktGenInfo.shouldGenResp) begin
-                    immAssert(
-                        isValid(maybeFirstOrOnlyHeader),
-                        "maybeFirstOrOnlyHeader assertion @ mkReqHandleRQ",
-                        $format(
-                            "maybeFirstOrOnlyHeader=", fshow(maybeFirstOrOnlyHeader),
-                            " must be valid when shouldGenResp=",
-                            fshow(respPktGenInfo.shouldGenResp),
-                            ", bth.opcode=", fshow(bth.opcode),
-                            ", bth.psn=%h, msn=%h", bth.psn, msn,
-                            ", reqStatus=", fshow(reqStatus)
-                        )
-                    );
-
-                    if (maybeFirstOrOnlyHeader matches tagged Valid .firstOrOnlyHeader) begin
-                        headerQ.enq(firstOrOnlyHeader);
-                        // $display("time=%0t: generate first or only response header", $time);
-                    end
-                end
-
-                if (
-                    reqPktInfo.isAtomicReq           &&
-                    (reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP)
-                ) begin
-                    immAssert(
-                        isValid(respPktGenInfo.atomicAckOrig),
-                        "atomicAckOrig assertion @ mkReqHandleRQ",
-                        $format(
-                            "atomicAckOrig=", fshow(respPktGenInfo.atomicAckOrig),
-                            " should be valid when isAtomicReq=", fshow(reqPktInfo.isAtomicReq),
-                            ", reqStatus=", fshow(reqStatus),
-                            " and shouldGenResp=", fshow(respPktGenInfo.shouldGenResp)
-                        )
-                    );
-                end
-            end
-            else begin
-                immAssert(
-                    reqStatus == RDMA_REQ_ST_NORMAL ||
-                    reqStatus == RDMA_REQ_ST_DUP    ||
-                    reqStatus == RDMA_REQ_ST_RMT_OP,
-                    "reqStatus assertion @ mkReqHandleRQ",
-                    $format(
-                        "reqStatus=", fshow(reqStatus),
-                        " must be normal or duplicate when isFirstOrOnlyRespPkt=",
-                        fshow(respPktHeaderInfo.isFirstOrOnlyRespPkt)
-                    )
-                );
-                immAssert(
-                    respPktGenInfo.shouldGenResp,
-                    "shouldGenResp assertion @ mkReqHandleRQ",
-                    $format(
-                        "shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-                        " must be true when isFirstOrOnlyRespPkt=",
-                        fshow(respPktHeaderInfo.isFirstOrOnlyRespPkt)
-                    )
-                );
-                immAssert(
-                    respPktGenInfo.expectReadRespPayload,
-                    "expectReadRespPayload assertion @ mkReqHandleRQ",
-                    $format(
-                        "expectReadRespPayload=", fshow(respPktGenInfo.expectReadRespPayload),
-                        " must be true when isFirstOrOnlyRespPkt=",
-                        fshow(respPktHeaderInfo.isFirstOrOnlyRespPkt),
-                        ", bth.psn=%h", bth.psn
-                    )
-                );
-                immAssert(
-                    bth.opcode == RDMA_READ_REQUEST,
-                    "bth.opcode assertion @ mkReqHandleRQ",
-                    $format(
-                        "bth.opcode=", fshow(bth.opcode),
-                        " must be read request when isFirstOrOnlyRespPkt=",
-                        fshow(respPktHeaderInfo.isFirstOrOnlyRespPkt)
-                    )
-                );
-
-                let maybeMiddleOrLastHeader = maybeHeader;
-                // let maybeMiddleOrLastHeader = genMiddleOrLastRespHeader(
-                //     bth.opcode, reqStatus, permCheckInfo.totalLen,
-                //     cntrl, psn, msn, respPktHeaderInfo.isLastOrOnlyRespPkt
-                // );
-                if (
-                    reqStatus == RDMA_REQ_ST_NORMAL ||
-                    reqStatus == RDMA_REQ_ST_DUP    ||
-                    reqStatus == RDMA_REQ_ST_RMT_OP // For read response error
-                ) begin
-                    immAssert(
-                        isValid(maybeMiddleOrLastHeader),
-                        "maybeMiddleOrLastHeader assertion @ mkReqHandleRQ",
-                        $format(
-                            "maybeMiddleOrLastHeader=", fshow(maybeMiddleOrLastHeader),
-                            " must be valid when reqStatus=", fshow(reqStatus)
-                        )
-                    );
-                end
-                if (respPktGenInfo.shouldGenResp) begin
-                    if (maybeMiddleOrLastHeader matches tagged Valid .middleOrLastHeader) begin
-                        headerQ.enq(middleOrLastHeader);
-                        // $display("time=%0t: generate middle or last response header", $time);
-                    end
-                end
-            end
-        end
-
-        let errReqStatus = isErrReqStatus(reqStatus);
-        if (errReqStatus) begin
-            hasErrRespGenReg <= True;
-            // if (!hasErrRespGenReg) begin
-            //     $display("time=%0t: first fatal error response, reqStatus=", $time, fshow(reqStatus));
-            // end
-        end
-        workCompReqQ.enq(tuple6(
-            pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, respPktHeaderInfo
-        ));
-        // $display(
-        //     "time=%0t: 30th stage, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-        //     // ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
-    endrule
-*/
     // This rule still runs at retry or error state
-    rule genWorkCompReq if (cntrl.isNonErr || cntrl.isERR);
+    rule genWorkCompRQ if (cntrl.isNonErr || cntrl.isERR);
         let {
             pktMetaData, reqStatus, permCheckInfo, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         } = workCompReqQ.first;
@@ -3364,7 +3046,7 @@ module mkReqHandleRQ#(
             workCompGenReqOutQ.enq(workCompReq);
         end
         // $display(
-        //     "time=%0t: 31st stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     "time=%0t: 31st stage genWorkCompRQ, bth.opcode=", $time, fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
         //     ", immDt=%h, ieth=%h", immDt, ieth,
         //     ", hasImmDt=", fshow(hasImmDt),

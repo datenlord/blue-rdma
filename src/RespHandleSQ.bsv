@@ -474,7 +474,7 @@ module mkRespHandleSQ#(
                         calcEnoughDmaSpace, \
                         checkReadRespLen, \
                         issueDmaReq, \
-                        genWorkComp, \
+                        genWorkCompSQ, \
                         discardGhostResp, \
                         checkTimeOutErr, \
                         errFlushWorkReq, \
@@ -536,7 +536,7 @@ module mkRespHandleSQ#(
             curPendingWR, curPktMetaData, respPktInfo, retryResetReqReg, wcReqType, wrAckType
         ));
         // $display(
-        //     "time=%0t: 1st stage,", $time,
+        //     "time=%0t: 1st stage deqPktMetaDataOrWorkReq,", $time,
         //     " preStageStateReg=", fshow(preStageStateReg),
         //     ", bth.psn=%h", respPktInfo.bth.psn,
         //     ", bth.opcode=", fshow(respPktInfo.bth.opcode),
@@ -1030,86 +1030,7 @@ module mkRespHandleSQ#(
         //     ", WR ID=%h", pendingWR.wr.id
         // );
     endrule
-/*
-    rule calcReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
-        let {
-            pendingWR, pktMetaData, respPktInfo, respAction,
-            wcStatus, wcReqType, nextReadRespWriteAddr
-        } = pendingLenCalcQ.first;
-        pendingLenCalcQ.deq;
 
-        let bth           = respPktInfo.bth;
-        let isReadResp    = respPktInfo.isReadResp;
-        let pktPayloadLen = pktMetaData.pktPayloadLen;
-        let isFirstPkt    = isFirstRdmaOpCode(bth.opcode);
-        let isMidPkt      = isMiddleRdmaOpCode(bth.opcode);
-        let isLastPkt     = isLastRdmaOpCode(bth.opcode);
-        let isOnlyPkt     = isOnlyRdmaOpCode(bth.opcode);
-
-        let enoughDmaSpace        = True;
-        let isLastPayloadLenZero  = False;
-        let remainingReadRespLen  = remainingReadRespLenReg;
-        let oneAsPSN              = 1;
-
-        if (isReadResp) begin
-            case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
-                4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = pendingWR.wr.len - zeroExtend(pktPayloadLen);
-                    enoughDmaSpace       = lenGtEqPktLen(pendingWR.wr.len, pktPayloadLen, cntrl.getPMTU);
-                end
-                4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(pendingWR.wr.len, oneAsPSN, cntrl.getPMTU);
-                    enoughDmaSpace       = lenGtEqPMTU(pendingWR.wr.len, cntrl.getPMTU);
-                end
-                4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
-                    enoughDmaSpace       = lenGtEqPMTU(remainingReadRespLenReg, cntrl.getPMTU);
-                end
-                4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
-                    enoughDmaSpace       = lenGtEqPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
-                    isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
-                end
-                default: begin
-                    immFail(
-                        "unreachible case @ mkRespHandleSQ",
-                        $format(
-                            "isOnlyPkt=", fshow(isOnlyPkt),
-                            "isFirstPkt=", fshow(isFirstPkt),
-                            "isMidPkt=", fshow(isMidPkt),
-                            "isLastPkt=", fshow(isLastPkt)
-                        )
-                    );
-                end
-            endcase
-
-            if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
-                remainingReadRespLenReg <= remainingReadRespLen;
-            end
-        end
-
-        let respLenCheckResult = RespLenCheckResult {
-            enoughDmaSpace       : enoughDmaSpace,
-            isLastPayloadLenZero : isLastPayloadLenZero,
-            nextReadRespWriteAddr: nextReadRespWriteAddr,
-            remainingReadRespLen : remainingReadRespLen
-        };
-        pendingLenCheckQ.enq(tuple7(
-            pendingWR, pktMetaData, respPktInfo, respAction,
-            wcStatus, wcReqType, respLenCheckResult
-        ));
-        // $display(
-        //     "time=%0t: 8th stage, bth.psn=%h", $time, bth.psn,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", respAction=", fshow(respAction),
-        //     ", wcStatus=", fshow(wcStatus),
-        //     ", wcReqType=", fshow(wcReqType),
-        //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
-        //     ", readRespPktNum=%0d", readRespPktNum,
-        //     ", WR ID=%h", pendingWR.wr.id
-        // );
-    endrule
-*/
     rule calcReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction,
@@ -1354,6 +1275,17 @@ module mkRespHandleSQ#(
                     };
                     payloadConReqOutQ.enq(payloadConReq);
                     wcWaitDmaResp = True;
+                    // $display(
+                    //     "time=%0t: 11th stage read response, bth.psn=%h", $time, bth.psn,
+                    //     ", bth.opcode=", fshow(bth.opcode),
+                    //     ", respAction=", fshow(respAction),
+                    //     // ", wcReqType=", fshow(wcReqType),
+                    //     // ", wcStatus=", fshow(wcStatus),
+                    //     // ", genWorkComp=", fshow(genWorkComp),
+                    //     // ", wcWaitDmaResp=", fshow(wcWaitDmaResp),
+                    //     ", WR ID=%h, WR len=%0d, pktPayloadLen=%0d",
+                    //     pendingWR.wr.id, pendingWR.wr.len, pktMetaData.pktPayloadLen
+                    // );
                 end
                 else if (isAtomicResp) begin
                     let atomicWriteReq = PayloadConReq {
@@ -1450,7 +1382,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule genWorkComp if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule genWorkCompSQ if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
         let { respPktInfo, workCompGenReq } = pendingWorkCompQ.first;
         pendingWorkCompQ.deq;
 
@@ -1552,6 +1484,12 @@ module mkRespHandleSQ#(
         if (hasTimeOutErr) begin
             hasTimeOutErrReg[0] <= True;
         end
+        $display(
+            "time=%0t:", $time,
+            " checkTimeOutErr, timeOutNotification=", fshow(timeOutNotification),
+            ", hasTimeOutErr=", fshow(hasTimeOutErr),
+            ", cntrl.isStableRTS=", fshow(cntrl.isStableRTS)
+        );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -1668,104 +1606,7 @@ module mkRespHandleSQ#(
             ", inErrStateAlt=", fshow(inErrStateAlt)
         );
     endrule
-/*
-    (* fire_when_enabled *)
-    rule errFlushPktMetaDataAndPayload if (inErrStateAlt); // Error flush
-        let retryResetReq = RETRY_HANDLER_RESET_TIMEOUT;
 
-        if (pendingWorkReqPipeIn.notEmpty) begin
-            let pendingWR = pendingWorkReqPipeIn.first;
-            pendingWorkReqPipeIn.deq;
-
-            let respPktInfo = RespPktInfo {
-                bth             : dontCareValue,
-                aeth            : dontCareValue,
-                // isZeroPayloadLen: True,
-                isFirstOrOnlyPkt: True,
-                isLastOrOnlyPkt : True,
-                isReadResp      : False,
-                isAtomicResp    : False,
-                hasLocalErr     : True,
-                shouldDiscard   : True,
-                genWorkComp     : True
-            };
-            let pktMetaData = RdmaPktMetaData {
-                pktPayloadLen   : 0,
-                pktFragNum      : 0,
-                isZeroPayloadLen: True,
-                pktHeader       : dontCareValue,
-                pdHandler       : dontCareValue,
-                pktValid        : False,
-                pktStatus       : dontCareValue
-                // pktStatus    : PKT_ST_DISCARD
-            };
-
-            // let rdmaRespType = RDMA_RESP_UNKNOWN;
-            // let retryReason  = RETRY_REASON_NOT_RETRY;
-            // let respAction = hasTimeOutErrReg[0] ? SQ_ACT_TIMEOUT_ERR : SQ_ACT_FLUSH_WR;
-            let wcReqType = WC_REQ_TYPE_FULL_ACK;
-            let wrAckType = hasTimeOutErrReg[0] ? WR_ACK_TIMOUT_ERR : WR_ACK_ERR_FLUSH_WR;
-            hasTimeOutErrReg[0] <= False;
-            incomingRespQ.enq(tuple6(
-                pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
-            ));
-            $display(
-                "time=%0t: 1st error flush stage", $time,
-                ", pendingWR=", fshow(pendingWR),
-                // ", rdmaRespType=", fshow(rdmaRespType),
-                // ", retryReason=", fshow(retryReason),
-                // ", respAction=", fshow(respAction),
-                ", wrAckType=", fshow(wrAckType),
-                ", wcReqType=", fshow(wcReqType),
-                // ", cntrl.isERR=", fshow(cntrl.isERR),
-                // ", respHandleStateReg=", fshow(respHandleStateReg)
-                ", inErrStateAlt=", fshow(inErrStateAlt)
-            );
-        end
-        else if (pktMetaDataPipeIn.notEmpty) begin
-            let pktMetaData = pktMetaDataPipeIn.first;
-            pktMetaDataPipeIn.deq;
-
-            PendingWorkReq emptyPendingWR = dontCareValue;
-
-            let rdmaHeader  = pktMetaData.pktHeader;
-            let bth         = extractBTH(rdmaHeader.headerData);
-            let aeth        = extractAETH(rdmaHeader.headerData);
-            let respPktInfo = RespPktInfo {
-                bth             : bth,
-                aeth            : aeth,
-                // isZeroPayloadLen: isZero(pktMetaData.pktPayloadLen),
-                isFirstOrOnlyPkt: isFirstOrOnlyRdmaOpCode(bth.opcode),
-                isLastOrOnlyPkt : isLastOrOnlyRdmaOpCode(bth.opcode),
-                isReadResp      : isReadRespRdmaOpCode(bth.opcode),
-                isAtomicResp    : isAtomicRespRdmaOpCode(bth.opcode),
-                hasLocalErr     : False,
-                shouldDiscard   : True,
-                genWorkComp     : False
-            };
-            // let rdmaRespType = RDMA_RESP_UNKNOWN;
-            // let retryReason  = RETRY_REASON_NOT_RETRY;
-            // let wrAckType    = pendingWorkReqPipeIn.notEmpty ?
-            //     WR_ACK_DISCARD : WR_ACK_GHOST;
-            // let respAction = SQ_ACT_DISCARD_RESP;
-            let wcReqType = WC_REQ_TYPE_NO_WC;
-            let wrAckType = WR_ACK_DISCARD;
-            incomingRespQ.enq(tuple6(
-                emptyPendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
-            ));
-            $display(
-                "time=%0t: 1st error discard stage, bth.psn=%h", $time, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                // ", rdmaRespType=", fshow(rdmaRespType),
-                // ", retryReason=", fshow(retryReason),
-                // ", respAction=", fshow(respAction),
-                ", wrAckType=", fshow(wrAckType),
-                ", wcReqType=", fshow(wcReqType),
-                ", inErrStateAlt=", fshow(inErrStateAlt)
-            );
-        end
-    endrule
-*/
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryFlushDone if (cntrl.isRTS && inRetryState);
         immAssert(

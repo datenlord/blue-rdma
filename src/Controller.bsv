@@ -226,6 +226,10 @@ module mkController(Controller);
         // $display("time=%0t: resetAndClear", $time);
     endrule
 
+    // rule showState if (stateReg != IBV_QPS_RTS);
+    //     $display("time=%0t:", $time, " cntrl.stateReg=", fshow(stateReg));
+    // endrule
+
     // qpAttr set when Reset 2 INIT
     function AttrQP queryReset2InitAttr(AttrQP qpAttr);
         qpAttr.curQpState    = stateReg;
@@ -687,161 +691,7 @@ module mkController(Controller);
         nextStateReg[1]   <= tagged Invalid;
         setStateErrReg[1] <= False;
     endrule
-/*
-    // TODO: support full functionality of modify_qp()
-    rule handleSrvPort4NonErrState if (
-        stateReg == IBV_QPS_RTS ||
-        stateReg == IBV_QPS_RTR ||
-        stateReg == IBV_QPS_SQD
-    );
-        let qpReq = reqQ.first;
-        reqQ.deq;
 
-        let qpResp = RespQP {
-            successOrNot: False,
-            qpn         : qpReq.qpn,
-            pdHandler   : qpReq.pdHandler,
-            qpAttr      : qpReq.qpAttr,
-            qpInitAttr  : qpReq.qpInitAttr
-        };
-
-        if (qpReq.qpReqType == REQ_QP_MODIFY) begin
-            immAssert(
-                qpReq.qpn == sqpnReg,
-                "SQPN assertion @ mkController",
-                $format("qpReq.qpn=%h should == sqpnReg=%h", qpReq.qpn, sqpnReg)
-            );
-            nextStateReg[0] <= tagged Valid qpReq.qpAttr.qpState;
-            qpResp.successOrNot = True;
-        end
-        else begin
-            immFail(
-                "modifyNonErrState @ mkController",
-                $format(
-                    "qpReq.qpReqType=", fshow(qpReq.qpReqType),
-                    " should be REQ_QP_MODIFY, when stateReg=", fshow(stateReg),
-                    " sqpnReg=%h, qpReq=", sqpnReg, fshow(qpReq)
-                )
-            );
-        end
-        respQ.enq(qpResp);
-    endrule
-
-    rule handleSrvPort4AbnormalState if (
-        stateReg == IBV_QPS_RESET ||
-        stateReg == IBV_QPS_INIT  ||
-        stateReg == IBV_QPS_ERR   ||
-        stateReg == IBV_QPS_SQE
-    );
-        let qpReq = reqQ.first;
-        reqQ.deq;
-
-        let qpResp = RespQP {
-            successOrNot: False,
-            qpn         : qpReq.qpn,
-            pdHandler   : qpReq.pdHandler,
-            qpAttr      : qpReq.qpAttr,
-            qpInitAttr  : qpReq.qpInitAttr
-        };
-
-        if (qpReq.qpReqType != REQ_QP_CREATE) begin
-            immAssert(
-                qpReq.qpn == sqpnReg,
-                "SQPN assertion @ mkController",
-                $format("qpReq.qpn=%h should == sqpnReg=%h", qpReq.qpn, sqpnReg)
-            );
-        end
-
-        case (qpReq.qpReqType)
-            REQ_QP_CREATE: begin
-                sqpnReg                        <= qpReq.qpn;
-                qpTypeReg                      <= qpReq.qpInitAttr.qpType;
-                sqSigAllReg                    <= qpReq.qpInitAttr.sqSigAll;
-
-                qpResp.successOrNot             = True;
-                qpResp.qpAttr.curQpState        = stateReg;
-                qpResp.qpAttr.sqDraining        = stateReg == IBV_QPS_SQD;
-            end
-            REQ_QP_DESTROY: begin
-                nextStateReg[0]                <= tagged Valid IBV_QPS_RESET;
-
-                qpResp.successOrNot             = True;
-                qpResp.qpAttr.curQpState        = stateReg;
-                qpResp.qpAttr.sqDraining        = stateReg == IBV_QPS_SQD;
-            end
-            REQ_QP_MODIFY: begin
-                // TODO: modify QP by QpAttrMaskFlag
-                nextStateReg[0]                <= tagged Valid qpReq.qpAttr.qpState;
-                // qpTypeReg                      <= qpType;
-                maxRnrCntReg                   <= qpReq.qpAttr.rnrRetry;
-                maxRetryCntReg                 <= qpReq.qpAttr.retryCnt;
-                maxTimeOutReg                  <= qpReq.qpAttr.timeout;
-                minRnrTimerReg                 <= qpReq.qpAttr.minRnrTimer;
-                // errFlushDoneReg                <= True;
-                qpAccessFlagsReg               <= qpReq.qpAttr.qpAccessFlags;
-                pendingWorkReqNumReg           <= qpReq.qpAttr.cap.maxSendWR;
-                pendingRecvReqNumReg           <= qpReq.qpAttr.cap.maxRecvWR;
-                pendingReadAtomicReqNumReg     <= qpReq.qpAttr.maxReadAtomic;
-                pendingDestReadAtomicReqNumReg <= qpReq.qpAttr.maxDestReadAtomic;
-                // coalesceWorkReqCntReg           <= qpReq.qpAttr.cap.maxSendWR;
-                // pendingDestReadAtomicReqCntReg <= qpReq.qpAttr.maxDestReadAtomic;
-                // sqSigAllReg                    <= sqSigAll;
-                dqpnReg                        <= qpReq.qpAttr.dqpn;
-                pkeyReg                        <= qpReq.qpAttr.pkeyIndex;
-                qkeyReg                        <= qpReq.qpAttr.qkey;
-                pmtuReg                        <= qpReq.qpAttr.pmtu;
-                npsnReg                        <= qpReq.qpAttr.sqPSN;
-                epsnReg[0]                     <= qpReq.qpAttr.rqPSN;
-
-                qpResp.successOrNot             = True;
-                qpResp.qpAttr.curQpState        = stateReg;
-                qpResp.qpAttr.sqDraining        = stateReg == IBV_QPS_SQD;
-            end
-            REQ_QP_QUERY : begin
-                qpResp.qpAttr.curQpState        = stateReg;
-                qpResp.qpAttr.pmtu              = pmtuReg;
-                qpResp.qpAttr.qkey              = qkeyReg;
-                qpResp.qpAttr.rqPSN             = epsnReg[0];
-                qpResp.qpAttr.sqPSN             = npsnReg;
-                qpResp.qpAttr.dqpn              = dqpnReg;
-                qpResp.qpAttr.qpAccessFlags     = qpAccessFlagsReg;
-                qpResp.qpAttr.cap.maxSendWR     = pendingWorkReqNumReg;
-                qpResp.qpAttr.cap.maxRecvWR     = pendingRecvReqNumReg;
-                qpResp.qpAttr.cap.maxSendSGE    = sendScatterGatherElemCntReg;
-                qpResp.qpAttr.cap.maxRecvSGE    = recvScatterGatherElemCntReg;
-                qpResp.qpAttr.cap.maxInlineData = inlineDataSizeReg;
-                qpResp.qpAttr.pkeyIndex         = pkeyReg;
-                qpResp.qpAttr.sqDraining        = stateReg == IBV_QPS_SQD;
-                qpResp.qpAttr.maxReadAtomic     = pendingReadAtomicReqNumReg;
-                qpResp.qpAttr.maxDestReadAtomic = pendingDestReadAtomicReqNumReg;
-                qpResp.qpAttr.minRnrTimer       = minRnrTimerReg;
-                qpResp.qpAttr.timeout           = maxTimeOutReg;
-                qpResp.qpAttr.retryCnt          = maxRetryCntReg;
-                qpResp.qpAttr.rnrRetry          = maxRnrCntReg;
-
-                qpResp.qpInitAttr.qpType        = qpTypeReg;
-                qpResp.qpInitAttr.sqSigAll      = sqSigAllReg;
-
-                qpResp.successOrNot = True;
-            end
-            default: begin
-                immFail(
-                    "unreachible case @ mkController",
-                    $format(
-                        "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
-                    )
-                );
-            end
-        endcase
-
-        // $display(
-        //     "time=%0t: controller receives qpReq=", $time, fshow(qpReq),
-        //     " and generates qpResp=", fshow(qpResp)
-        // );
-        respQ.enq(qpResp);
-    endrule
-*/
     method Bool isERR()    = stateReg == IBV_QPS_ERR;
     method Bool isInit()   = stateReg == IBV_QPS_INIT;
     method Bool isNonErr() = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD;

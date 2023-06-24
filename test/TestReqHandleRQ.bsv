@@ -32,9 +32,10 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     let qpIndex = getDefaultIndexQP;
     let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
-    let readAtomicWorkReqPipeOut <- mkRandomReadWorkReq( // mkRandomReadOrAtomicWorkReq(
+    Vector#(1, PipeOut#(WorkReq)) readAtomicWorkReqPipeOutVec <- mkRandomReadWorkReq( // mkRandomReadOrAtomicWorkReq(
         fromInteger(minReadWorkReqLen), fromInteger(maxReadWorkReqLen)
     );
+    let readAtomicWorkReqPipeOut = readAtomicWorkReqPipeOutVec[0];
     Vector#(2, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, readAtomicWorkReqPipeOut);
     let pendingWorkReqPipeOut4ReqGen = existingPendingWorkReqPipeOutVec[0];
@@ -280,7 +281,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
 
     // RecvReq
-    Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq(cntrl);
+    Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
     let recvReqBuf4Ref <- mkBufferN(8, recvReqBufVec[1]);
     Reg#(Bool) recvReqBufReadyReg <- mkReg(False);
@@ -596,7 +597,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
 
     // RecvReq
-    Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq(cntrl);
+    Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
     // let recvReqBuf4Ref <- mkBufferN(1024, recvReqBufVec[1]);
 
@@ -928,9 +929,10 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     Vector#(1, PipeOut#(WorkReq)) normalWorkReqPipeOutVec <- mkRandomWorkReq(
         minPayloadLen, maxPayloadLen
     );
-    let readAtomicWorkReqPipeOut <- mkRandomReadOrAtomicWorkReq(
+    Vector#(1, PipeOut#(WorkReq)) readAtomicWorkReqPipeOutVec <- mkRandomReadOrAtomicWorkReq(
         minReadWorkReqLen, maxReadWorkReqLen
     );
+    let readAtomicWorkReqPipeOut = readAtomicWorkReqPipeOutVec[0];
     let illegalAtomicWorkReqPipeOut <- mkGenIllegalAtomicWorkReq;
     let workReqPipeOut = case (errType)
         REQ_HANDLE_PERM_CHECK_FAIL: normalWorkReqPipeOutVec[0];
@@ -979,7 +981,7 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
 
     // RecvReq
-    Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq(cntrl);
+    Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
     let recvReqBuf4Ref <- mkBufferN(32, recvReqBufVec[1]);
 
@@ -1250,8 +1252,8 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
 
     // RecvReq
-    Vector#(1, PipeOut#(RecvReq)) recvReqPipeOutVec <- mkSimGenRecvReq(cntrl);
-    let recvReqPipeOut = recvReqPipeOutVec[0];
+    Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
+    let recvReqPipeOut = recvReqBufVec[0];
     FIFOF#(RecvReq) recvReqQ4Retry <- mkFIFOF;
     FIFOF#(RecvReq)   recvReqQ4Cmp <- mkFIFOF;
 

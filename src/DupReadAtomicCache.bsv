@@ -212,6 +212,25 @@ module mkRecursiveSearch#(
 );
     if (valueOf(qSz) == 1) begin
         return inputVec[0];
+
+        // rule discardInput if (clearAll);
+        //     inputVec[0].deq;
+        // endrule
+
+        // FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
+
+        // rule clearAndReset if (clearAll);
+        //     resultQ.clear;
+        // endrule
+
+        // rule popOut if (!clearAll);
+        //     let result = inputVec[0].first;
+        //     inputVec[0].deq;
+
+        //     resultQ.enq(result);
+        // endrule
+
+        // return convertFifo2PipeOut(resultQ);
     end
     else begin
         Vector#(TDiv#(qSz, 2), FIFOF#(Maybe#(anytype))) nextLayerVec <- replicateM(mkFIFOF);
@@ -252,9 +271,9 @@ module mkRecursiveSearch#(
 endmodule
 
 module mkCacheFIFO#(
-    function searchType convertFunc(anytype item4Search, anytype itemInQ),
-    function cmpResultType compareFunc(searchType searchData),
-    function Maybe#(anytype) compareResult2SearchResult(cmpResultType searchResult)
+    function searchType firstStageFunc(anytype item4Search, anytype itemInQ),
+    function cmpResultType secondStageFunc(searchType searchData),
+    function Maybe#(anytype) thirdStageFunc(cmpResultType searchResult)
 )(CacheFIFO#(qSz, anytype)) provisos(
     Bits#(anytype, tSz),
     Bits#(searchType, searchTypeSz),
@@ -274,6 +293,7 @@ module mkCacheFIFO#(
 
     Reg#(Bit#(cntSz)) enqPtrReg <- mkReg(0);
 
+    Vector#(qSz, FIFOF#(anytype))                    searchReqVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Tuple2#(Bool, searchType))) searchDataVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Maybe#(cmpResultType)))      cmpResultVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Maybe#(anytype)))         searchResultVec <- replicateM(mkFIFOF);
@@ -297,17 +317,6 @@ module mkCacheFIFO#(
     function Action clearSearchResultQ(FIFOF#(Maybe#(anytype)) searchResultQ);
         action
             searchResultQ.clear;
-        endaction
-    endfunction
-
-    function Action firstMapFunc(
-        function searchType mapFunc(anytype item4Cmp),
-        Tuple3#(Bool, anytype, FIFOF#(Tuple2#(Bool, searchType))) zip3Item
-    );
-        action
-            let { tag, itemInQ, searchDataQ } = zip3Item;
-            let searchData = mapFunc(itemInQ);
-            searchDataQ.enq(tuple2(tag, searchData));
         endaction
     endfunction
 
@@ -337,31 +346,53 @@ module mkCacheFIFO#(
         enqPtrReg <= enqPtrReg + 1;
     endrule
 /*
-    (* no_implicit_conditions, fire_when_enabled *)
-    rule push if (!clearReg[1]);
-        if (pushReg[1] matches tagged Valid .pushVal) begin
-            dataVec[enqPtrReg] <= pushVal;
-            tagVec[enqPtrReg]  <= True;
-            enqPtrReg <= enqPtrReg + 1;
-        end
+    function Action firstMapFunc(
+        function searchType mapFunc(anytype item4Cmp),
+        Tuple3#(Bool, anytype, FIFOF#(Tuple2#(Bool, searchType))) zip3Item
+    );
+        action
+            let { tag, itemInQ, searchDataQ } = zip3Item;
+            let searchData = mapFunc(itemInQ);
+            searchDataQ.enq(tuple2(tag, searchData));
+        endaction
+    endfunction
 
-        pushReg[1] <= tagged Invalid;
-    endrule
-*/
     rule firstSearchStage if (!clearReg[1]);
         let item4Search = searchReqQ.first;
         searchReqQ.deq;
 
-        mapM_(firstMapFunc(convertFunc(item4Search)), firstSearchStageZipVec);
+        mapM_(firstMapFunc(firstStageFunc(item4Search)), firstSearchStageZipVec);
+    endrule
+*/
+    function Action duplicateSearchReq(anytype item4Cmp, FIFOF#(anytype) dupSearchReqQ);
+        action
+            dupSearchReqQ.enq(item4Cmp);
+        endaction
+    endfunction
+
+    rule duplicateSearchReqStage if (!clearReg[1]);
+        let item4Search = searchReqQ.first;
+        searchReqQ.deq;
+
+        mapM_(duplicateSearchReq(item4Search), searchReqVec);
     endrule
 
     for (Integer idx = 0; idx < valueOf(qSz); idx = idx + 1) begin
+        rule firstSearchStage if (!clearReg[1]);
+            let item4Search = searchReqVec[idx].first;
+            searchReqVec[idx].deq;
+
+            let { tag, itemInQ, searchDataQ } = firstSearchStageZipVec[idx];
+            let searchData = firstStageFunc(item4Search, itemInQ);
+            searchDataVec[idx].enq(tuple2(tag, searchData));
+        endrule
+
         rule secondSearchStage if (!clearReg[1]);
             let searchDataQ = searchDataVec[idx];
             let { tag, searchData } = searchDataQ.first;
             searchDataQ.deq;
 
-            let cmpResult = compareFunc(searchData);
+            let cmpResult = secondStageFunc(searchData);
             let cmpResultQ = cmpResultVec[idx];
             let outResult = tag ? (tagged Valid cmpResult) : (tagged Invalid);
             cmpResultQ.enq(outResult);
@@ -376,7 +407,7 @@ module mkCacheFIFO#(
 
             let maybeSearchResult = tagged Invalid;
             if (maybeCmpResult matches tagged Valid .cmpResult) begin
-                maybeSearchResult = compareResult2SearchResult(cmpResult);
+                maybeSearchResult = thirdStageFunc(cmpResult);
             end
             searchResultQ.enq(maybeSearchResult);
         endrule
@@ -426,12 +457,16 @@ typedef struct {
 
 interface DupReadAtomicCache;
     method Action insertRead(ReadCacheItem dupReadCacheItem);
+    // interface Server#(ReadCacheItem, Maybe#(Tuple3#(
+    //     ReadCacheItem, ADDR, DupReadReqStartState
+    // ))) dupReadQuerySrv;
     method Action searchReadReq(ReadCacheItem readCacheItem2Search);
     method ActionValue#(Maybe#(Tuple3#(
         ReadCacheItem, ADDR, DupReadReqStartState
     ))) searchReadResp();
 
     method Action insertAtomic(AtomicCacheItem atomicCache);
+    // interface Server#(AtomicCacheItem, Maybe#(AtomicCacheItem)) dupAtomicQuerySrv;
     method Action searchAtomicReq(AtomicCacheItem atomicCacheItem2Search);
     method ActionValue#(Maybe#(AtomicCacheItem)) searchAtomicResp();
 
@@ -614,19 +649,11 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
         buildAtomicSearchData, compareAtomicCacheItem, checkAtomicCacheItemCmpResult
     );
     FIFOF#(ReadCacheItem) dupReadReqQ <- mkFIFOF;
-
-    method Action insertRead(ReadCacheItem readCacheItem);
-        readCacheQ.cacheIfc.push(readCacheItem);
-    endmethod
-
-    method Action searchReadReq(ReadCacheItem readCacheItem2Search);
-        readCacheQ.searchIfc.searchReq(readCacheItem2Search);
-        dupReadReqQ.enq(readCacheItem2Search);
-    endmethod
-
-    method ActionValue#(Maybe#(Tuple3#(
+    FIFOF#(Maybe#(Tuple3#(
         ReadCacheItem, ADDR, DupReadReqStartState
-    ))) searchReadResp();
+    ))) dupReadRespQ <- mkFIFOF;
+
+    rule postProcessDupReadResp;
         let dupReadCacheItem = dupReadReqQ.first;
         dupReadReqQ.deq;
         let dupReadReth = dupReadCacheItem.reth;
@@ -661,6 +688,23 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
             // );
         end
 
+        dupReadRespQ.enq(readResp);
+    endrule
+
+    method Action insertRead(ReadCacheItem readCacheItem);
+        readCacheQ.cacheIfc.push(readCacheItem);
+    endmethod
+
+    method Action searchReadReq(ReadCacheItem readCacheItem2Search);
+        readCacheQ.searchIfc.searchReq(readCacheItem2Search);
+        dupReadReqQ.enq(readCacheItem2Search);
+    endmethod
+
+    method ActionValue#(Maybe#(Tuple3#(
+        ReadCacheItem, ADDR, DupReadReqStartState
+    ))) searchReadResp();
+        let readResp = dupReadRespQ.first;
+        dupReadRespQ.deq;
         return readResp;
     endmethod
 
