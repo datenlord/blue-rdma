@@ -32,8 +32,9 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // WorkReq generation
     Vector#(2, PipeOut#(WorkReq)) workReqPipeOutVec <-
@@ -284,8 +285,9 @@ module mkTestReqGenDmaReadErrCase(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
     Reg#(Bool) genErrWorkCompReg[2] <- mkCReg(2, False);
 
     // WorkReq generation

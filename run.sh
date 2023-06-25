@@ -19,8 +19,8 @@ ALL_LOG=$TEST_DIR/run.log
 # echo "" > $ALL_LOG
 
 # make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestFixedLenSimDataStreamPipeOut 2>&1 | tee -a $ALL_LOG
-
-# make -j8 TESTFILE=SimGenRdmaReqAndResp.bsv TOPMODULE=mkTestSimGenRdmaResp 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=SimExtractRdmaHeaderPayload.bsv TOPMODULE=mkTestSimExtractNormalHeaderPayload 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=SimGenRdmaReqResp.bsv TOPMODULE=mkTestSimGenRdmaResp 2>&1 | tee -a $ALL_LOG
 
 # make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestPipeOutArbiter 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestServerArbiter 2>&1 | tee -a $ALL_LOG
@@ -53,7 +53,6 @@ ALL_LOG=$TEST_DIR/run.log
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestSimExtractNormalRdmaHeader 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairTimeOutErrCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairNormalCase 2>&1 | tee -a $ALL_LOG
 

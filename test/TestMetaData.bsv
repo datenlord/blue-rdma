@@ -9,8 +9,9 @@ import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
 import MetaData :: *;
-import Settings :: *;
 import PrimUtils :: *;
+import QueuePair :: *;
+import Settings :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
@@ -516,6 +517,16 @@ module mkTestMetaDataQPs(Empty);
             )
         );
 
+        let qp = qpMetaDataDUT.getQueuePairByQPN(qpn2Search);
+        immAssert(
+            qp.cntrlStatus.isReset,
+            "QP CntrlStatus assertion @ mkTestMetaDataQPs",
+            $format(
+                "qp.cntrlStatus.isReset=", fshow(qp.cntrlStatus.isReset),
+                " should be true"
+            )
+        );
+/*
         let qpCntrl = qpMetaDataDUT.getCntrlByQPN(qpn2Search);
         immAssert(
             qpCntrl.isReset,
@@ -525,7 +536,7 @@ module mkTestMetaDataQPs(Empty);
                 " should be true"
             )
         );
-
+*/
         // $display(
         //     "time=%0t: isValidQP=", $time, fshow(isValidQP),
         //     " should be valid when qpn2Search=%h and qpCnt=%0d",
@@ -595,9 +606,9 @@ module mkTestMetaDataQPs(Empty);
 endmodule
 
 (* synthesize *)
-module mkTestPermCheckMR(Empty);
+module mkTestPermCheckSrv(Empty);
     let pdMetaData  <- mkMetaDataPDs;
-    let permCheckMR <- mkPermCheckMR(pdMetaData);
+    let permCheckSrv <- mkPermCheckSrv(pdMetaData);
 
     Count#(Bit#(TLog#(TAdd#(1, MAX_PD))))  pdReqCnt <- mkCount(0);
     Count#(Bit#(TLog#(TAdd#(1, MAX_PD)))) pdRespCnt <- mkCount(0);
@@ -651,7 +662,7 @@ module mkTestPermCheckMR(Empty);
         let allocRespPD <- pdMetaData.srvPort.response.get;
         immAssert(
             allocRespPD.successOrNot,
-            "allocRespPD.successOrNot assertion @ mkTestPermCheckMR",
+            "allocRespPD.successOrNot assertion @ mkTestPermCheckSrv",
             $format(
                 "allocRespPD.successOrNot=", fshow(allocRespPD.successOrNot),
                 " should be true when pdRespCnt=%0d", pdRespCnt
@@ -678,7 +689,7 @@ module mkTestPermCheckMR(Empty);
         let maybeMRs = pdMetaData.getMRs4PD(pdHandler);
         immAssert(
             isValid(maybeMRs),
-            "maybeMRs assertion @ mkTestPermCheckMR",
+            "maybeMRs assertion @ mkTestPermCheckSrv",
             $format(
                 "isValid(maybeMRs)=", fshow(isValid(maybeMRs)),
                 " should be valid for pdHandler=%h", pdHandler
@@ -732,7 +743,7 @@ module mkTestPermCheckMR(Empty);
         let maybeMRs = pdMetaData.getMRs4PD(pdHandler);
         immAssert(
             isValid(maybeMRs),
-            "maybeMRs assertion @ mkTestPermCheckMR",
+            "maybeMRs assertion @ mkTestPermCheckSrv",
             $format(
                 "isValid(maybeMRs)=", fshow(isValid(maybeMRs)),
                 " should be valid for pdHandler=%h", pdHandler
@@ -755,7 +766,7 @@ module mkTestPermCheckMR(Empty);
             let rkey = allocRespMR.rkey;
             // immAssert(
             //     isValid(rkey),
-            //     "rkey assertion @ mkTestPermCheckMR",
+            //     "rkey assertion @ mkTestPermCheckSrv",
             //     $format("rkey=", rkey, " should be valid")
             // );
 
@@ -782,7 +793,7 @@ module mkTestPermCheckMR(Empty);
         let { pdHandler, lkey } = lKeyQ4Search.first;
         lKeyQ4Search.deq;
 
-        let permCheckInfo = PermCheckInfo {
+        let permCheckReq = PermCheckReq {
             wrID         : tagged Invalid,
             lkey         : lkey,
             rkey         : dontCareValue,
@@ -794,9 +805,9 @@ module mkTestPermCheckMR(Empty);
             accFlags     : defaultAccPerm
         };
 
-        permCheckMR.request.put(permCheckInfo);
+        permCheckSrv.request.put(permCheckReq);
         // $display(
-        //     "time=%0t: checkReqByLKey permCheckInfo=", $time, fshow(permCheckInfo)
+        //     "time=%0t: checkReqByLKey permCheckReq=", $time, fshow(permCheckReq)
         // );
     endrule
 
@@ -812,7 +823,7 @@ module mkTestPermCheckMR(Empty);
         let { pdHandler, rkey } = rKeyQ4Search.first;
         rKeyQ4Search.deq;
 
-        let permCheckInfo = PermCheckInfo {
+        let permCheckReq = PermCheckReq {
             wrID         : tagged Invalid,
             lkey         : dontCareValue,
             rkey         : rkey,
@@ -824,9 +835,9 @@ module mkTestPermCheckMR(Empty);
             accFlags     : defaultAccPerm
         };
 
-        permCheckMR.request.put(permCheckInfo);
+        permCheckSrv.request.put(permCheckReq);
         // $display(
-        //     "time=%0t: checkReqByRKey permCheckInfo=", $time, fshow(permCheckInfo)
+        //     "time=%0t: checkReqByRKey permCheckReq=", $time, fshow(permCheckReq)
         // );
     endrule
 
@@ -839,20 +850,20 @@ module mkTestPermCheckMR(Empty);
             searchRespCnt.incr(1);
         end
 
-        let checkResp <- permCheckMR.response.get;
+        let checkResp <- permCheckSrv.response.get;
         immAssert(
             checkResp,
-            "checkResp @ mkTestPermCheckMR",
+            "checkResp @ mkTestPermCheckSrv",
             $format(
                 "checkResp=", fshow(checkResp), " should be true"
             )
         );
 
-        // if (lKeyPermCheckInfoQ.notEmpty) begin
-        //     let lKeyCheckResp <- permCheckMR.response.get;
+        // if (lKeyPermCheckReqQ.notEmpty) begin
+        //     let lKeyCheckResp <- permCheckSrv.response.get;
         //     immAssert(
         //         lKeyCheckResp,
-        //         "lKeyCheckResp @ mkTestPermCheckMR",
+        //         "lKeyCheckResp @ mkTestPermCheckSrv",
         //         $format(
         //             "lKeyCheckResp=", fshow(lKeyCheckResp),
         //             " should be true"
@@ -864,11 +875,11 @@ module mkTestPermCheckMR(Empty);
         //         "time=%0t: lKeyCheckResp=", $time, fshow(lKeyCheckResp), " should be true"
         //     );
         // end
-        // else if (rKeyPermCheckInfoQ.notEmpty) begin
-        //     let rKeyCheckResp <- permCheckMR.response.get;
+        // else if (rKeyPermCheckReqQ.notEmpty) begin
+        //     let rKeyCheckResp <- permCheckSrv.response.get;
         //     immAssert(
         //         rKeyCheckResp,
-        //         "rKeyCheckResp @ mkTestPermCheckMR",
+        //         "rKeyCheckResp @ mkTestPermCheckSrv",
         //         $format(
         //             "rKeyCheckResp=", fshow(rKeyCheckResp),
         //             " should be true"

@@ -121,9 +121,6 @@ typedef Bit#(PD_HANDLE_WIDTH) HandlerPD;
 
 typedef PipeOut#(DataStream) DataStreamPipeOut;
 
-typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
-typedef Server#(DmaWriteReq, DmaWriteResp) DmaWriteSrv;
-
 typedef ScanFIFOF#(MAX_QP_WR, PendingWorkReq) PendingWorkReqBuf;
 typedef PipeOut#(RecvReq)                     RecvReqBuf;
 
@@ -133,6 +130,21 @@ typedef struct {
 } PayloadTLB deriving(Bits);
 
 typedef SizeOf#(PayloadTLB) TLB_PAYLOAD_WIDTH;
+
+// Common types
+
+typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
+typedef Server#(DmaWriteReq, DmaWriteResp) DmaWriteSrv;
+typedef Client#(DmaReadReq, DmaReadResp)   DmaReadClt;
+typedef Client#(DmaWriteReq, DmaWriteResp) DmaWriteClt;
+
+typedef Server#(PermCheckReq, Bool) PermCheckSrv;
+typedef Client#(PermCheckReq, Bool) PermCheckClt;
+
+interface RdmaPktMetaDataAndPayloadPipeOut;
+    interface PipeOut#(RdmaPktMetaData) pktMetaData;
+    interface DataStreamPipeOut payload;
+endinterface
 
 // RDMA related requests and responses
 
@@ -222,7 +234,7 @@ typedef struct {
     HandlerPD pdHandler;
     Bool isZeroDmaLen;
     FlagsType#(MemAccessTypeFlag) accFlags;
-} PermCheckInfo deriving(Bits, FShow);
+} PermCheckReq deriving(Bits, FShow);
 
 typedef struct {
     DmaReqInitiator initiator;

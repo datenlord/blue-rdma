@@ -27,9 +27,9 @@ function Maybe#(WorkComp) genWorkComp4WorkReq(
             flags   : wcFlags,
             status  : wcGenReqSQ.wcStatus,
             len     : wr.len,
-            pkey    : cntrl.getPKEY,
-            dqpn    : cntrl.getSQPN,
-            sqpn    : cntrl.getDQPN,
+            pkey    : cntrl.cntrlStatus.getPKEY,
+            dqpn    : cntrl.cntrlStatus.getSQPN,
+            sqpn    : cntrl.cntrlStatus.getDQPN,
             immDt   : tagged Invalid,
             rkey2Inv: tagged Invalid
         };
@@ -52,9 +52,9 @@ endfunction
 //             flags   : IBV_WC_NO_FLAGS,
 //             status  : IBV_WC_WR_FLUSH_ERR,
 //             len     : wr.len,
-//             pkey    : cntrl.getPKEY,
-//             dqpn    : cntrl.getSQPN,
-//             sqpn    : cntrl.getDQPN,
+//             pkey    : cntrl.cntrlStatus.getPKEY,
+//             dqpn    : cntrl.cntrlStatus.getSQPN,
+//             sqpn    : cntrl.cntrlStatus.getDQPN,
 //             immDt   : tagged Invalid,
 //             rkey2Inv: tagged Invalid
 //         };
@@ -98,11 +98,11 @@ module mkWorkCompGenSQ#(
     Reg#(Bool)      isFirstErrPartialAckWorkReqReg <- mkRegU;
     Reg#(WorkReqID) firstErrPartialAckWorkReqIdReg <- mkRegU;
 
-    let inNormalState = cntrl.isRTS && workCompGenStateReg == WC_GEN_ST_NORMAL;
-    let inErrorState  = cntrl.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
+    let inNormalState = cntrl.cntrlStatus.isRTS && workCompGenStateReg == WC_GEN_ST_NORMAL;
+    let inErrorState  = cntrl.cntrlStatus.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.isReset);
+    rule resetAndClear if (cntrl.cntrlStatus.isReset);
         dmaWaitingQ.clear;
         workCompOutQ4SQ.clear;
         pendingWorkCompQ4SQ.clear;
@@ -112,7 +112,7 @@ module mkWorkCompGenSQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule start if (cntrl.isRTS && workCompGenStateReg == WC_GEN_ST_STOP);
+    rule start if (cntrl.cntrlStatus.isRTS && workCompGenStateReg == WC_GEN_ST_STOP);
         workCompGenStateReg <= WC_GEN_ST_NORMAL;
     endrule
 
@@ -172,7 +172,7 @@ module mkWorkCompGenSQ#(
         let workComp = unwrapMaybe(maybeWorkComp);
         let needWorkCompWhenNormal =
             wcGenReqSQ.wcReqType == WC_REQ_TYPE_FULL_ACK &&
-            (workReqNeedWorkCompSQ(wcGenReqSQ.wr) || cntrl.getSigAll);
+            (workReqNeedWorkCompSQ(wcGenReqSQ.wr) || cntrl.cntrlStatus.getSigAll);
 
         let pendingWorkCompSQ = PendingWorkCompSQ {
             wcGenReqSQ            : wcGenReqSQ,
@@ -355,9 +355,9 @@ function Maybe#(WorkComp) genWorkComp4RecvReq(
             flags   : wcFlags,
             status  : wcGenReqRQ.wcStatus,
             len     : wcGenReqRQ.len,
-            pkey    : cntrl.getPKEY,
-            dqpn    : cntrl.getSQPN,
-            sqpn    : cntrl.getDQPN,
+            pkey    : cntrl.cntrlStatus.getPKEY,
+            dqpn    : cntrl.cntrlStatus.getSQPN,
+            sqpn    : cntrl.cntrlStatus.getDQPN,
             immDt   : wcGenReqRQ.immDt,
             rkey2Inv: wcGenReqRQ.rkey2Inv
         };
@@ -383,9 +383,9 @@ endfunction
 //             flags   : wcFlags,
 //             status  : IBV_WC_WR_FLUSH_ERR,
 //             len     : wcGenReqRQ.len,
-//             pkey    : cntrl.getPKEY,
-//             dqpn    : cntrl.getSQPN,
-//             sqpn    : cntrl.getDQPN,
+//             pkey    : cntrl.cntrlStatus.getPKEY,
+//             dqpn    : cntrl.cntrlStatus.getSQPN,
+//             sqpn    : cntrl.cntrlStatus.getDQPN,
 //             immDt   : wcGenReqRQ.immDt,
 //             rkey2Inv: wcGenReqRQ.rkey2Inv
 //         };
@@ -405,9 +405,9 @@ endfunction
 //         flags   : IBV_WC_NO_FLAGS,
 //         status  : IBV_WC_WR_FLUSH_ERR,
 //         len     : rr.len,
-//         pkey    : cntrl.getPKEY,
-//         dqpn    : cntrl.getSQPN,
-//         sqpn    : cntrl.getDQPN,
+//         pkey    : cntrl.cntrlStatus.getPKEY,
+//         dqpn    : cntrl.cntrlStatus.getSQPN,
+//         sqpn    : cntrl.cntrlStatus.getDQPN,
 //         immDt   : tagged Invalid,
 //         rkey2Inv: tagged Invalid
 //     };
@@ -446,11 +446,11 @@ module mkWorkCompGenRQ#(
 
     Reg#(WorkCompGenState) workCompGenStateReg <- mkReg(WC_GEN_ST_STOP);
 
-    let inNormalState = cntrl.isNonErr && workCompGenStateReg == WC_GEN_ST_NORMAL;
-    let inErrorState  = cntrl.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
+    let inNormalState = cntrl.cntrlStatus.isNonErr && workCompGenStateReg == WC_GEN_ST_NORMAL;
+    let inErrorState  = cntrl.cntrlStatus.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.isReset);
+    rule resetAndClear if (cntrl.cntrlStatus.isReset);
         workCompOutQ4RQ.clear;
         wcStatusQ4SQ.clear;
 
@@ -460,7 +460,7 @@ module mkWorkCompGenRQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule start if (cntrl.isNonErr && workCompGenStateReg == WC_GEN_ST_STOP);
+    rule start if (cntrl.cntrlStatus.isNonErr && workCompGenStateReg == WC_GEN_ST_STOP);
         workCompGenStateReg <= WC_GEN_ST_NORMAL;
     endrule
 

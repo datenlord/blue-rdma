@@ -129,10 +129,11 @@ module mkTestDupReadAtomicCache(Empty);
     FIFOF#(AtomicCacheItem)  atomicSearchReqQ <- mkFIFOF;
     FIFOF#(AtomicCacheItem) atomicSearchRespQ <- mkFIFOF;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
-    let dut <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dut <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 

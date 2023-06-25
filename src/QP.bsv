@@ -24,17 +24,17 @@ import SpecialFIFOF :: *;
 import WorkCompGen :: *;
 import Utils :: *;
 
-typedef Vector#(portSz, PermCheckMR) PermCheckSrvArbiter#(numeric type portSz);
+typedef Vector#(portSz, PermCheckSrv) PermCheckSrvArbiter#(numeric type portSz);
 
-module mkPermCheckSrvArbiter#(PermCheckMR permCheckMR)(PermCheckSrvArbiter#(portSz)) provisos(
+module mkPermCheckSrvArbiter#(PermCheckSrv permCheckSrv)(PermCheckSrvArbiter#(portSz)) provisos(
     Add#(1, anysize, portSz),
     Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
 );
-    function Bool isPermCheckReqFinished(PermCheckInfo req) = True;
+    function Bool isPermCheckReqFinished(PermCheckReq req) = True;
     function Bool isPermCheckRespFinished(Bool resp) = True;
 
     PermCheckSrvArbiter#(portSz) arbiter <- mkServerArbiter(
-        permCheckMR,
+        permCheckSrv,
         isPermCheckReqFinished,
         isPermCheckRespFinished
     );
@@ -178,7 +178,7 @@ module mkSQ#(
     Controller cntrl,
     DmaReadSrv dmaReadSrv,
     DmaWriteSrv dmaWriteSrv,
-    PermCheckMR permCheckMR,
+    PermCheckSrv permCheckSrv,
     PipeOut#(WorkReq) workReqPipeIn,
     RdmaPktMetaDataAndPayloadPipeOut respPktPipeOut,
     PipeOut#(WorkCompStatus) workCompStatusPipeInFromRQ
@@ -207,7 +207,7 @@ module mkSQ#(
     let respHandleSQ <- mkRespHandleSQ(
         cntrl,
         retryHandler,
-        permCheckMR,
+        permCheckSrv,
         convertFifo2PipeOut(pendingWorkReqBuf.fifof),
         respPktPipeOut.pktMetaData
     );
@@ -241,16 +241,16 @@ module mkRQ#(
     Controller cntrl,
     DmaReadSrv dmaReadSrv,
     DmaWriteSrv dmaWriteSrv,
-    PermCheckMR permCheckMR,
+    PermCheckSrv permCheckSrv,
     RecvReqBuf recvReqBuf,
     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn
 )(RQ);
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     let reqHandlerRQ <- mkReqHandleRQ(
         cntrl,
         dmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
         reqPktPipeIn.pktMetaData
@@ -286,8 +286,8 @@ module mkQP#(
     PipeOut#(WorkReq) workReqPipeIn,
     DmaReadSrv dmaReadSrv,
     DmaWriteSrv dmaWriteSrv,
-    PermCheckMR permCheck4RQ,
-    PermCheckMR permCheck4SQ,
+    PermCheckSrv permCheck4RQ,
+    PermCheckSrv permCheck4SQ,
     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn,
     RdmaPktMetaDataAndPayloadPipeOut respPktPipeIn
 )(QP);
@@ -326,7 +326,7 @@ module mkQP#(
     let reqRespPipeOut <- mkFixedBinaryPipeOutArbiter(
         rq.rdmaRespDataStreamPipeOut, sq.rdmaReqDataStreamPipeOut
     );
-    rule errFlush if (cntrl.isERR);
+    rule errFlush if (cntrl.cntrlStatus.isERR);
         // TODO: if pending WR queue is empty, then error flush is done
         if (!workReqQ.notEmpty && !recvReqQ.notEmpty) begin
             // Notify controller when flush done
@@ -391,7 +391,7 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
     FIFOF#(WorkReqOrRecvReq) inputWorkReqOrRecvReqQ <- mkFIFOF;
 
     let pdMetaData  <- mkMetaDataPDs;
-    let permCheckMR <- mkPermCheckMR(pdMetaData);
+    let permCheckSrv <- mkPermCheckSrv(pdMetaData);
     let qpMetaData  <- mkMetaDataQPs;
     let metaDataSrv <- mkMetaDataSrv(pdMetaData, qpMetaData);
 
@@ -406,7 +406,7 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
         convertFifo2PipeOut(inputWorkReqOrRecvReqQ)
     );
 
-    PermCheckSrvArbiter#(TMul#(2, MAX_QP)) permCheckSrvArbiter <- mkPermCheckSrvArbiter(permCheckMR);
+    PermCheckSrvArbiter#(TMul#(2, MAX_QP)) permCheckSrvArbiter <- mkPermCheckSrvArbiter(permCheckSrv);
 
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaReqRespPipeIn

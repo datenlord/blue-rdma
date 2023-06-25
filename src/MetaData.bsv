@@ -11,6 +11,7 @@ import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
 import PrimUtils :: *;
+import QueuePair :: *;
 import Settings :: *;
 import Utils :: *;
 
@@ -349,6 +350,170 @@ interface MetaDataQPs;
     interface SrvPortQP srvPort;
     method Bool isValidQP(QPN qpn);
     method Maybe#(HandlerPD) getPD(QPN qpn);
+    method QueuePair getQueuePairByQPN(QPN qpn);
+    method QueuePair getQueuePairByIndexQP(IndexQP qpIndex);
+    // method Action clear();
+    method Bool notEmpty();
+    method Bool notFull();
+endinterface
+
+function IndexQP getIndexQP(QPN qpn) = unpack(truncateLSB(qpn));
+
+function QPN genQPN(IndexQP qpIndex, HandlerPD pdHandler);
+    return { pack(qpIndex), truncate(pdHandler) };
+endfunction
+
+module mkMetaDataQPs(MetaDataQPs);
+    TagVecSrv#(MAX_QP, HandlerPD) qpTagVec <- mkTagVecSrv;
+    Vector#(MAX_QP, QueuePair) qpVec <- replicateM(mkQP);
+    FIFOF#(Tuple2#(Bool, ReqQP)) qpReqQ4Resp <- mkFIFOF;
+    FIFOF#(ReqQP) qpReqQ4Cntrl <- mkFIFOF;
+
+    rule handleReqQP;
+        let qpReq = qpReqQ4Cntrl.first;
+        qpReqQ4Cntrl.deq;
+
+        let tagVecRespSuccess = True;
+        case (qpReq.qpReqType)
+            REQ_QP_CREATE,
+            REQ_QP_DESTROY: begin
+                let { successOrNot, qpIndex, pdHandler } <- qpTagVec.srvPort.response.get;
+                tagVecRespSuccess = successOrNot;
+                let qp = qpVec[qpIndex];
+
+                if (tagVecRespSuccess) begin
+                    let qpn = genQPN(qpIndex, pdHandler);
+                    qpReq.qpn = qpn;
+                    qpReq.pdHandler = pdHandler;
+                    qp.srvPortQP.request.put(qpReq);
+                end
+            end
+            REQ_QP_MODIFY,
+            REQ_QP_QUERY : begin
+                let qpIndex = getIndexQP(qpReq.qpn);
+                let qp = qpVec[qpIndex];
+
+                qp.srvPortQP.request.put(qpReq);
+            end
+            default: begin
+                immFail(
+                    "unreachible case @ mkMetaDataQPs",
+                    $format("qpReq.qpReqType=", fshow(qpReq.qpReqType))
+                );
+            end
+        endcase
+        qpReqQ4Resp.enq(tuple2(tagVecRespSuccess, qpReq));
+    endrule
+
+    interface srvPort = interface SrvPortQP;
+        interface request = interface Put#(ReqQP);
+            method Action put(ReqQP qpReq);
+                case (qpReq.qpReqType)
+                    REQ_QP_CREATE ,
+                    REQ_QP_DESTROY: begin
+                        let qpCreateOrNot = qpReq.qpReqType == REQ_QP_CREATE;
+                        let qpIndex = getIndexQP(qpReq.qpn);
+                        qpTagVec.srvPort.request.put(tuple3(
+                            qpCreateOrNot, qpReq.pdHandler, qpIndex
+                        ));
+                    end
+                    REQ_QP_MODIFY,
+                    REQ_QP_QUERY : begin end
+                    default: begin
+                        immFail(
+                            "unreachible case @ mkMetaDataQPs",
+                            $format("qpReq.qpReqType=", fshow(qpReq.qpReqType))
+                        );
+                    end
+                endcase
+
+                qpReqQ4Cntrl.enq(qpReq);
+            endmethod
+        endinterface;
+
+        interface response = interface Get#(RespQP);
+            method ActionValue#(RespQP) get();
+                let { tagVecRespSuccess, qpReq } = qpReqQ4Resp.first;
+                qpReqQ4Resp.deq;
+
+                // immAssert(
+                //     tagVecRespSuccess,
+                //     "tagVecRespSuccess assertion @ mkMetaDataQPs",
+                //     $format(
+                //         "tagVecRespSuccess=", fshow(tagVecRespSuccess),
+                //         " should be valid when qpReq.qpReqType=", fshow(qpReq.qpReqType),
+                //         " and qpReq.qpn=%h", qpReq.qpn
+                //     )
+                // );
+
+                let qpIndex = getIndexQP(qpReq.qpn);
+                let qp = qpVec[qpIndex];
+                let qpResp = RespQP {
+                    successOrNot: False,
+                    qpn         : qpReq.qpn,
+                    pdHandler   : qpReq.pdHandler,
+                    qpAttr      : qpReq.qpAttr,
+                    qpInitAttr  : qpReq.qpInitAttr
+                };
+
+                case (qpReq.qpReqType)
+                    REQ_QP_CREATE ,
+                    REQ_QP_MODIFY ,
+                    REQ_QP_QUERY  ,
+                    REQ_QP_DESTROY: begin
+                        if (tagVecRespSuccess) begin
+                            qpResp <- qp.srvPortQP.response.get;
+                        end
+                    end
+                    default: begin
+                        immFail(
+                            "unreachible case @ mkMetaDataQPs",
+                            $format(
+                                "request QPN=%h", qpReq.qpn, "qpReqType=", fshow(qpReq.qpReqType)
+                            )
+                        );
+                    end
+                endcase
+
+                // $display(
+                //     "time=%0t:", $time,
+                //     " tagVecRespSuccess=", fshow(tagVecRespSuccess),
+                //     " qpResp.successOrNot=", fshow(qpResp.successOrNot),
+                //     " qpReq.qpn=%h, qpIndex=%h, qpReq.pdHandler=%h",
+                //     qpReq.qpn, qpIndex, qpReq.pdHandler
+                // );
+                return qpResp;
+            endmethod
+        endinterface;
+    endinterface;
+
+    method Bool isValidQP(QPN qpn);
+        let qpIndex = getIndexQP(qpn);
+        return isValid(qpTagVec.getItem(qpIndex));
+    endmethod
+
+    method Maybe#(HandlerPD) getPD(QPN qpn);
+        let qpIndex = getIndexQP(qpn);
+        return qpTagVec.getItem(qpIndex);
+    endmethod
+
+    method QueuePair getQueuePairByQPN(QPN qpn);
+        let qpIndex = getIndexQP(qpn);
+        let qp = qpVec[qpIndex];
+        return qp;
+    endmethod
+
+    method QueuePair getQueuePairByIndexQP(IndexQP qpIndex) = qpVec[qpIndex];
+
+    // method Action clear() = qpTagVec.clear;
+    method Bool notEmpty() = qpTagVec.notEmpty;
+    method Bool notFull()  = qpTagVec.notFull;
+endmodule
+/*
+interface MetaDataQPs;
+    interface SrvPortQP srvPort;
+    method Bool isValidQP(QPN qpn);
+    method Maybe#(HandlerPD) getPD(QPN qpn);
     method Controller getCntrlByQPN(QPN qpn);
     method Controller getCntrlByIndexQP(IndexQP qpIndex);
     method Action clear();
@@ -508,28 +673,26 @@ module mkMetaDataQPs(MetaDataQPs);
     method Bool notEmpty() = qpTagVec.notEmpty;
     method Bool notFull()  = qpTagVec.notFull;
 endmodule
-
+*/
 // MR check related
 
-typedef Server#(PermCheckInfo, Bool) PermCheckMR;
-
-module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
-    FIFOF#(PermCheckInfo) reqInQ <- mkFIFOF;
+module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
+    FIFOF#(PermCheckReq) reqInQ <- mkFIFOF;
     FIFOF#(Bool) respOutQ <- mkFIFOF;
-    // FIFOF#(Tuple3#(PermCheckInfo, Bool, Maybe#(MemRegion))) checkReqQ <- mkFIFOF;
-    FIFOF#(Tuple3#(PermCheckInfo, Bool, Maybe#(MemRegion))) checkStepOneQ <- mkFIFOF;
-    FIFOF#(Tuple3#(PermCheckInfo, Maybe#(MemRegion), Bool)) checkStepTwoQ <- mkFIFOF;
+    // FIFOF#(Tuple3#(PermCheckReq, Bool, Maybe#(MemRegion))) checkReqQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PermCheckReq, Bool, Maybe#(MemRegion))) checkStepOneQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PermCheckReq, Maybe#(MemRegion), Bool)) checkStepTwoQ <- mkFIFOF;
 
-    function Bool checkPermByMR(PermCheckInfo permCheckInfo, MemRegion mr);
-        let keyMatch = case (permCheckInfo.localOrRmtKey)
-            True : (truncate(permCheckInfo.lkey) == mr.lkeyPart);
-            False: (truncate(permCheckInfo.rkey) == mr.rkeyPart);
+    function Bool checkPermByMR(PermCheckReq permCheckReq, MemRegion mr);
+        let keyMatch = case (permCheckReq.localOrRmtKey)
+            True : (truncate(permCheckReq.lkey) == mr.lkeyPart);
+            False: (truncate(permCheckReq.rkey) == mr.rkeyPart);
         endcase;
 
-        let accTypeMatch = compareAccessTypeFlags(permCheckInfo.accFlags, mr.accFlags);
+        let accTypeMatch = compareAccessTypeFlags(permCheckReq.accFlags, mr.accFlags);
 
         let addrLenMatch = checkAddrAndLenWithinRange(
-            permCheckInfo.reqAddr, permCheckInfo.totalLen, mr.laddr, mr.len
+            permCheckReq.reqAddr, permCheckReq.totalLen, mr.laddr, mr.len
         );
         return keyMatch && accTypeMatch && addrLenMatch;
     endfunction
@@ -557,67 +720,67 @@ module mkPermCheckMR#(MetaDataPDs pdMetaData)(PermCheckMR);
     endfunction
 
     rule recvReq;
-        let permCheckInfo = reqInQ.first;
+        let permCheckReq = reqInQ.first;
         reqInQ.deq;
 
-        let isZeroDmaLen = isZero(permCheckInfo.totalLen);
+        let isZeroDmaLen = isZero(permCheckReq.totalLen);
         immAssert(
             !isZeroDmaLen,
-            "isZeroDmaLen assertion @ mkPermCheckMR",
+            "isZeroDmaLen assertion @ mkPermCheckSrv",
             $format(
                 "isZeroDmaLen=", fshow(isZeroDmaLen),
-                " should be false in PermCheckMR.checkReq()"
+                " should be false in PermCheckSrv.checkReq()"
             )
         );
 
         let maybeMR = tagged Invalid;
-        if (permCheckInfo.localOrRmtKey) begin
+        if (permCheckReq.localOrRmtKey) begin
             maybeMR = mrSearchByLKey(
-                pdMetaData, permCheckInfo.pdHandler, permCheckInfo.lkey
+                pdMetaData, permCheckReq.pdHandler, permCheckReq.lkey
             );
         end
         else begin
             maybeMR = mrSearchByRKey(
-                pdMetaData, permCheckInfo.pdHandler, permCheckInfo.rkey
+                pdMetaData, permCheckReq.pdHandler, permCheckReq.rkey
             );
         end
 
-        checkStepOneQ.enq(tuple3(permCheckInfo, isZeroDmaLen, maybeMR));
-        // checkReqQ.enq(tuple3(permCheckInfo, isZeroDmaLen, maybeMR));
+        checkStepOneQ.enq(tuple3(permCheckReq, isZeroDmaLen, maybeMR));
+        // checkReqQ.enq(tuple3(permCheckReq, isZeroDmaLen, maybeMR));
     endrule
 
     rule checkReqStepOne;
-        let { permCheckInfo, isZeroDmaLen, maybeMR } = checkStepOneQ.first;
+        let { permCheckReq, isZeroDmaLen, maybeMR } = checkStepOneQ.first;
         checkStepOneQ.deq;
 
         let stepOneResult = isZeroDmaLen;
         if (!isZeroDmaLen) begin
             if (maybeMR matches tagged Valid .mr) begin
-                let keyMatch = permCheckInfo.localOrRmtKey ?
-                    (truncate(permCheckInfo.lkey) == mr.lkeyPart) :
-                    (truncate(permCheckInfo.rkey) == mr.rkeyPart);
+                let keyMatch = permCheckReq.localOrRmtKey ?
+                    (truncate(permCheckReq.lkey) == mr.lkeyPart) :
+                    (truncate(permCheckReq.rkey) == mr.rkeyPart);
 
                 let accTypeMatch = compareAccessTypeFlags(
-                    permCheckInfo.accFlags, mr.accFlags
+                    permCheckReq.accFlags, mr.accFlags
                 );
 
                 stepOneResult = keyMatch && accTypeMatch;
             end
         end
 
-        checkStepTwoQ.enq(tuple3(permCheckInfo, maybeMR, stepOneResult));
+        checkStepTwoQ.enq(tuple3(permCheckReq, maybeMR, stepOneResult));
     endrule
 
     rule checkReqStepTwo;
-        let { permCheckInfo, maybeMR, stepOneResult } = checkStepTwoQ.first;
+        let { permCheckReq, maybeMR, stepOneResult } = checkStepTwoQ.first;
         checkStepTwoQ.deq;
 
         let stepTwoResult = stepOneResult;
         if (stepOneResult) begin
             if (maybeMR matches tagged Valid .mr) begin
                 stepTwoResult = checkAddrAndLenWithinRange(
-                    permCheckInfo.reqAddr,
-                    permCheckInfo.totalLen,
+                    permCheckReq.reqAddr,
+                    permCheckReq.totalLen,
                     mr.laddr,
                     mr.len
                 );

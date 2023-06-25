@@ -17,7 +17,8 @@ import RetryHandleSQ :: *;
 import SpecialFIFOF :: *;
 import Settings :: *;
 import SimDma :: *;
-import SimGenRdmaReqAndResp :: *;
+import SimExtractRdmaHeaderPayload :: *;
+import SimGenRdmaReqResp :: *;
 import Utils :: *;
 import Utils4Test :: *;
 import WorkCompGen :: *;
@@ -150,9 +151,10 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     PendingWorkReqBuf pendingWorkReqBuf <- mkScanFIFOF;
@@ -185,7 +187,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // Only select read response payload for normal WR
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let readRespPayloadPipeOutBuf <- mkBufferN(32, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(cntrl.getPMTU);
+    let pmtuPipeOut <- mkConstantPipeOut(cntrl.cntrlStatus.getPMTU);
     let readRespPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
         readRespPayloadPipeOutBuf, pmtuPipeOut
     );
@@ -194,10 +196,14 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
         respType, cntrl, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = True;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaRespDataStreamPipeOut
     );
+    // let isRespPktPipeIn = True;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    // );
+
     Vector#(2, PipeOut#(RdmaPktMetaData)) pktMetaDataPipeOutVec <-
         mkForkVector(pktMetaDataAndPayloadPipeOut.pktMetaData);
     let pktMetaDataPipeOut4RespHandle = pktMetaDataPipeOutVec[0];
@@ -209,13 +215,13 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl,
         retryHandler,
-        permCheckMR,
+        permCheckSrv,
         convertFifo2PipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataPipeOut4RespHandle
     );
@@ -407,9 +413,10 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     PendingWorkReqBuf pendingWorkReqBuf <- mkScanFIFOF;
@@ -432,10 +439,13 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     );
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = True;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaRespDataStreamPipeOut
     );
+    // let isRespPktPipeIn = True;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    // );
 
     // Discard responses if timeout case
     let passOrDiscard = respType != TEST_RESP_HANDLE_TIMEOUT_ERR;
@@ -451,13 +461,13 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
 
     // MR permission check
     let mrCheckPassOrFail = !(respType == TEST_RESP_HANDLE_PERM_CHECK_FAIL);
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl,
         retryHandler,
-        permCheckMR,
+        permCheckSrv,
         convertFifo2PipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataOrEmptyPipeOut
     );
@@ -477,8 +487,9 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     // This controller will be set to error state,
     // since it cannot generate WR when error state,
     // so use a dedicated controller for WC.
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl4WorkComp <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl4WorkComp <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl4WorkComp <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
     let workCompPipeOut <- mkWorkCompGenSQ(
         cntrl4WorkComp,
         payloadConsumer.respPipeOut,
@@ -586,9 +597,10 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     let qpType = IBV_QPT_RC;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     PendingWorkReqBuf pendingWorkReqBuf <- mkScanFIFOF;
@@ -627,10 +639,13 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     );
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = True;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaRespDataStreamPipeOut
     );
+    // let isRespPktPipeIn = True;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaRespDataStreamPipeOut, qpMetaData
+    // );
     // Retry handler
     let retryHandler <- mkRetryHandleSQ(
         cntrl, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
@@ -638,13 +653,13 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl,
         retryHandler,
-        permCheckMR,
+        permCheckSrv,
         convertFifo2PipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataAndPayloadPipeOut.pktMetaData
     );

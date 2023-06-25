@@ -6,8 +6,6 @@ import PAClib :: *;
 import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
-import InputPktHandle :: *;
-import MetaData :: *;
 import PrimUtils :: *;
 import RetryHandleSQ :: *;
 import SpecialFIFOF :: *;
@@ -121,7 +119,7 @@ endinterface
 module mkRespHandleSQ#(
     Controller cntrl,
     RetryHandleSQ retryHandler,
-    PermCheckMR permCheckMR,
+    PermCheckSrv permCheckSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn,
     PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn
 )(RespHandleSQ);
@@ -168,7 +166,7 @@ module mkRespHandleSQ#(
     Reg#(Bool)  retryFlushReg <- mkReg(False);
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.isReset);
+    rule resetAndClear if (cntrl.cntrlStatus.isReset);
         payloadConReqOutQ.clear;
         workCompGenReqOutQ.clear;
 
@@ -199,13 +197,13 @@ module mkRespHandleSQ#(
     let inNormalState = !retryFlushReg && !errOccurredReg && !recvErrRespReg;
     let inRetryState = retryFlushReg && !errOccurredReg && !recvErrRespReg;
     // Error state must include controller error state
-    let inErrState = errOccurredReg || cntrl.isERR;
-    let inErrStateAlt = (cntrl.isRTS && (recvErrRespReg || errOccurredReg)) || cntrl.isERR;
+    let inErrState = errOccurredReg || cntrl.cntrlStatus.isERR;
+    let inErrStateAlt = (cntrl.cntrlStatus.isRTS && (recvErrRespReg || errOccurredReg)) || cntrl.cntrlStatus.isERR;
 
     // TODO: check preBuildRespInfo having negative impact on throughput,
     // since preBuildRespInfo is not pipelined.
     rule preBuildRespInfo if (
-        cntrl.isRTS && pendingWorkReqPipeIn.notEmpty &&
+        cntrl.cntrlStatus.isRTS && pendingWorkReqPipeIn.notEmpty &&
         preStageStateReg == SQ_PRE_BUILD_STAGE && inNormalState
     ); // This rule will not run at retry or error state
         let curPktMetaData = pktMetaDataPipeIn.first;
@@ -249,7 +247,7 @@ module mkRespHandleSQ#(
         let curPendingWR = pendingWorkReqPipeIn.first;
         let isReadAtomicWR = isReadOrAtomicWorkReq(curPendingWR.wr.opcode);
 
-        let nextPSN  = cntrl.getNPSN;
+        let nextPSN  = cntrl.cntrlStatus.getNPSN;
         let startPSN = unwrapMaybe(curPendingWR.startPSN);
         let endPSN   = unwrapMaybe(curPendingWR.endPSN);
         let pktNum   = unwrapMaybe(curPendingWR.pktNum);
@@ -307,7 +305,7 @@ module mkRespHandleSQ#(
     endrule
 
     rule preProcRespInfo if (
-        cntrl.isRTS && pendingWorkReqPipeIn.notEmpty &&
+        cntrl.cntrlStatus.isRTS && pendingWorkReqPipeIn.notEmpty &&
         preStageStateReg == SQ_PRE_PROC_STAGE && inNormalState
     ); // This rule will not run at retry or error state
         let respAndWorkReqRelation = preStageRespAndWorkReqRelationReg;
@@ -481,7 +479,7 @@ module mkRespHandleSQ#(
                         errFlushIncomingResp, \
                         (retryFlushDone, retryFlushPktMetaDataAndPayload)" *)
     rule deqPktMetaDataOrWorkReq if (
-        cntrl.isRTS && pendingWorkReqPipeIn.notEmpty &&
+        cntrl.cntrlStatus.isRTS && pendingWorkReqPipeIn.notEmpty &&
         preStageStateReg == SQ_PRE_STAGE_DONE && inNormalState
     ); // This rule will not run at retry or error state
         let respPktInfo  = preStageReqPktInfoReg;
@@ -548,7 +546,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule recvRespHeader if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule recvRespHeader if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         } = incomingRespQ.first;
@@ -660,7 +658,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule handleRespByType if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule handleRespByType if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
         } = pendingRespQ.first;
@@ -742,7 +740,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule queryPerm4NormalReadAtomicResp if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule queryPerm4NormalReadAtomicResp if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcReqType
         } = pendingPermQueryQ.first;
@@ -759,7 +757,7 @@ module mkRespHandleSQ#(
                 isFirstOrOnlyPkt && !inErrState &&
                 ((isReadResp && !isZeroPayloadLen) || isAtomicResp)
             ) begin
-                let permCheckInfo = PermCheckInfo {
+                let permCheckReq = PermCheckReq {
                     wrID         : tagged Valid pendingWR.wr.id,
                     lkey         : pendingWR.wr.lkey,
                     rkey         : dontCareValue,
@@ -770,7 +768,7 @@ module mkRespHandleSQ#(
                     accFlags     : enum2Flag(IBV_ACCESS_LOCAL_WRITE),
                     localOrRmtKey: True
                 };
-                permCheckMR.request.put(permCheckInfo);
+                permCheckSrv.request.put(permCheckReq);
                 expectPermCheckResp = True;
             end
         end
@@ -787,7 +785,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule checkRetryErr if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule checkRetryErr if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, expectPermCheckResp
         } = pendingRetryCheckQ.first;
@@ -914,7 +912,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule checkPerm4NormalReadAtomicResp if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule checkPerm4NormalReadAtomicResp if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcStatus, wcReqType, expectPermCheckResp
         } = pendingPermCheckQ.first;
@@ -934,7 +932,7 @@ module mkRespHandleSQ#(
             end
 
             if (expectPermCheckResp) begin
-                let mrCheckResult <- permCheckMR.response.get;
+                let mrCheckResult <- permCheckSrv.response.get;
                 if (!mrCheckResult) begin
                     wcStatus   = tagged Valid IBV_WC_LOC_ACCESS_ERR;
                     respAction = SQ_ACT_LOCAL_ACC_ERR;
@@ -960,7 +958,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule calcReadRespAddr if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule calcReadRespAddr if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcStatus, wcReqType
         } = pendingAddrCalcQ.first;
@@ -984,11 +982,11 @@ module mkRespHandleSQ#(
                     readRespPktNum        = 1;
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(pendingWR.wr.laddr, oneAsPSN, cntrl.getPMTU);
+                    nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(pendingWR.wr.laddr, oneAsPSN, cntrl.cntrlStatus.getPMTU);
                     readRespPktNum        = readRespPktNumReg + 1;
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntrl.getPMTU);
+                    nextReadRespWriteAddr = addrAddPsnMultiplyPMTU(nextReadRespWriteAddrReg, oneAsPSN, cntrl.cntrlStatus.getPMTU);
                     readRespPktNum        = readRespPktNumReg + 1;
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
@@ -1031,7 +1029,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule calcReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule calcReadRespLen if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction,
             wcStatus, wcReqType, nextReadRespWriteAddr
@@ -1055,13 +1053,13 @@ module mkRespHandleSQ#(
                     remainingReadRespLen = pendingWR.wr.len - zeroExtend(pktPayloadLen);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(pendingWR.wr.len, oneAsPSN, cntrl.getPMTU);
+                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(pendingWR.wr.len, oneAsPSN, cntrl.cntrlStatus.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.getPMTU);
+                    remainingReadRespLen = lenSubtractPsnMultiplyPMTU(remainingReadRespLenReg, oneAsPSN, cntrl.cntrlStatus.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                    remainingReadRespLen = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.getPMTU);
+                    remainingReadRespLen = lenSubtractPktLen(remainingReadRespLenReg, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
                 end
                 default: begin
                     immFail(
@@ -1103,7 +1101,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule calcEnoughDmaSpace if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule calcEnoughDmaSpace if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction, wcStatus,
             wcReqType, respLenCheckResult, preRemainingDmaWriteLen
@@ -1117,7 +1115,7 @@ module mkRespHandleSQ#(
         let isMidPkt      = isMiddleRdmaOpCode(bth.opcode);
         let isLastPkt     = isLastRdmaOpCode(bth.opcode);
         let isOnlyPkt     = isOnlyRdmaOpCode(bth.opcode);
-        Length pmtuLen    = zeroExtend(calcPmtuLen(cntrl.getPMTU));
+        Length pmtuLen    = zeroExtend(calcPmtuLen(cntrl.cntrlStatus.getPMTU));
 
         let enoughDmaSpace        = True;
         let isLastPayloadLenZero  = False;
@@ -1126,7 +1124,7 @@ module mkRespHandleSQ#(
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
                     // Just truncate the total length and then compare with the payload length
-                    enoughDmaSpace       = lenGtEqPktLen(pendingWR.wr.len, pktPayloadLen, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPktLen(pendingWR.wr.len, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
                     if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
                         immAssert(
                             pmtuLen >= pendingWR.wr.len,
@@ -1139,14 +1137,14 @@ module mkRespHandleSQ#(
                     end
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    enoughDmaSpace       = lenGtEqPMTU(pendingWR.wr.len, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPMTU(pendingWR.wr.len, cntrl.cntrlStatus.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    enoughDmaSpace       = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.cntrlStatus.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     // Just truncate the remaining DMA length and then compare with the payload length
-                    enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.getPMTU);
+                    enoughDmaSpace       = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
                     isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                     if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
                         immAssert(
@@ -1197,7 +1195,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule checkReadRespLen if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule checkReadRespLen if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction,
             wcStatus, wcReqType, respLenCheckResult
@@ -1242,7 +1240,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule issueDmaReq if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule issueDmaReq if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let {
             pendingWR, pktMetaData, respPktInfo, respAction,
             wcStatus, wcReqType, nextReadRespWriteAddr
@@ -1267,7 +1265,7 @@ module mkRespHandleSQ#(
                         fragNum      : pktMetaData.pktFragNum,
                         consumeInfo  : tagged SendWriteReqReadRespInfo DmaWriteMetaData {
                             initiator: DMA_INIT_SQ_WR,
-                            sqpn     : cntrl.getSQPN,
+                            sqpn     : cntrl.cntrlStatus.getSQPN,
                             startAddr: nextReadRespWriteAddr,
                             len      : pktMetaData.pktPayloadLen,
                             psn      : bth.psn
@@ -1293,7 +1291,7 @@ module mkRespHandleSQ#(
                         consumeInfo: tagged AtomicRespInfoAndPayload {
                             atomicRespDmaWriteMetaData: DmaWriteMetaData {
                                 initiator: DMA_INIT_SQ_ATOMIC,
-                                sqpn     : cntrl.getSQPN,
+                                sqpn     : cntrl.cntrlStatus.getSQPN,
                                 startAddr: pendingWR.wr.laddr,
                                 len      : truncate(pendingWR.wr.len),
                                 psn      : bth.psn
@@ -1309,7 +1307,7 @@ module mkRespHandleSQ#(
         else if ((shouldDiscard || inErrState) && !isZeroPayloadLen) begin
             let initiator = DMA_INIT_SQ_DISCARD;
             genDiscardPayloadReq(
-                pktMetaData.pktFragNum, initiator, cntrl.getSQPN,
+                pktMetaData.pktFragNum, initiator, cntrl.cntrlStatus.getSQPN,
                 nextReadRespWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
                 payloadConReqOutQ
             );
@@ -1382,7 +1380,7 @@ module mkRespHandleSQ#(
         // );
     endrule
 
-    rule genWorkCompSQ if (cntrl.isRTS || cntrl.isERR); // This rule still runs at retry or error state
+    rule genWorkCompSQ if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR); // This rule still runs at retry or error state
         let { respPktInfo, workCompGenReq } = pendingWorkCompQ.first;
         pendingWorkCompQ.deq;
 
@@ -1427,7 +1425,7 @@ module mkRespHandleSQ#(
     // (* no_implicit_conditions, fire_when_enabled *)
     (* fire_when_enabled *)
     rule discardGhostResp if (
-        cntrl.isRTS && inNormalState &&
+        cntrl.cntrlStatus.isRTS && inNormalState &&
         pktMetaDataPipeIn.notEmpty   &&
         !pendingWorkReqPipeIn.notEmpty
     ); // Ghost responses
@@ -1474,7 +1472,7 @@ module mkRespHandleSQ#(
     endrule
 
     (* fire_when_enabled *)
-    rule checkTimeOutErr if (cntrl.isRTS && inNormalState);
+    rule checkTimeOutErr if (cntrl.cntrlStatus.isRTS && inNormalState);
         // Support timeout retry error
         let timeOutNotification <- retryHandler.notifyTimeOut2SQ;
         let hasTimeOutErr = timeOutNotification == RETRY_HANDLER_TIMEOUT_ERR;
@@ -1488,13 +1486,13 @@ module mkRespHandleSQ#(
             "time=%0t:", $time,
             " checkTimeOutErr, timeOutNotification=", fshow(timeOutNotification),
             ", hasTimeOutErr=", fshow(hasTimeOutErr),
-            ", cntrl.isStableRTS=", fshow(cntrl.isStableRTS)
+            ", cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS)
         );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule canonicalize if (
-        cntrl.isRTS && (hasInternalErrReg[1] || hasTimeOutErrReg[1])
+        cntrl.cntrlStatus.isRTS && (hasInternalErrReg[1] || hasTimeOutErrReg[1])
     );
         errOccurredReg       <= True;
         hasInternalErrReg[1] <= False;
@@ -1555,7 +1553,7 @@ module mkRespHandleSQ#(
             // ", respAction=", fshow(respAction),
             ", wrAckType=", fshow(wrAckType),
             ", wcReqType=", fshow(wcReqType),
-            // ", cntrl.isERR=", fshow(cntrl.isERR),
+            // ", cntrl.cntrlStatus.isERR=", fshow(cntrl.cntrlStatus.isERR),
             // ", respHandleStateReg=", fshow(respHandleStateReg)
             ", inErrStateAlt=", fshow(inErrStateAlt)
         );
@@ -1608,13 +1606,13 @@ module mkRespHandleSQ#(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule retryFlushDone if (cntrl.isRTS && inRetryState);
+    rule retryFlushDone if (cntrl.cntrlStatus.isRTS && inRetryState);
         immAssert(
             pendingWorkReqPipeIn.notEmpty,
             "pendingWR notEmpty assertion @ mkRespHandleSQ",
             $format(
                 "pendingWorkReqPipeIn.notEmpty=", fshow(pendingWorkReqPipeIn.notEmpty),
-                " should be true, when cntrl.isRTS=", fshow(cntrl.isRTS),
+                " should be true, when cntrl.cntrlStatus.isRTS=", fshow(cntrl.cntrlStatus.isRTS),
                 ", inRetryState=", fshow(inRetryState),
                 ", retryFlushReg=", fshow(retryFlushReg),
                 ", errOccurredReg=", fshow(errOccurredReg)
@@ -1636,7 +1634,7 @@ module mkRespHandleSQ#(
 
     // (* no_implicit_conditions, fire_when_enabled *)
     (* fire_when_enabled *)
-    rule retryFlushPktMetaDataAndPayload if (cntrl.isRTS && inRetryState);
+    rule retryFlushPktMetaDataAndPayload if (cntrl.cntrlStatus.isRTS && inRetryState);
         preStageStateReg <= SQ_PRE_BUILD_STAGE;
 
         if (pktMetaDataPipeIn.notEmpty) begin

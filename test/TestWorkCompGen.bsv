@@ -40,9 +40,10 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     // It needs extra controller to generate pending WR,
     // since WC might change controller to error state,
     // which prevent generating pending WR.
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
     Vector#(2, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl4PendingWorkReqGen, workReqPipeOutVec[0]);
     let pendingWorkReqPipeOut4WorkCompReq = existingPendingWorkReqPipeOutVec[0];
@@ -59,8 +60,9 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
 
     // Controller for DUT that will be triggered into error state
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // DUT
     let workCompPipeOut <- mkWorkCompGenSQ(
@@ -82,7 +84,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
             let payloadConResp = PayloadConResp {
                 dmaWriteResp: DmaWriteResp {
                     initiator: dontCareValue,
-                    sqpn     : cntrl.getSQPN,
+                    sqpn     : cntrl.cntrlStatus.getSQPN,
                     psn      : endPSN,
                     isRespErr: False
                 }
@@ -97,7 +99,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
         end
     endrule
 
-    rule filterWorkReqNeedWorkComp if (cntrl.isRTS || cntrl.isERR);
+    rule filterWorkReqNeedWorkComp if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR);
         let pendingWR = pendingWorkReqPipeOut4WorkCompReq.first;
         pendingWorkReqPipeOut4WorkCompReq.deq;
 
@@ -179,9 +181,10 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
     // It needs extra controller to generate pending WR,
     // since WC might change controller to error state,
     // which prevent generating pending WR.
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
     Vector#(1, PipeOut#(PendingWorkReq)) pendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl4PendingWorkReqGen, workReqPipeOutVec[0]);
 
@@ -196,8 +199,10 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
     // WC requests
     FIFOF#(WorkCompGenReqRQ) workCompGenReqQ4RQ <- mkFIFOF;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    // Controller for DUT that will be triggered into error state
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // DUT
     let dut <- mkWorkCompGenRQ(
@@ -216,7 +221,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule setCntrlErrState if (cntrl.isRTS);
+    rule setCntrlErrState if (cntrl.cntrlStatus.isRTS);
         let wcStatus = dut.workCompStatusPipeOutRQ.first;
         dut.workCompStatusPipeOutRQ.deq;
 
@@ -249,7 +254,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
                 let payloadConResp = PayloadConResp {
                     dmaWriteResp: DmaWriteResp {
                         initiator: dontCareValue,
-                        sqpn     : cntrl.getSQPN,
+                        sqpn     : cntrl.cntrlStatus.getSQPN,
                         psn      : endPSN,
                         isRespErr: False
                     }
@@ -285,7 +290,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
             let workCompReq = WorkCompGenReqRQ {
                 rrID        : maybeRecvReqID,
                 len         : pendingWR.wr.len,
-                sqpn        : cntrl.getSQPN,
+                sqpn        : cntrl.cntrlStatus.getSQPN,
                 reqPSN      : endPSN,
                 isZeroDmaLen: isZeroLen,
                 wcStatus    : isNormalCase ? IBV_WC_SUCCESS : IBV_WC_WR_FLUSH_ERR,

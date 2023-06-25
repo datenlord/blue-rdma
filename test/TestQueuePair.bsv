@@ -8,18 +8,18 @@ import Vector :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
 import Headers :: *;
-import InputPktHandle :: *;
-import MetaData :: *;
+// import InputPktHandle :: *;
+// import MetaData :: *;
 import PrimUtils :: *;
 import QueuePair :: *;
 import Settings :: *;
 import SimDma :: *;
-import SimGenRdmaReqAndResp :: *;
+import SimExtractRdmaHeaderPayload :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
-module mkTestSimExtractNormalRdmaHeader(Empty);
+/*
+module mkTestSimExtractNormalHeaderPayload(Empty);
     let minPayloadLen = 1;
     let maxPayloadLen = 2048;
     let qpType = IBV_QPT_RC;
@@ -50,7 +50,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
     let inputPktBuf <- mkSimInputPktBuf4SingleQP(isRespPktPipeIn, rdmaReqPipeOut4InputPktBuf, qpMetaData);
 
     // DUT
-    let dut <- mkSimExtractNormalRdmaHeader(rdmaReqPipeOut4DUT);
+    let dut <- mkSimExtractNormalHeaderPayload(rdmaReqPipeOut4DUT);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -71,7 +71,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
         immAssert(
             pktMetaData.pktPayloadLen == pktMetaDataRef.pktPayloadLen    &&
             pktMetaData.pktFragNum    == pktMetaDataRef.pktFragNum,
-            "pktPayloadLen and pktFragNum assertion @ mkTestSimExtractNormalRdmaHeader",
+            "pktPayloadLen and pktFragNum assertion @ mkTestSimExtractNormalHeaderPayload",
             $format(
                 "pktMetaData.pktPayloadLen=%0d should == pktMetaDataRef.pktPayloadLen=%0d",
                 pktMetaData.pktPayloadLen, pktMetaDataRef.pktPayloadLen,
@@ -84,7 +84,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
             pktMetaData.isZeroPayloadLen == pktMetaDataRef.isZeroPayloadLen &&
             pktMetaData.pktValid         == pktMetaDataRef.pktValid         &&
             pktMetaData.pktStatus        == pktMetaDataRef.pktStatus,
-            "pktMetaData assertion @ mkTestSimExtractNormalRdmaHeader",
+            "pktMetaData assertion @ mkTestSimExtractNormalHeaderPayload",
             $format(
                 "pktMetaData.isZeroPayloadLen=", fshow(pktMetaData.isZeroPayloadLen),
                 " should == pktMetaDataRef.isZeroPayloadLen", fshow(pktMetaDataRef.isZeroPayloadLen),
@@ -98,7 +98,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
             pktMetaData.pktHeader.headerData     == pktMetaDataRef.pktHeader.headerData   &&
             pktMetaData.pktHeader.headerByteEn   == pktMetaDataRef.pktHeader.headerByteEn &&
             pktMetaData.pktHeader.headerMetaData == pktMetaDataRef.pktHeader.headerMetaData,
-            "pktHeader assertion @ mkTestSimExtractNormalRdmaHeader",
+            "pktHeader assertion @ mkTestSimExtractNormalHeaderPayload",
             $format(
                 "pktMetaData.pktHeader=", fshow(pktMetaData.pktHeader),
                 " should == pktMetaDataRef.pktHeader", fshow(pktMetaDataRef.pktHeader)
@@ -121,7 +121,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
 
         immAssert(
             payloadFrag == payloadFragRef,
-            "payloadFrag assertion @ mkTestSimExtractNormalRdmaHeader",
+            "payloadFrag assertion @ mkTestSimExtractNormalHeaderPayload",
             $format(
                 "payloadFrag=", fshow(payloadFrag),
                 " should == payloadFragRef=", fshow(payloadFragRef)
@@ -134,7 +134,7 @@ module mkTestSimExtractNormalRdmaHeader(Empty);
     endrule
 endmodule
 
-module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
+module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
     RdmaPktMetaDataAndPayloadPipeOut
 );
     FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkFIFOF;
@@ -174,7 +174,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
             padCntCheckReqHeader(bth) || padCntCheckRespHeader(bth, aeth);
         immAssert(
             bthCheckResult && headerCheckResult,
-            "bth valid assertion @ mkSimExtractNormalRdmaHeader",
+            "bth valid assertion @ mkSimExtractNormalHeaderPayload",
             $format(
                 "bth=", fshow(bth),
                 " should be valid, but bthCheckResult=", fshow(bthCheckResult),
@@ -193,7 +193,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
         let payloadFragLen = calcFragByteNumFromByteEn(payloadFrag.byteEn);
         immAssert(
             isValid(payloadFragLen),
-            "isValid(payloadFragLen) assertion @ mkSimExtractNormalRdmaHeader",
+            "isValid(payloadFragLen) assertion @ mkSimExtractNormalHeaderPayload",
             $format(
                 "payloadFragLen=", fshow(payloadFragLen), " should be valid"
             )
@@ -259,7 +259,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
         else begin
             immAssert(
                 !rdmaHeader.headerMetaData.hasPayload,
-                "hasPayload assertion @ mkSimExtractNormalRdmaHeader",
+                "hasPayload assertion @ mkSimExtractNormalHeaderPayload",
                 $format(
                     "hasPayload=", fshow(rdmaHeader.headerMetaData.hasPayload),
                     " should be false when isZeroPayloadLen=", fshow(isZeroPayloadLen)
@@ -269,7 +269,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
 
         if (bth.opcode == ACKNOWLEDGE) begin
             $display(
-                "time=%0t: mkSimExtractNormalRdmaHeader recvPktFrag", $time,
+                "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
                 ", bth.opcode=", fshow(bth.opcode),
                 ", bth.psn=%h", bth.psn,
                 ", bthPadCnt=%0d", bthPadCnt,
@@ -283,7 +283,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
             );
             immAssert(
                 isZeroPayloadLen && payloadFrag.isLast && payloadFrag.isFirst,
-                "isZeroPayloadLen assertion @ mkSimExtractNormalRdmaHeader",
+                "isZeroPayloadLen assertion @ mkSimExtractNormalHeaderPayload",
                 $format(
                     "isZeroPayloadLen=", fshow(isZeroPayloadLen),
                     ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
@@ -297,6 +297,7 @@ module mkSimExtractNormalRdmaHeader#(DataStreamPipeOut rdmaPktPipeIn)(
     interface pktMetaData = convertFifo2PipeOut(pktMetaDataOutQ);
     interface payload     = convertFifo2PipeOut(payloadOutQ);
 endmodule
+*/
 
 (* synthesize *)
 module mkTestQueuePairTimeOutErrCase(Empty);
@@ -344,14 +345,14 @@ module mkTestQueuePairTimeOutErrCase(Empty);
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let simPermCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let simPermCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
     let permCheckClt <- mkPermCheckCltArbiter(vec(
         sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ
     ));
-    mkConnection(permCheckClt, simPermCheckMR);
+    mkConnection(permCheckClt, simPermCheckSrv);
 
     // Extract RDMA request metadata and payload
-    let reqPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalRdmaHeader(sendSideQP.rdmaReqRespPipeOut);
+    let reqPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(sendSideQP.rdmaReqRespPipeOut);
     let reqPayloadSink <- mkSink(reqPktMetaDataAndPayloadPipeOut.payload);
     let reqPktMetaDataPipeOut = reqPktMetaDataAndPayloadPipeOut.pktMetaData;
     let reqPktMetaDataSink <- mkSink(reqPktMetaDataPipeOut);
@@ -437,7 +438,7 @@ module mkTestQueuePairTimeOutErrCase(Empty);
         //     "time=%0t: timeOutErrWC=", $time, fshow(timeOutErrWC),
         //     " not match WR=", fshow(firstWorkReqReg)
         // );
-        $finish;
+        normalExit;
     endrule
 endmodule
 
@@ -500,12 +501,12 @@ module mkTestQueuePairNormalCase(Empty);
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    // let simPermCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    // let simPermCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
     // let permCheckClt <- mkPermCheckCltArbiter(vec(
     //     sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ, recvSideQP.permCheckClt4RQ, recvSideQP.permCheckClt4SQ
     // ));
-    // mkConnection(permCheckClt, simPermCheckMR);
-    Vector#(4, PermCheckMR) simPermCheckVec  <- replicateM(mkSimPermCheckMR(mrCheckPassOrFail));
+    // mkConnection(permCheckClt, simPermCheckSrv);
+    Vector#(4, PermCheckSrv) simPermCheckVec  <- replicateM(mkSimPermCheckSrv(mrCheckPassOrFail));
     Vector#(4, PermCheckClt) permCheckCltVec = vec(
         sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ, recvSideQP.permCheckClt4RQ, recvSideQP.permCheckClt4SQ
     );
@@ -513,8 +514,8 @@ module mkTestQueuePairNormalCase(Empty);
         mkConnection(permCheckCltVec[idx], simPermCheckVec[idx]);
     end
 
-    let reqPktMetaDataAndPayloadPipeOut  <- mkSimExtractNormalRdmaHeader(sendSideQP.rdmaReqRespPipeOut);
-    let respPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalRdmaHeader(recvSideQP.rdmaReqRespPipeOut);
+    let reqPktMetaDataAndPayloadPipeOut  <- mkSimExtractNormalHeaderPayload(sendSideQP.rdmaReqRespPipeOut);
+    let respPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(recvSideQP.rdmaReqRespPipeOut);
 
     // // Build RdmaPktMetaData and payload DataStream for requests
     // let spMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);

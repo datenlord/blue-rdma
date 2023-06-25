@@ -13,10 +13,13 @@ module mkTestCntrlInVec(Empty);
     let qpType = IBV_QPT_XRC_RECV;
     let pmtu = IBV_MTU_1024;
 
-    let setExpectedPsnAsNextPSN = False;
-    Vector#(MAX_QP, Controller) cntrlVec <- replicateM(mkSimController(
-        qpType, pmtu, setExpectedPsnAsNextPSN
-    ));
+    Vector#(MAX_QP, Controller) cntrlVec <- replicateM(
+        mkSimCntrl(qpType, pmtu)
+    );
+    // let setExpectedPsnAsNextPSN = False;
+    // Vector#(MAX_QP, Controller) cntrlVec <- replicateM(mkSimController(
+    //     qpType, pmtu, setExpectedPsnAsNextPSN
+    // ));
     Array#(Controller) cntrlArray = vectorToArray(cntrlVec);
     List#(Controller) cntrlList = toList(cntrlVec);
 
@@ -32,7 +35,7 @@ module mkTestCntrlInVec(Empty);
             stateReg <= False;
             qpCnt <= 0;
         end
-        else if (cntrl.isStableRTS) begin
+        else if (cntrl.cntrlStatus.isStableRTS) begin
             cntrl.contextRQ.setCurRespPSN(cntrl.contextRQ.getEPSN);
             qpCnt.incr(1);
 
@@ -57,11 +60,11 @@ module mkTestCntrlInVec(Empty);
             let cntrl2 = cntrlArray[qpCnt];
 
             immAssert(
-                cntrl1.getQKEY == cntrl2.getQKEY,
+                cntrl1.cntrlStatus.getQKEY == cntrl2.cntrlStatus.getQKEY,
                 "qkey assertion @ mkTestCntrlInVec",
                 $format(
-                    "cntrl1.getQKEY=%h == cntrl2.getQKEY=%h",
-                    cntrl1.getQKEY, cntrl2.getQKEY
+                    "cntrl1.cntrlStatus.getQKEY=%h == cntrl2.cntrlStatus.getQKEY=%h",
+                    cntrl1.cntrlStatus.getQKEY, cntrl2.cntrlStatus.getQKEY
                 )
             );
             immAssert(
@@ -73,8 +76,8 @@ module mkTestCntrlInVec(Empty);
                 )
             );
             // $display(
-            //     "time=%0t: cntrl1.getQKEY=%h == cntrl2.getQKEY=%h",
-            //     $time, cntrl1.getQKEY, cntrl2.getQKEY
+            //     "time=%0t: cntrl1.cntrlStatus.getQKEY=%h == cntrl2.cntrlStatus.getQKEY=%h",
+            //     $time, cntrl1.cntrlStatus.getQKEY, cntrl2.cntrlStatus.getQKEY
             // );
         end
     endrule

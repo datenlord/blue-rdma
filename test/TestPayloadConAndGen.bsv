@@ -25,8 +25,9 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     FIFOF#(PayloadConReq) payloadConReqQ <- mkFIFOF;
     FIFOF#(PSN) payloadConReqPsnQ <- mkFIFOF;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     Vector#(2, PipeOut#(PktLen)) pktLenPipeOutVec <-
         mkRandomValueInRangePipeOut(minpktLen, maxpktLen);
@@ -61,7 +62,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     // - simDmaWriteSrvDataStreamPipeOut
     // - payloadConsumer.respPipeOut
 
-    rule genPayloadGenReq if (cntrl.isNonErr);
+    rule genPayloadGenReq if (cntrl.cntrlStatus.isNonErr);
         let pktLen = pktLenPipeOut4Gen.first;
         pktLenPipeOut4Gen.deq;
 
@@ -71,7 +72,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
             pmtu         : pmtu,
             dmaReadReq   : DmaReadReq {
                 initiator: DMA_INIT_SQ_RD,
-                sqpn     : cntrl.getSQPN,
+                sqpn     : cntrl.cntrlStatus.getSQPN,
                 startAddr: dontCareValue,
                 len      : zeroExtend(pktLen),
                 wrID     : dontCareValue
@@ -80,7 +81,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         payloadGenReqQ.enq(payloadGenReq);
     endrule
 
-    rule recvPayloadGenResp if (cntrl.isNonErr);
+    rule recvPayloadGenResp if (cntrl.cntrlStatus.isNonErr);
         let payloadGenResp = payloadGenerator.respPipeOut.first;
         payloadGenerator.respPipeOut.deq;
 
@@ -94,16 +95,16 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         );
     endrule
 
-    rule genPayloadConReq if (cntrl.isNonErr);
+    rule genPayloadConReq if (cntrl.cntrlStatus.isNonErr);
         let pktLen = pktLenPipeOut4Con.first;
         pktLenPipeOut4Con.deq;
 
-        // let startPktSeqNum = cntrl.getNPSN;
+        // let startPktSeqNum = cntrl.cntrlStatus.getNPSN;
         let startPktSeqNum = npsnReg;
         let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } = calcPktNumNextAndEndPSN(
             startPktSeqNum,
             zeroExtend(pktLen),
-            cntrl.getPMTU
+            cntrl.cntrlStatus.getPMTU
         );
         // cntrl.setNPSN(nextPktSeqNum);
         npsnReg <= nextPktSeqNum;
@@ -115,7 +116,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
             fragNum      : truncate(totalFragNum),
             consumeInfo  : tagged SendWriteReqReadRespInfo DmaWriteMetaData {
                 initiator: DMA_INIT_SQ_WR,
-                sqpn     : cntrl.getSQPN,
+                sqpn     : cntrl.cntrlStatus.getSQPN,
                 startAddr: dontCareValue,
                 len      : pktLen,
                 psn      : startPktSeqNum
@@ -177,8 +178,9 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_4096;
 
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     FIFOF#(PayloadGenReq) payloadGenReqQ <- mkFIFOF;
     Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <-
@@ -204,7 +206,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     // - payloadGenerator.payloadDataStreamPipeOut
     // - segmentedPayloadPipeOut4Ref
 
-    rule genPayloadGenReq if (cntrl.isNonErr);
+    rule genPayloadGenReq if (cntrl.cntrlStatus.isNonErr);
         let pktLen = pktLenPipeOut4Gen.first;
         pktLenPipeOut4Gen.deq;
 
@@ -214,7 +216,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
             pmtu         : pmtu,
             dmaReadReq   : DmaReadReq {
                 initiator: DMA_INIT_SQ_RD,
-                sqpn     : cntrl.getSQPN,
+                sqpn     : cntrl.cntrlStatus.getSQPN,
                 startAddr: dontCareValue,
                 len      : zeroExtend(pktLen),
                 wrID     : dontCareValue
@@ -223,7 +225,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         payloadGenReqQ.enq(payloadGenReq);
     endrule
 
-    rule recvPayloadGenResp if (cntrl.isNonErr);
+    rule recvPayloadGenResp if (cntrl.cntrlStatus.isNonErr);
         let payloadGenResp = payloadGenerator.respPipeOut.first;
         payloadGenerator.respPipeOut.deq;
 
@@ -237,7 +239,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         );
     endrule
 
-    rule comparePayloadDataStream if (cntrl.isNonErr);
+    rule comparePayloadDataStream if (cntrl.cntrlStatus.isNonErr);
         let segmentedPayload = payloadGenerator.payloadDataStreamPipeOut.first;
         payloadGenerator.payloadDataStreamPipeOut.deq;
         let segmentedPayloadRef = segmentedPayloadPipeOut4Ref.first;

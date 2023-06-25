@@ -1,4 +1,3 @@
-import Array :: *;
 import BuildVector :: *;
 import ClientServer :: *;
 import Cntrs :: *;
@@ -14,6 +13,7 @@ import Headers :: *;
 import InputPktHandle :: *;
 import MetaData :: *;
 import PrimUtils :: *;
+import QueuePair :: *;
 import RetryHandleSQ :: *;
 import Settings :: *;
 import Utils :: *;
@@ -36,6 +36,13 @@ interface CountDown;
     method int   _read();
 endinterface
 
+function Action normalExit();
+    action
+        $info("time=%0t: normal finished", $time);
+        $finish(0);
+    endaction
+endfunction
+
 module mkCountDown#(Integer maxValue)(CountDown);
     Reg#(Long) cycleNumReg <- mkReg(0);
     Count#(int) cnt <- mkCount(fromInteger(maxValue));
@@ -49,7 +56,7 @@ module mkCountDown#(Integer maxValue)(CountDown);
         // $display("time=%0t: cycles=%0d, cmp cnt=%0d", $time, cycleNumReg, cnt);
 
         if (isZero(pack(cnt))) begin
-            $info("time=%0t: finished after %0d cycles", $time, cycleNumReg);
+            $info("time=%0t: normal finished after %0d cycles", $time, cycleNumReg);
             $finish(0);
         end
     endmethod
@@ -818,28 +825,28 @@ module mkExistingPendingWorkReqPipeOut#(
     FIFOF#(PendingWorkReq) pendingWorkReqOutQ <- mkFIFOF;
     let pendingWorkReqPipeOut = convertFifo2PipeOut(pendingWorkReqOutQ);
 
-    rule checkExpectedPSN if (cntrl.isRTR2RTS);
+    rule checkExpectedPSN if (cntrl.cntrlStatus.isRTR2RTS);
         immAssert(
-            cntrl.contextRQ.getEPSN == cntrl.getNPSN,
+            cntrl.contextRQ.getEPSN == cntrl.cntrlStatus.getNPSN,
             "ePSN == nPSN assertion @ mkExistingPendingWorkReqPipeOut",
             $format(
-                "cntrl.contextRQ.getEPSN=%h should == cntrl.getNPSN=%h",
-                cntrl.contextRQ.getEPSN, cntrl.getNPSN,
+                "cntrl.contextRQ.getEPSN=%h should == cntrl.cntrlStatus.getNPSN=%h",
+                cntrl.contextRQ.getEPSN, cntrl.cntrlStatus.getNPSN,
                 " which is required by mkExistingPendingWorkReqPipeOut"
             )
         );
     endrule
 
-    rule genExistingPendingWorkReq if (cntrl.isRTS);
+    rule genExistingPendingWorkReq if (cntrl.cntrlStatus.isRTS);
         let wr = workReqPipeIn.first;
         workReqPipeIn.deq;
 
-        let startPktSeqNum = cntrl.getNPSN;
+        let startPktSeqNum = cntrl.cntrlStatus.getNPSN;
         let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } =
             calcPktNumNextAndEndPSN(
                 startPktSeqNum,
                 wr.len,
-                cntrl.getPMTU
+                cntrl.cntrlStatus.getPMTU
             );
 
         cntrl.setNPSN(nextPktSeqNum);
@@ -1077,6 +1084,18 @@ module mkChange2CntrlStateRTS#(
     endrule
 endmodule
 
+module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(Controller);
+    let cntrl <- mkController;
+    let setExpectedPsnAsNextPSN = True;
+    let setZero2ExpectedPsnAndNextPSN = False;
+    let setCntrl2RTS <- mkChange2CntrlStateRTS(
+        cntrl.srvPort, qpType, pmtu,
+        setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    );
+    return cntrl;
+endmodule
+
+/*
 module mkSimController#(
     TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
 )(Controller);
@@ -1088,7 +1107,13 @@ module mkSimController#(
     );
     return cntrl;
 endmodule
-/*
+
+module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(Controller);
+    let setExpectedPsnAsNextPSN = True;
+    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    return cntrl;
+endmodule
+
 module mkSimController#(
     TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
 )(Controller);
@@ -1233,8 +1258,8 @@ module mkSimController#(
     return cntrl;
 endmodule
 */
-module mkSimPermCheckMR#(Bool mrCheckPassOrFail)(PermCheckMR);
-    FIFOF#(PermCheckInfo) checkReqQ <- mkFIFOF;
+module mkSimPermCheckSrv#(Bool mrCheckPassOrFail)(PermCheckSrv);
+    FIFOF#(PermCheckReq) checkReqQ <- mkFIFOF;
     FIFOF#(Bool) checkRespQ <- mkFIFOF;
 
     rule check;
@@ -1245,6 +1270,29 @@ module mkSimPermCheckMR#(Bool mrCheckPassOrFail)(PermCheckMR);
     return toGPServer(checkReqQ, checkRespQ);
 endmodule
 
+module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
+    let qp <- mkQP;
+    let setExpectedPsnAsNextPSN = True;
+    let setZero2ExpectedPsnAndNextPSN = True;
+    let setCntrl2RTS <- mkChange2CntrlStateRTS(
+        qp.srvPortQP, qpType, pmtu,
+        setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    );
+
+    interface srvPort = qp.srvPortQP;
+
+    method Bool isValidQP(QPN qpn) = qpn == getDefaultQPN;
+
+    method Maybe#(HandlerPD) getPD(QPN qpn);
+        return tagged Valid dontCareValue;
+    endmethod
+    method QueuePair getQueuePairByQPN(QPN qpn) = qp;
+    method QueuePair getQueuePairByIndexQP(IndexQP qpIndex) = qp;
+
+    method Bool notEmpty() = True;
+    method Bool notFull()  = True;
+endmodule
+/*
 module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
     // TODO: merge mkExistingPendingWorkReqPipeOut into here
     let setExpectedPsnAsNextPSN = True;
@@ -1267,7 +1315,7 @@ module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
     method Bool notEmpty() = True;
     method Bool notFull() = True;
 endmodule
-
+*/
 module mkSimGenRecvReq(Vector#(vSz, PipeOut#(RecvReq)));
     FIFOF#(RecvReq) recvReqQ <- mkFIFOF;
     PipeOut#(WorkReqID) recvReqIdPipeOut <- mkGenericRandomPipeOut;

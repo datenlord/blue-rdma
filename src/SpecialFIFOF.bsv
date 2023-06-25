@@ -83,8 +83,6 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
     function Bool  isAlmostFull() = isAllOnesR(removeMSB(itemCnt));
     function Bool isAlmostEmpty() = isOne(itemCnt);
 
-    // function Bool isScanCntZero() = isZero(scanCnt);
-
     (* no_implicit_conditions, fire_when_enabled *)
     rule clearAll if (clearReg[1]);
         enqPtrReg     <= 0;
@@ -97,13 +95,13 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
 
         pushReg[1]           <= tagged Invalid;
         popReg[1]            <= False;
-        clearReg[1]          <= False;
         preScanStartReg[1]   <= False;
         scanStartReg[1]      <= False;
         scanStopReg[1]       <= False;
         preScanRestartReg[1] <= False;
         scanDoneReg[1]       <= False;
 
+        clearReg[1]          <= False;
         // $display("time=%0t: clear ScanFIFOF", $time);
     endrule
 
@@ -291,7 +289,7 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule check;
+    rule check if (!clearReg[1]);
         immAssert(
             !(scanStartReg[1] && popReg[1]),
             "scanStartReg and popReg assertion @ mkScanFIFOF",

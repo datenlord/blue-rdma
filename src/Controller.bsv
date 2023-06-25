@@ -73,42 +73,38 @@ typedef struct {
 typedef Server#(ReqQP, RespQP) SrvPortQP;
 
 interface ContextRQ;
-    method PermCheckInfo getPermCheckInfo();
-    method Action        setPermCheckInfo(PermCheckInfo permCheckInfo);
-    method Length        getTotalDmaWriteLen();
-    method Action        setTotalDmaWriteLen(Length totalDmaWriteLen);
-    method Length        getRemainingDmaWriteLen();
-    method Action        setRemainingDmaWriteLen(Length remainingDmaWriteLen);
-    method ADDR          getNextDmaWriteAddr();
-    method Action        setNextDmaWriteAddr(ADDR nextDmaWriteAddr);
-    method PktNum        getSendWriteReqPktNum();
-    method Action        setSendWriteReqPktNum(PktNum sendWriteReqPktNum);
-    method RdmaOpCode    getPreReqOpCode();
-    method Action        setPreReqOpCode(RdmaOpCode preOpCode);
+    method PermCheckReq getPermCheckReq();
+    method Action       setPermCheckReq(PermCheckReq permCheckReq);
+    method Length       getTotalDmaWriteLen();
+    method Action       setTotalDmaWriteLen(Length totalDmaWriteLen);
+    method Length       getRemainingDmaWriteLen();
+    method Action       setRemainingDmaWriteLen(Length remainingDmaWriteLen);
+    method ADDR         getNextDmaWriteAddr();
+    method Action       setNextDmaWriteAddr(ADDR nextDmaWriteAddr);
+    method PktNum       getSendWriteReqPktNum();
+    method Action       setSendWriteReqPktNum(PktNum sendWriteReqPktNum);
+    method RdmaOpCode   getPreReqOpCode();
+    method Action       setPreReqOpCode(RdmaOpCode preOpCode);
     // method PendingReqCnt getCoalesceWorkReqCnt();
     // method Action        setCoalesceWorkReqCnt(PendingReqCnt coalesceWorkReqCnt);
     // method PendingReqCnt getPendingDestReadAtomicReqCnt();
     // method Action        setPendingDestReadAtomicReqCnt(PendingReqCnt pendingDestReadAtomicReqCnt);
-    method Epoch         getEpoch();
-    method Action        incEpoch();
-    method MSN           getMSN();
-    method Action        setMSN(MSN msn);
-    method Bool          getIsRespPktNumZero();
-    method PktNum        getRespPktNum();
-    method Action        setRespPktNum(PktNum respPktNum);
-    method PSN           getCurRespPSN();
-    method Action        setCurRespPSN(PSN curRespPsn);
-    method PSN           getEPSN();
-    method Action        setEPSN(PSN psn);
-    method Action        restorePreReqOpCodeAndEPSN(RdmaOpCode preOpCode, PSN psn);
-    // method Action        restorePreReqOpCode(RdmaOpCode preOpCode);
-    // method Action        restoreEPSN(PSN psn);
+    method Epoch        getEpoch();
+    method Action       incEpoch();
+    method MSN          getMSN();
+    method Action       setMSN(MSN msn);
+    method Bool         getIsRespPktNumZero();
+    method PktNum       getRespPktNum();
+    method Action       setRespPktNum(PktNum respPktNum);
+    method PSN          getCurRespPSN();
+    method Action       setCurRespPSN(PSN curRespPsn);
+    method PSN          getEPSN();
+    method Action       setEPSN(PSN psn);
+    method Action       restorePreReqOpCodeAndEPSN(RdmaOpCode preOpCode, PSN psn);
 endinterface
 
-interface Controller;
-    interface SrvPortQP srvPort;
-    interface ContextRQ contextRQ;
-
+interface CntrlStatus;
+    // method StateQP getQPS();
     method Bool isERR();
     method Bool isInit();
     method Bool isReset();
@@ -119,17 +115,14 @@ interface Controller;
 
     method Bool isRTR2RTS();
     method Bool isStableRTS();
-    // method StateQP getQPS();
-    method Action setStateErr();
-    method Action errFlushDone();
 
     method TypeQP getTypeQP();
     method FlagsType#(MemAccessTypeFlag) getAccessFlags();
 
-    method RetryCnt getMaxRnrCnt();
-    method RetryCnt getMaxRetryCnt();
+    method RetryCnt     getMaxRnrCnt();
+    method RetryCnt     getMaxRetryCnt();
+    method RnrTimer     getMinRnrTimer();
     method TimeOutTimer getMaxTimeOut();
-    method RnrTimer getMinRnrTimer();
 
     method PendingReqCnt getPendingWorkReqNum();
     method PendingReqCnt getPendingRecvReqNum();
@@ -137,12 +130,54 @@ interface Controller;
     method PendingReqCnt getPendingDestReadAtomicReqNum();
     method Bool getSigAll();
 
-    method QPN getSQPN();
-    method QPN getDQPN();
+    method QPN  getSQPN();
+    method QPN  getDQPN();
     method PKEY getPKEY();
     method QKEY getQKEY();
     method PMTU getPMTU();
-    method PSN getNPSN();
+    method PSN  getNPSN();
+endinterface
+
+interface Controller;
+    interface SrvPortQP srvPort;
+    interface ContextRQ contextRQ;
+
+    method Action setStateErr();
+    method Action errFlushDone();
+
+    interface CntrlStatus cntrlStatus;
+    // // method StateQP getQPS();
+    // method Bool isERR();
+    // method Bool isInit();
+    // method Bool isReset();
+    // method Bool isRTR();
+    // method Bool isRTS();
+    // method Bool isNonErr();
+    // method Bool isSQD();
+
+    // method Bool isRTR2RTS();
+    // method Bool isStableRTS();
+
+    // method TypeQP getTypeQP();
+    // method FlagsType#(MemAccessTypeFlag) getAccessFlags();
+
+    // method RetryCnt     getMaxRnrCnt();
+    // method RetryCnt     getMaxRetryCnt();
+    // method RnrTimer     getMinRnrTimer();
+    // method TimeOutTimer getMaxTimeOut();
+
+    // method PendingReqCnt getPendingWorkReqNum();
+    // method PendingReqCnt getPendingRecvReqNum();
+    // method PendingReqCnt getPendingReadAtomicReqNum();
+    // method PendingReqCnt getPendingDestReadAtomicReqNum();
+    // method Bool getSigAll();
+
+    // method QPN  getSQPN();
+    // method QPN  getDQPN();
+    // method PKEY getPKEY();
+    // method QKEY getQKEY();
+    // method PMTU getPMTU();
+    // method PSN  getNPSN();
     method Action setNPSN(PSN psn);
 endinterface
 
@@ -196,7 +231,7 @@ module mkController(Controller);
     Bool inited = stateReg != IBV_QPS_RESET && stateReg != IBV_QPS_UNKNOWN;
 
     // ContextRQ related
-    Reg#(PermCheckInfo) permCheckInfoReg <- mkRegU;
+    Reg#(PermCheckReq) permCheckReqReg <- mkRegU;
     Reg#(Length)     totalDmaWriteLenReg <- mkRegU;
     Reg#(Length) remainingDmaWriteLenReg <- mkRegU;
     Reg#(ADDR)       nextDmaWriteAddrReg <- mkRegU;
@@ -692,18 +727,6 @@ module mkController(Controller);
         setStateErrReg[1] <= False;
     endrule
 
-    method Bool isERR()    = stateReg == IBV_QPS_ERR;
-    method Bool isInit()   = stateReg == IBV_QPS_INIT;
-    method Bool isNonErr() = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD;
-    method Bool isReset()  = stateReg == IBV_QPS_UNKNOWN || stateReg == IBV_QPS_RESET;
-    method Bool isRTR()    = stateReg == IBV_QPS_RTR;
-    method Bool isRTS()    = stateReg == IBV_QPS_RTS;
-    method Bool isSQD()    = stateReg == IBV_QPS_SQD;
-
-    // method StateQP getQPS() = stateReg;
-    method Bool   isRTR2RTS() = preStateReg == IBV_QPS_RTR && stateReg == IBV_QPS_RTS;
-    method Bool isStableRTS() = preStateReg == IBV_QPS_RTS && stateReg == IBV_QPS_RTS;
-
     // method Action setStateReset() if (inited && stateReg == IBV_QPS_ERR && errFlushDoneReg);
     //     stateReg <= IBV_QPS_RESET;
     // endmethod
@@ -726,26 +749,40 @@ module mkController(Controller);
         errFlushDoneReg <= True;
     endmethod
 
-    method TypeQP getTypeQP() if (inited) = qpTypeReg;
-    method FlagsType#(MemAccessTypeFlag) getAccessFlags() if (inited) = qpAccessFlagsReg;
+    interface cntrlStatus = interface CntrlStatus;
+        // method StateQP getQPS() = stateReg;
+        method Bool isERR()    = stateReg == IBV_QPS_ERR;
+        method Bool isInit()   = stateReg == IBV_QPS_INIT;
+        method Bool isNonErr() = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD;
+        method Bool isReset()  = stateReg == IBV_QPS_UNKNOWN || stateReg == IBV_QPS_RESET;
+        method Bool isRTR()    = stateReg == IBV_QPS_RTR;
+        method Bool isRTS()    = stateReg == IBV_QPS_RTS;
+        method Bool isSQD()    = stateReg == IBV_QPS_SQD;
 
-    method RetryCnt      getMaxRnrCnt() if (inited) = maxRnrCntReg;
-    method RetryCnt    getMaxRetryCnt() if (inited) = maxRetryCntReg;
-    method TimeOutTimer getMaxTimeOut() if (inited) = maxTimeOutReg;
-    method RnrTimer    getMinRnrTimer() if (inited) = minRnrTimerReg;
+        method Bool   isRTR2RTS() = preStateReg == IBV_QPS_RTR && stateReg == IBV_QPS_RTS;
+        method Bool isStableRTS() = preStateReg == IBV_QPS_RTS && stateReg == IBV_QPS_RTS;
 
-    method PendingReqCnt getPendingWorkReqNum() if (inited) = pendingWorkReqNumReg;
-    method PendingReqCnt getPendingRecvReqNum() if (inited) = pendingRecvReqNumReg;
-    method PendingReqCnt     getPendingReadAtomicReqNum() if (inited) = pendingReadAtomicReqNumReg;
-    method PendingReqCnt getPendingDestReadAtomicReqNum() if (inited) = pendingDestReadAtomicReqNumReg;
+        method TypeQP getTypeQP() if (inited) = qpTypeReg;
+        method FlagsType#(MemAccessTypeFlag) getAccessFlags() if (inited) = qpAccessFlagsReg;
 
-    method Bool getSigAll() if (inited) = sqSigAllReg;
-    method PSN  getSQPN()   if (inited) = sqpnReg;
-    method PSN  getDQPN()   if (inited) = dqpnReg;
-    method PKEY getPKEY()   if (inited) = pkeyReg;
-    method QKEY getQKEY()   if (inited) = qkeyReg;
-    method PMTU getPMTU()   if (inited) = pmtuReg;
-    method PSN  getNPSN()   if (inited) = npsnReg;
+        method RetryCnt      getMaxRnrCnt() if (inited) = maxRnrCntReg;
+        method RetryCnt    getMaxRetryCnt() if (inited) = maxRetryCntReg;
+        method TimeOutTimer getMaxTimeOut() if (inited) = maxTimeOutReg;
+        method RnrTimer    getMinRnrTimer() if (inited) = minRnrTimerReg;
+
+        method PendingReqCnt getPendingWorkReqNum() if (inited) = pendingWorkReqNumReg;
+        method PendingReqCnt getPendingRecvReqNum() if (inited) = pendingRecvReqNumReg;
+        method PendingReqCnt     getPendingReadAtomicReqNum() if (inited) = pendingReadAtomicReqNumReg;
+        method PendingReqCnt getPendingDestReadAtomicReqNum() if (inited) = pendingDestReadAtomicReqNumReg;
+
+        method Bool getSigAll() if (inited) = sqSigAllReg;
+        method PSN  getSQPN()   if (inited) = sqpnReg;
+        method PSN  getDQPN()   if (inited) = dqpnReg;
+        method PKEY getPKEY()   if (inited) = pkeyReg;
+        method QKEY getQKEY()   if (inited) = qkeyReg;
+        method PMTU getPMTU()   if (inited) = pmtuReg;
+        method PSN  getNPSN()   if (inited) = npsnReg;
+    endinterface;
 
     method Action setNPSN(PSN psn);
         npsnReg <= psn;
@@ -754,9 +791,9 @@ module mkController(Controller);
     interface srvPort = toGPServer(reqQ, respQ);
 
     interface contextRQ = interface ContextRQ;
-        method PermCheckInfo getPermCheckInfo() if (inited) = permCheckInfoReg;
-        method Action        setPermCheckInfo(PermCheckInfo permCheckInfo) if (inited);
-            permCheckInfoReg <= permCheckInfo;
+        method PermCheckReq getPermCheckReq() if (inited) = permCheckReqReg;
+        method Action        setPermCheckReq(PermCheckReq permCheckReq) if (inited);
+            permCheckReqReg <= permCheckReq;
         endmethod
 
         method Length getTotalDmaWriteLen() if (inited) = totalDmaWriteLenReg;

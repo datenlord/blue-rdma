@@ -16,7 +16,8 @@ import ReqHandleRQ :: *;
 import SpecialFIFOF :: *;
 import Settings :: *;
 import SimDma :: *;
-import SimGenRdmaReqAndResp :: *;
+import SimExtractRdmaHeaderPayload :: *;
+import SimGenRdmaReqResp :: *;
 import Utils :: *;
 import Utils4Test :: *;
 import WorkCompGen :: *;
@@ -28,9 +29,10 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     let minReadWorkReqLen = valueOf(TMul#(TMul#(3, DATA_BUS_BYTE_WIDTH), MAX_QP_DST_RD_ATOM));
     let maxReadWorkReqLen = valueOf(TMul#(TMul#(3, DATA_BUS_BYTE_WIDTH), MAX_QP_DST_RD_ATOM));
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     Vector#(1, PipeOut#(WorkReq)) readAtomicWorkReqPipeOutVec <- mkRandomReadWorkReq( // mkRandomReadOrAtomicWorkReq(
         fromInteger(minReadWorkReqLen), fromInteger(maxReadWorkReqLen)
@@ -59,18 +61,21 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     ));
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = False;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaReqPipeOut
     );
+    // let isRespPktPipeIn = False;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     FIFOF#(RecvReq) recvReqQ <- mkFIFOF;
     let recvReqBuf = convertFifo2PipeOut(recvReqQ);
@@ -79,7 +84,7 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     let dut <- mkReqHandleRQ(
         cntrl,
         simDmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
         pktMetaDataPipeIn
@@ -230,9 +235,10 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <- mkRandomSendOrWriteImmWorkReqWithNoAck(
@@ -267,18 +273,21 @@ module mkTestReqHandleNoAckReqCase(Empty);
     ));
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = False;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaReqPipeOut
     );
+    // let isRespPktPipeIn = False;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     // RecvReq
     Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -290,7 +299,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let dut <- mkReqHandleRQ(
         cntrl,
         simDmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
         pktMetaDataPipeIn
@@ -443,7 +452,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
                 )
             );
 
-            pendingWorkReqCnt <= cntrl.getPendingWorkReqNum - 1;
+            pendingWorkReqCnt <= cntrl.cntrlStatus.getPendingWorkReqNum - 1;
         end
         else begin
             pendingWorkReqCnt.decr(1);
@@ -524,9 +533,10 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <- mkRandomWorkReq(
@@ -583,18 +593,21 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     );
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = False;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaReqPipeOut
     );
+    // let isRespPktPipeIn = False;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     // RecvReq
     Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -605,7 +618,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let dut <- mkReqHandleRQ(
         cntrl,
         simDmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
         pktMetaDataPipeIn
@@ -919,9 +932,10 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     Vector#(1, PipeOut#(Bool)) selectPipeOutVec <- mkGenericRandomPipeOutVec;
@@ -967,18 +981,21 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     ));
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = False;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        rdmaReqPipeOut
     );
+    // let isRespPktPipeIn = False;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, rdmaReqPipeOut, qpMetaData
+    // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
     // MR permission check
     let mrCheckPassOrFail = !(errType == REQ_HANDLE_PERM_CHECK_FAIL);
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     // RecvReq
     Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -989,7 +1006,7 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     let dut <- mkReqHandleRQ(
         cntrl,
         simDmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
         pktMetaDataPipeIn
@@ -1202,9 +1219,10 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     Vector#(1, PipeOut#(Bool)) selectPipeOutVec <- mkGenericRandomPipeOutVec;
@@ -1238,18 +1256,21 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     FIFOF#(DataStream) rdmaReqDataStreamQ <- mkFIFOF;
 
     // Build RdmaPktMetaData and payload DataStream
-    let isRespPktPipeIn = False;
-    let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-        isRespPktPipeIn, convertFifo2PipeOut(rdmaReqDataStreamQ), qpMetaData
+    let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
+        convertFifo2PipeOut(rdmaReqDataStreamQ)
     );
+    // let isRespPktPipeIn = False;
+    // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
+    //     isRespPktPipeIn, convertFifo2PipeOut(rdmaReqDataStreamQ), qpMetaData
+    // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
     // MR permission check
     let mrCheckPassOrFail = True;
-    let permCheckMR <- mkSimPermCheckMR(mrCheckPassOrFail);
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
 
     // RecvReq
     Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -1261,7 +1282,7 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     let dut <- mkReqHandleRQ(
         cntrl,
         simDmaReadSrv,
-        permCheckMR,
+        permCheckSrv,
         dupReadAtomicCache,
         convertFifo2PipeOut(recvReqQ4Retry),
         pktMetaDataPipeIn

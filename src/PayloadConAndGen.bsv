@@ -12,11 +12,6 @@ import DataTypes :: *;
 import PrimUtils :: *;
 import Utils :: *;
 
-// interface Server#(type req_type, type resp_type);
-//     interface Put#(req_type) request;
-//     interface Get#(resp_type) response;
-// endinterface: Server
-
 // TODO: add clearAndReset rule
 module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
     PipeOut#(anytype)
@@ -74,7 +69,7 @@ module mkPayloadGenerator#(
     Reg#(Bool)      isFragCntZeroReg <- mkReg(False);
     Reg#(Bool)      isNormalStateReg <- mkReg(True);
 
-    rule clearAndReset if (cntrl.isReset);
+    rule clearAndReset if (cntrl.cntrlStatus.isReset);
         payloadGenRespQ.clear;
 
         pendingGenReqQ.clear;
@@ -93,7 +88,7 @@ module mkPayloadGenerator#(
         // $display("time=%0t: clearAndReset @ mkPayloadGenerator", $time);
     endrule
 
-    rule recvPayloadGenReq if (cntrl.isNonErr && isNormalStateReg);
+    rule recvPayloadGenReq if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
         let payloadGenReq = payloadGenReqPipeIn.first;
         payloadGenReqPipeIn.deq;
         immAssert(
@@ -127,7 +122,7 @@ module mkPayloadGenerator#(
         dmaReadSrv.request.put(payloadGenReq.dmaReadReq);
     endrule
 
-    rule lastFragAddPadding if (cntrl.isNonErr && isNormalStateReg);
+    rule lastFragAddPadding if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
         let dmaReadResp <- dmaReadSrv.response.get;
         let { payloadGenReq, lastFragByteEnWithPadding, pmtuFragNum } = pendingGenReqQ.first;
 
@@ -161,7 +156,7 @@ module mkPayloadGenerator#(
         // end
     endrule
 
-    rule segmentPayload if (cntrl.isNonErr && isNormalStateReg);
+    rule segmentPayload if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
         let { curData, hasDmaRespErr, isOrigLastFrag } = payloadSegmentQ.first;
         payloadSegmentQ.deq;
 
@@ -219,21 +214,21 @@ module mkPayloadGenerator#(
         payloadBufQ.enq(curData);
     endrule
 
-    rule flushDmaReadResp if (cntrl.isERR || (cntrl.isNonErr && !isNormalStateReg));
+    rule flushDmaReadResp if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
         let dmaReadResp <- dmaReadSrv.response.get;
     endrule
 
-    rule flushPayloadGenReqPipeIn if (cntrl.isERR || (cntrl.isNonErr && !isNormalStateReg));
+    rule flushPayloadGenReqPipeIn if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
         payloadGenReqPipeIn.deq;
     endrule
 
-    rule flushPipelineQ if (cntrl.isERR || (cntrl.isNonErr && !isNormalStateReg));
+    rule flushPipelineQ if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
         pendingGenReqQ.clear;
         pendingGenRespQ.clear;
         payloadSegmentQ.clear;
     endrule
 
-    rule flushRespQ if (cntrl.isERR);
+    rule flushRespQ if (cntrl.cntrlStatus.isERR);
         // Response related queues cannot be cleared once isNormalStateReg is False,
         // since some payload DataStream in payloadBufQ might be still under processing.
         payloadGenRespQ.clear;
@@ -274,7 +269,7 @@ module mkPayloadConsumer#(
     Reg#(Bool)       isFirstOrOnlyFragReg <- mkReg(True);
     // Reg#(Bool) busyReg <- mkReg(False);
 
-    rule clearAndReset if (cntrl.isReset);
+    rule clearAndReset if (cntrl.cntrlStatus.isReset);
         consumeRespQ.clear;
         countReqFragQ.clear;
         pendingConReqQ.clear;
@@ -305,7 +300,7 @@ module mkPayloadConsumer#(
         endaction
     endfunction
 
-    rule recvReq if (cntrl.isNonErr || cntrl.isERR);
+    rule recvReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
         let consumeReq = payloadConReqPipeIn.first;
         payloadConReqPipeIn.deq;
 
@@ -358,7 +353,7 @@ module mkPayloadConsumer#(
         // ));
     endrule
 
-    rule countReqFrag if (cntrl.isNonErr || cntrl.isERR);
+    rule countReqFrag if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
         let { consumeReq, isFragNumLessOrEqOne } = countReqFragQ.first;
 
         let isLastReqFrag = isFragNumLessOrEqOne ? True : isRemainingFragNumZeroReg;
@@ -392,7 +387,7 @@ module mkPayloadConsumer#(
         // );
     endrule
 
-    rule consumePayload if (cntrl.isNonErr || cntrl.isERR);
+    rule consumePayload if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
         let {
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFrag, isLastReqFrag
         } = pendingConReqQ.first;
@@ -541,7 +536,7 @@ module mkPayloadConsumer#(
         endcase
     endrule
 
-    rule issueDmaReq if (cntrl.isNonErr);
+    rule issueDmaReq if (cntrl.cntrlStatus.isNonErr);
         let { consumeReq, payload } = pendingDmaReqQ.first;
         pendingDmaReqQ.deq;
 
@@ -580,7 +575,7 @@ module mkPayloadConsumer#(
         endcase
     endrule
 
-    rule genConResp if (cntrl.isNonErr);
+    rule genConResp if (cntrl.cntrlStatus.isNonErr);
         let dmaWriteResp <- dmaWriteSrv.response.get;
         let consumeReq = genConRespQ.first;
         genConRespQ.deq;
@@ -651,21 +646,21 @@ module mkPayloadConsumer#(
     // When error, continue send DMA write requests,
     // so as to flush payload data properly later.
     // But discard DMA write responses when error.
-    rule flushDmaWriteResp if (cntrl.isERR);
+    rule flushDmaWriteResp if (cntrl.cntrlStatus.isERR);
         let dmaWriteResp <- dmaWriteSrv.response.get;
     endrule
 
-    // rule flushPayloadBufPipeOut if (cntrl.isERR);
+    // rule flushPayloadBufPipeOut if (cntrl.cntrlStatus.isERR);
     //     payloadBufPipeOut.deq;
     // endrule
 
-    rule flushPipelineQ if (cntrl.isERR);
+    rule flushPipelineQ if (cntrl.cntrlStatus.isERR);
         payloadBufQ.clear;
         pendingConReqQ.clear;
         pendingDmaReqQ.clear;
     endrule
 
-    rule flushPayloadConResp if (cntrl.isERR);
+    rule flushPayloadConResp if (cntrl.cntrlStatus.isERR);
         consumeRespQ.clear;
     endrule
 

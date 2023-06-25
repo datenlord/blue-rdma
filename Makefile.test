@@ -3,7 +3,8 @@ LOGDIR ?= $(abspath ../tmp)
 
 TESTBENCHS = \
             SimDma.bsv \
-            SimGenRdmaReqAndResp.bsv \
+            SimExtractRdmaHeaderPayload.bsv \
+            SimGenRdmaReqResp.bsv \
             TestArbitration.bsv \
             TestController.bsv \
             TestDupReadAtomicCache.bsv \
@@ -11,6 +12,7 @@ TESTBENCHS = \
             TestInputPktHandle.bsv \
             TestMetaData.bsv \
             TestPayloadConAndGen.bsv \
+            TestQueuePair.bsv \
             TestReqGenSQ.bsv \
             TestReqHandleRQ.bsv \
             TestRespHandleSQ.bsv \
@@ -20,7 +22,8 @@ TESTBENCHS = \
             TestWorkCompGen.bsv
 
 SimDma.bsv                       = mkTestFixedLenSimDataStreamPipeOut
-SimGenRdmaReqAndResp.bsv         = mkTestSimGenRdmaResp
+SimExtractRdmaHeaderPayload.bsv  = mkTestSimExtractNormalHeaderPayload
+SimGenRdmaReqResp.bsv            = mkTestSimGenRdmaResp
 TestArbitration.bsv              = mkTestPipeOutArbiter \
                                     mkTestServerArbiter \
                                     mkTestClientArbiter
@@ -39,14 +42,13 @@ TestInputPktHandle.bsv           = mkTestCalculateRandomPktLen \
 TestMetaData.bsv                 = mkTestMetaDataMRs \
                                     mkTestMetaDataPDs \
                                     mkTestMetaDataQPs \
-                                    mkTestPermCheckMR \
+                                    mkTestPermCheckSrv \
                                     mkTestMetaDataSrv \
                                     mkTestBramCache \
                                     mkTestTLB
 TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
                                     mkTestPayloadGenSegmentAndPaddingCase
-TestQueuePair.bsv                = mkTestSimExtractNormalRdmaHeader \
-                                    mkTestQueuePairTimeOutErrCase \
+TestQueuePair.bsv                = mkTestQueuePairTimeOutErrCase \
                                     mkTestQueuePairNormalCase
 TestReqGenSQ.bsv                 = mkTestReqGenNormalCase \
                                     mkTestReqGenZeroLenCase \

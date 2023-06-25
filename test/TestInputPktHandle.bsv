@@ -9,8 +9,9 @@ import Headers :: *;
 import InputPktHandle :: *;
 import MetaData :: *;
 import PrimUtils :: *;
+import QueuePair :: *;
 import Settings :: *;
-import SimGenRdmaReqAndResp :: *;
+import SimGenRdmaReqResp :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
@@ -21,9 +22,9 @@ module mkTestReceiveCNP(Empty);
 
     let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let qp = qpMetaData.getQueuePairByIndexQP(qpIndex);
 
-    let cnpDataStream = buildCNP(cntrl);
+    let cnpDataStream = buildCNP(qp.cntrlStatus);
     let cnpDataStreamPipeIn <- mkConstantPipeOut(cnpDataStream);
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         cnpDataStreamPipeIn

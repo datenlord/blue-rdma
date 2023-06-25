@@ -7,7 +7,6 @@ import Controller :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
 import InputPktHandle :: *;
-import MetaData :: *;
 import PayloadConAndGen :: *;
 import PrimUtils :: *;
 import ReqGenSQ :: *;
@@ -27,8 +26,9 @@ module mkSimGenRdmaReqAndSendWritePayloadPipeOut#(
     TypeQP qpType,
     PMTU pmtu
 )(RdmaReqAndSendWritePayloadAndPendingWorkReq);
-    let setExpectedPsnAsNextPSN = False;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let setExpectedPsnAsNextPSN = False;
+    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     // Assume no pending WR
@@ -100,7 +100,7 @@ function Maybe#(RdmaOpCode) genMiddleOrLastRdmaOpCode(WorkReqOpCode wrOpCode, Bo
 endfunction
 
 function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(PendingWorkReq pendingWR, Controller cntrl, Bool isOnlyRespPkt, MSN msn);
-    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
+    let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
     let maybeOpCode = genFirstOrOnlyRdmaOpCode(pendingWR.wr.opcode, isOnlyRespPkt);
     let isReadWR = isReadWorkReq(pendingWR.wr.opcode);
 
@@ -117,11 +117,11 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(PendingWorkReq pendingWR, C
             migReq   : unpack(0),
             padCnt   : (isOnlyRespPkt && isReadWR) ? calcPadCnt(pendingWR.wr.len) : 0,
             tver     : unpack(0),
-            pkey     : cntrl.getPKEY,
+            pkey     : cntrl.cntrlStatus.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
-            dqpn     : cntrl.getSQPN, // DQPN of response is SQPN
+            dqpn     : cntrl.cntrlStatus.getSQPN, // DQPN of response is SQPN
             ackReq   : False,
             resv7    : unpack(0),
             psn      : isReadWR ? startPSN : endPSN
@@ -170,7 +170,7 @@ endfunction
 function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
     PendingWorkReq pendingWR, Controller cntrl, PSN psn, Bool isLastRespPkt, MSN msn
 );
-    let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
+    let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
     let maybeOpCode = genMiddleOrLastRdmaOpCode(pendingWR.wr.opcode, isLastRespPkt);
     let isReadWR = isReadWorkReq(pendingWR.wr.opcode);
     let isZeroLenWR = isZero(pendingWR.wr.len);
@@ -189,11 +189,11 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
             migReq   : unpack(0),
             padCnt   : isLastRespPkt ? calcPadCnt(pendingWR.wr.len) : 0,
             tver     : unpack(0),
-            pkey     : cntrl.getPKEY,
+            pkey     : cntrl.cntrlStatus.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
-            dqpn     : cntrl.getSQPN, // DQPN of response is SQPN
+            dqpn     : cntrl.cntrlStatus.getSQPN, // DQPN of response is SQPN
             ackReq   : False,
             resv7    : unpack(0),
             psn      : psn
@@ -225,7 +225,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
     end
 endfunction
 
-function DataStream buildCNP(Controller cntrl) provisos(
+function DataStream buildCNP(CntrlStatus cntrlStatus) provisos(
     NumAlias#(TAdd#(BTH_BYTE_WIDTH, CNP_PAYLOAD_BYTE_WIDTH), cnpPktByteSz),
     Add#(cnpPktByteSz, anysize, DATA_BUS_BYTE_WIDTH) // cnpPktByteSz <= DATA_BUS_BYTE_WIDTH
 );
@@ -236,11 +236,11 @@ function DataStream buildCNP(Controller cntrl) provisos(
         migReq   : unpack(0),
         padCnt   : 0,
         tver     : unpack(0),
-        pkey     : cntrl.getPKEY,
+        pkey     : cntrlStatus.getPKEY,
         fecn     : unpack(0),
         becn     : unpack(0),
         resv6    : unpack(0),
-        dqpn     : cntrl.getSQPN, // DQPN of response is SQPN
+        dqpn     : cntrlStatus.getSQPN, // DQPN of response is SQPN
         ackReq   : False,
         resv7    : unpack(0),
         psn      : 0
@@ -301,11 +301,11 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
         // $display("time=%0t: received PendingWorkReq=", $time, fshow(curPendingWR));
 
         immAssert(
-            curPendingWR.wr.sqpn == cntrl.getSQPN,
+            curPendingWR.wr.sqpn == cntrl.cntrlStatus.getSQPN,
             "curPendingWR.wr.sqpn assertion @ mkSimGenRdmaRespHeaderAndDataStream",
             $format(
-                "curPendingWR.wr.sqpn=%h should == cntrl.getSQPN=%h",
-                curPendingWR.wr.sqpn, cntrl.getSQPN
+                "curPendingWR.wr.sqpn=%h should == cntrl.cntrlStatus.getSQPN=%h",
+                curPendingWR.wr.sqpn, cntrl.cntrlStatus.getSQPN
             )
         );
         immAssert(
@@ -347,10 +347,10 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
                 let payloadGenReq = PayloadGenReq {
                     addPadding   : True,
                     segment      : True,
-                    pmtu         : cntrl.getPMTU,
+                    pmtu         : cntrl.cntrlStatus.getPMTU,
                     dmaReadReq   : DmaReadReq {
                         initiator: DMA_INIT_SQ_RD,
-                        sqpn     : cntrl.getSQPN,
+                        sqpn     : cntrl.cntrlStatus.getSQPN,
                         startAddr: curPendingWR.wr.laddr,
                         len      : curPendingWR.wr.len,
                         wrID     : curPendingWR.wr.id
@@ -464,7 +464,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
     );
 
     rule genRespAck;
-        let maybeTrans  = qpType2TransType(cntrl.getTypeQP);
+        let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
         immAssert(
             isValid(maybeTrans),
             "maybeTrans assertion @ mkGenErrRdmaResp",
@@ -511,11 +511,11 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
             migReq   : unpack(0),
             padCnt   : 0,
             tver     : unpack(0),
-            pkey     : cntrl.getPKEY,
+            pkey     : cntrl.cntrlStatus.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
-            dqpn     : cntrl.getSQPN, // DQPN of response is SQPN
+            dqpn     : cntrl.cntrlStatus.getSQPN, // DQPN of response is SQPN
             ackReq   : False,
             resv7    : unpack(0),
             psn      : bthPSN
@@ -530,7 +530,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
             GEN_RDMA_RESP_ACK_RNR: AETH {
                 rsvd : unpack(0),
                 code : AETH_CODE_RNR,
-                value: cntrl.getMinRnrTimer,
+                value: cntrl.cntrlStatus.getMinRnrTimer,
                 msn  : dontCareValue
             };
             GEN_RDMA_RESP_ACK_SEQ_ERR: AETH {
@@ -569,9 +569,10 @@ module mkTestSimGenRdmaResp(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-    let qpIndex = getDefaultIndexQP;
-    let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
+    // let qpIndex = getDefaultIndexQP;
+    // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
 
     // WorkReq generation
     Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <-

@@ -8,6 +8,7 @@ import ExtractAndPrependPipeOut :: *;
 import Headers :: *;
 import MetaData :: *;
 import PrimUtils :: *;
+import QueuePair :: *;
 import Settings :: *;
 import Utils :: *;
 
@@ -74,13 +75,13 @@ function Bool padCntCheckRespHeader(BTH bth, AETH aeth);
 endfunction
 
 // TODO: check XRC domain match
-function Bool validateHeader(TransType transType, QKEY qkey, Controller cntrl, Bool isRespPkt);
-    let transTypeMatch = transTypeMatchQpType(transType, cntrl.getTypeQP);
-    let qpStateMatch = isRespPkt ? cntrl.isRTS : cntrl.isNonErr;
+function Bool validateHeader(TransType transType, QKEY qkey, CntrlStatus cntrlStatus, Bool isRespPkt);
+    let transTypeMatch = transTypeMatchQpType(transType, cntrlStatus.getTypeQP);
+    let qpStateMatch = isRespPkt ? cntrlStatus.isRTS : cntrlStatus.isNonErr;
     // UD has no responses
-    let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrl.getQKEY : True;
+    let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrlStatus.getQKEY : True;
     // TODO: verify RoCEv2 only use default PKEY
-    // let pKeyMatch = isDefaultPKEY(cntrl.getPKEY);
+    // let pKeyMatch = isDefaultPKEY(cntrlStatus.getPKEY);
     return transTypeMatch && qpStateMatch && qKeyMatch;
 endfunction
 
@@ -152,11 +153,6 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
     endinterface;
     interface payload = headerAndPayloadPipeOut.payload;
 endmodule
-
-interface RdmaPktMetaDataAndPayloadPipeOut;
-    interface PipeOut#(RdmaPktMetaData) pktMetaData;
-    interface DataStreamPipeOut payload;
-endinterface
 
 interface InputRdmaPktBuf;
     interface RdmaPktMetaDataAndPayloadPipeOut reqPktPipeOut;
@@ -419,7 +415,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             let isFirstOrMidPkt = headerValidateInfo.isFirstOrMidPkt;
             let isLastOrOnlyPkt = headerValidateInfo.isLastOrOnlyPkt;
 
-            let cntrl = qpMetaData.getCntrlByQPN(headerValidateInfo.dqpn);
+            let qp = qpMetaData.getQueuePairByQPN(headerValidateInfo.dqpn);
             let isValidHeader = False;
             let pdHandler = dontCareValue;
             if (headerValidateInfo.maybePdHandler matches tagged Valid .pdh) begin
@@ -428,16 +424,16 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 isValidHeader = validateHeader(
                     bth.trans,
                     headerValidateInfo.qkeyDETH,
-                    cntrl,
+                    qp.cntrlStatus,
                     isRespPkt || isCNP
                 );
             end
 
             // immAssert(
-            //     cntrl.isStableRTS && isValidHeader,
+            //     cntrl.cntrlStatus.isStableRTS && isValidHeader,
             //     "isStableRTS and isValidHeader assertion @ mkInputRdmaPktBufAndHeaderValidation",
             //     $format(
-            //         "cntrl.isStableRTS=", fshow(cntrl.isStableRTS),
+            //         "cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS),
             //         " isValidHeader=", fshow(isValidHeader),
             //         " should both be true"
             //     )
@@ -445,7 +441,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
             let validHeaderInfo = ValidHeaderInfo {
                 pdHandler      : pdHandler,
-                pmtu           : cntrl.getPMTU,
+                pmtu           : qp.cntrlStatus.getPMTU,
                 isValidHeader  : isValidHeader,
                 isCNP          : isCNP,
                 isRespPkt      : isRespPkt,

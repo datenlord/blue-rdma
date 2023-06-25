@@ -496,7 +496,9 @@ typedef struct {
 // No need to consider concurrent search and insert,
 // since ReqHandleRQ garrentees insert before search.
 module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
-    function Tuple5#(PMTU, Bool, Bool, ReadCacheItem, ReadCacheItem) buildDupReadSearchData(
+    function Tuple6#(
+        PMTU, Bool, Bool, Bool, ReadCacheItem, ReadCacheItem
+    ) buildDupReadSearchData(
         PMTU pmtu, ReadCacheItem dupReadCacheItem, ReadCacheItem origReadCacheItem
     );
         let dupReadReth  = dupReadCacheItem.reth;
@@ -505,22 +507,27 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
         let dupEndPSN    = dupReadCacheItem.endPSN;
         let origStartPSN = origReadCacheItem.startPSN;
         let origEndPSN   = origReadCacheItem.endPSN;
+        let dupRKey      = dupReadReth.rkey;
+        let origRKey     = origReadReth.rkey;
 
         let psnStartExactMatch = dupStartPSN == origStartPSN;
         let psnEndExactMatch   = dupEndPSN   == origEndPSN;
+        let keyMatch           = dupRKey     == origRKey;
 
-        return tuple5(
-            pmtu, psnStartExactMatch, psnEndExactMatch, dupReadCacheItem, origReadCacheItem
+        return tuple6(
+            pmtu, psnStartExactMatch, psnEndExactMatch,
+            keyMatch, dupReadCacheItem, origReadCacheItem
         );
     endfunction
 
     function Tuple4#(
         DupReadCmpParts, ReadRespLastPktAddrPart, ReadRespLastPktAddrPart, ReadCacheItem
     ) compareReadCacheItem(
-        Tuple5#(PMTU, Bool, Bool, ReadCacheItem, ReadCacheItem) searchData
+        Tuple6#(PMTU, Bool, Bool, Bool, ReadCacheItem, ReadCacheItem) searchData
     );
         let {
-            pmtu, psnStartExactMatch, psnEndExactMatch, dupReadCacheItem, origReadCacheItem
+            pmtu, psnStartExactMatch, psnEndExactMatch,
+            keyMatch, dupReadCacheItem, origReadCacheItem
         } = searchData;
 
         let dupReadReth  = dupReadCacheItem.reth;
@@ -530,7 +537,7 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
         let origStartPSN = origReadCacheItem.startPSN;
         let origEndPSN   = origReadCacheItem.endPSN;
 
-        let keyMatch           = dupReadReth.rkey == origReadReth.rkey;
+        // let keyMatch           = dupReadReth.rkey == origReadReth.rkey;
         let psnStartRangeMatch = psnInRangeExclusive(dupStartPSN, origStartPSN, origEndPSN);
         let psnEndRangeMatch   = psnInRangeExclusive(dupEndPSN, origStartPSN, origEndPSN);
 
