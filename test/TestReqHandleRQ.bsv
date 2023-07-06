@@ -30,6 +30,7 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     let maxReadWorkReqLen = valueOf(TMul#(TMul#(3, DATA_BUS_BYTE_WIDTH), MAX_QP_DST_RD_ATOM));
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -75,15 +76,21 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     FIFOF#(RecvReq) recvReqQ <- mkFIFOF;
-    let recvReqBuf = convertFifo2PipeOut(recvReqQ);
+    let recvReqBuf = toPipeOut(recvReqQ);
+
+    // PayloadGenerator
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
+    );
 
     // DUT
     let dut <- mkReqHandleRQ(
-        cntrl,
-        simDmaReadSrv,
+        cntrl.contextRQ,
+        payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
@@ -98,8 +105,8 @@ module mkTestReqHandleTooManyReadAtomicReqCase(Empty);
     // WorkCompGenRQ
     FIFOF#(PayloadConResp) payloadConRespQ <- mkFIFOF;
     let workCompGenRQ <- mkWorkCompGenRQ(
-        cntrl,
-        convertFifo2PipeOut(payloadConRespQ),
+        cntrlStatus,
+        toPipeOut(payloadConRespQ),
         dut.workCompGenReqPipeOut
     );
     // Add rule to check no WC output
@@ -236,6 +243,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -287,7 +295,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     // RecvReq
     Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -295,10 +303,16 @@ module mkTestReqHandleNoAckReqCase(Empty);
     let recvReqBuf4Ref <- mkBufferN(8, recvReqBufVec[1]);
     Reg#(Bool) recvReqBufReadyReg <- mkReg(False);
 
+    // PayloadGenerator
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
+    );
+
     // DUT
     let dut <- mkReqHandleRQ(
-        cntrl,
-        simDmaReadSrv,
+        cntrl.contextRQ,
+        payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
@@ -307,18 +321,19 @@ module mkTestReqHandleNoAckReqCase(Empty);
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
     // let sendWriteReqPayloadPipeOut = simDmaWriteSrv.dataStream;
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenRQ
     // FIFOF#(WorkCompGenReqRQ) wcGenReqQ4ReqGenInRQ <- mkFIFOF;
     let workCompGenRQ <- mkWorkCompGenRQ(
-        cntrl,
+        cntrlStatus,
         payloadConsumer.respPipeOut,
         dut.workCompGenReqPipeOut
     );
@@ -452,7 +467,7 @@ module mkTestReqHandleNoAckReqCase(Empty);
                 )
             );
 
-            pendingWorkReqCnt <= cntrl.cntrlStatus.getPendingWorkReqNum - 1;
+            pendingWorkReqCnt <= cntrlStatus.comm.getPendingWorkReqNum - 1;
         end
         else begin
             pendingWorkReqCnt.decr(1);
@@ -524,7 +539,7 @@ module mkNonZeroSendWriteReqPayloadPipeOut#(
         end
     endrule
 
-    return convertFifo2PipeOut(dataStreamOutQ);
+    return toPipeOut(dataStreamOutQ);
 endmodule
 
 module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
@@ -534,6 +549,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -607,17 +623,23 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     // RecvReq
     Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
     // let recvReqBuf4Ref <- mkBufferN(1024, recvReqBufVec[1]);
 
+    // PayloadGenerator
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
+    );
+
     // DUT
     let dut <- mkReqHandleRQ(
-        cntrl,
-        simDmaReadSrv,
+        cntrl.contextRQ,
+        payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
@@ -626,18 +648,19 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
     let sendWriteReqPayloadPipeOut = simDmaWriteSrv.dataStream;
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv.dmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenRQ
     // FIFOF#(WorkCompGenReqRQ) wcGenReqQ4ReqGenInRQ <- mkFIFOF;
     let workCompGenRQ <- mkWorkCompGenRQ(
-        cntrl,
+        cntrlStatus,
         payloadConsumer.respPipeOut,
         dut.workCompGenReqPipeOut
     );
@@ -933,6 +956,7 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -995,17 +1019,23 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     // RecvReq
     Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
     let recvReqBuf4Ref <- mkBufferN(32, recvReqBufVec[1]);
 
+    // PayloadGenerator
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
+    );
+
     // DUT
     let dut <- mkReqHandleRQ(
-        cntrl,
-        simDmaReadSrv,
+        cntrl.contextRQ,
+        payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
@@ -1014,16 +1044,17 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenRQ
     let workCompGenRQ <- mkWorkCompGenRQ(
-        cntrl,
+        cntrlStatus,
         payloadConsumer.respPipeOut,
         dut.workCompGenReqPipeOut
     );
@@ -1052,6 +1083,19 @@ module mkTestReqHandleAbnormalCase#(ReqHandleErrType errType)(Empty);
                 fshow(dut.rdmaRespDataStreamPipeOut.notEmpty),
                 " should be false, when firstErrRdmaRespGenReg=",
                 fshow(firstErrRdmaRespGenReg)
+            )
+        );
+    endrule
+
+    rule checkWorkCompGenHasErr if (firstErrWorkCompGenReg);
+        immAssert(
+            workCompGenRQ.hasErr,
+            "workCompGenRQ.hasErr assertion @ mkTestReqHandleAbnormalCase",
+            $format(
+                "workCompGenRQ.hasErr=",
+                fshow(workCompGenRQ.hasErr),
+                " should be true, when firstErrWorkCompGenReg=",
+                fshow(firstErrWorkCompGenReg)
             )
         );
     endrule
@@ -1220,6 +1264,7 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -1244,7 +1289,7 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
 
     // Generate RDMA requests
     let simReqGen <- mkSimGenRdmaReq(
-        convertFifo2PipeOut(origPendingWorkReqQ), qpType, pmtu
+        toPipeOut(origPendingWorkReqQ), qpType, pmtu
     );
     let rdmaReqPipeOut = simReqGen.rdmaReqDataStreamPipeOut;
     // Add rule to check no pending WR output
@@ -1257,11 +1302,11 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
 
     // Build RdmaPktMetaData and payload DataStream
     let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
-        convertFifo2PipeOut(rdmaReqDataStreamQ)
+        toPipeOut(rdmaReqDataStreamQ)
     );
     // let isRespPktPipeIn = False;
     // let pktMetaDataAndPayloadPipeOut <- mkSimInputPktBuf4SingleQP(
-    //     isRespPktPipeIn, convertFifo2PipeOut(rdmaReqDataStreamQ), qpMetaData
+    //     isRespPktPipeIn, toPipeOut(rdmaReqDataStreamQ), qpMetaData
     // );
     let pktMetaDataPipeIn = pktMetaDataAndPayloadPipeOut.pktMetaData;
 
@@ -1270,7 +1315,7 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
     // DupReadAtomicCache
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     // RecvReq
     Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
@@ -1278,28 +1323,35 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     FIFOF#(RecvReq) recvReqQ4Retry <- mkFIFOF;
     FIFOF#(RecvReq)   recvReqQ4Cmp <- mkFIFOF;
 
+    // PayloadGenerator
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
+    );
+
     // DUT
     let dut <- mkReqHandleRQ(
-        cntrl,
-        simDmaReadSrv,
+        cntrl.contextRQ,
+        payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
-        convertFifo2PipeOut(recvReqQ4Retry),
+        toPipeOut(recvReqQ4Retry),
         pktMetaDataPipeIn
     );
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenRQ
     let workCompGenRQ <- mkWorkCompGenRQ(
-        cntrl,
+        cntrlStatus,
         payloadConsumer.respPipeOut,
         dut.workCompGenReqPipeOut
     );
@@ -1319,13 +1371,13 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
     // let sinkWorkComp <- mkSink(workCompPipeOut4WorkReq);
 
     rule noErrWorkComp;
-        let hasWorkCompErrStatusRQ = workCompGenRQ.workCompStatusPipeOutRQ.notEmpty;
+        // let hasWorkCompErrStatusRQ = workCompGenRQ.workCompStatusPipeOutRQ.notEmpty;
         // Check workCompGenRQ.wcStatusQ4SQ has no error WC status
         immAssert(
-            !hasWorkCompErrStatusRQ,
-            "hasWorkCompErrStatusRQ assertion @ mkTestReqHandleRetryCase",
+            !workCompGenRQ.hasErr,
+            "workCompGenRQ.hasErr assertion @ mkTestReqHandleRetryCase",
             $format(
-                "hasWorkCompErrStatusRQ=", fshow(hasWorkCompErrStatusRQ),
+                "workCompGenRQ.hasErr=", fshow(workCompGenRQ.hasErr),
                 " should be false"
             )
         );

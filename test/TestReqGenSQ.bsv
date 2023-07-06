@@ -1,10 +1,12 @@
 import PAClib :: *;
 import Vector :: *;
 
+import Controller :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
 import InputPktHandle :: *;
 import Headers :: *;
+import PayloadConAndGen :: *;
 import PrimUtils :: *;
 import ReqGenSQ :: *;
 import Settings :: *;
@@ -33,8 +35,9 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // WorkReq generation
     Vector#(2, PipeOut#(WorkReq)) workReqPipeOutVec <-
@@ -52,10 +55,15 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
     let pendingWorkReqBufNotEmpty = True;
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv.dmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus,
+        dmaReadCntrl
+    );
     // DUT
     let reqGenSQ <- mkReqGenSQ(
-        cntrl,
-        simDmaReadSrv.dmaReadSrv,
+        cntrl.contextSQ,
+        payloadGenerator,
         newPendingWorkReqPipeOut,
         pendingWorkReqBufNotEmpty
     );
@@ -238,12 +246,14 @@ module mkTestReqGenNormalAndZeroLenCase#(
             );
         end
 
+        let isRespPkt = True;
         immAssert(
-            transTypeMatchQpType(transType, qpType),
+            transTypeMatchQpType(transType, qpType, isRespPkt),
             "transTypeMatchQpType assertion @ mkTestReqGenNormalCase",
             $format(
                 "transType=", fshow(transType),
-                " should match qpType=", fshow(qpType)
+                " should match qpType=", fshow(qpType),
+                " and isRespPkt=", fshow(isRespPkt)
             )
         );
         immAssert(
@@ -286,8 +296,9 @@ module mkTestReqGenDmaReadErrCase(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
     Reg#(Bool) genErrWorkCompReg[2] <- mkCReg(2, False);
 
     // WorkReq generation
@@ -309,9 +320,17 @@ module mkTestReqGenDmaReadErrCase(Empty);
     );
 
     let pendingWorkReqBufNotEmpty = True;
+    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus,
+        dmaReadCntrl
+    );
     // DUT
     let reqGenSQ <- mkReqGenSQ(
-        cntrl, simDmaReadSrv, newPendingWorkReqPipeOut, pendingWorkReqBufNotEmpty
+        cntrl.contextSQ,
+        payloadGenerator,
+        newPendingWorkReqPipeOut,
+        pendingWorkReqBufNotEmpty
     );
     let pendingWorkReqPipeOut4Comp = reqGenSQ.pendingWorkReqPipeOut;
     let rdmaReqPipeOut = reqGenSQ.rdmaReqDataStreamPipeOut;

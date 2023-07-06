@@ -20,7 +20,6 @@ import Utils :: *;
 
 typedef 0 DEFAULT_QPN;
 typedef 0 DEFAULT_QP_IDX;
-typedef 3 DEFAULT_RETRY_NUM;
 typedef 10000 MAX_CMP_CNT;
 
 function QPN getDefaultQPN();
@@ -285,7 +284,7 @@ module mkGenericRandomPipeOut(PipeOut#(anytype)) provisos(
         randomValQ.enq(val);
     endrule
 
-    return convertFifo2PipeOut(randomValQ);
+    return toPipeOut(randomValQ);
 endmodule
 
 module mkGenericRandomPipeOutVec(
@@ -305,7 +304,7 @@ module mkRandomValueInRangePipeOut#(
 );
     Randomize#(anytype) randomVal <- mkConstrainedRandomizer(min, max);
     FIFOF#(anytype) randomValQ <- mkFIFOF;
-    let resultPipeOutVec <- mkForkVector(convertFifo2PipeOut(randomValQ));
+    let resultPipeOutVec <- mkForkVector(toPipeOut(randomValQ));
 
     Reg#(Bool) initializedReg <- mkReg(False);
 
@@ -359,7 +358,7 @@ module mkRandomLenPipeOut#(
         lenQ.enq(len);
     endrule
 
-    return convertFifo2PipeOut(lenQ);
+    return toPipeOut(lenQ);
 endmodule
 
 module mkFixedLenHeaderMetaPipeOut#(
@@ -368,7 +367,7 @@ module mkFixedLenHeaderMetaPipeOut#(
 )(Vector#(vSz, PipeOut#(HeaderMetaData)));
     FIFOF#(HeaderMetaData) headerMetaDataQ <- mkFIFOF;
     Vector#(vSz, PipeOut#(HeaderMetaData)) resultPipeOutVec <-
-        mkForkVector(convertFifo2PipeOut(headerMetaDataQ));
+        mkForkVector(toPipeOut(headerMetaDataQ));
 
     rule enq;
         let headerLen = headerLenPipeIn.first;
@@ -400,7 +399,7 @@ module mkRandomHeaderMetaPipeOut#(
         mkConstrainedRandomizer(minHeaderLen, maxHeaderLen);
     Vector#(vSz, PipeOut#(HeaderMetaData)) resultPipeOutVec <-
         mkFixedLenHeaderMetaPipeOut(
-            convertFifo2PipeOut(headerLenQ),
+            toPipeOut(headerLenQ),
             alwaysHasPayload
         );
 
@@ -560,7 +559,7 @@ module mkSimGenWorkReqByOpCode#(
     PipeOut#(RKEY) rkey2InvPipeOut <- mkGenericRandomPipeOut;
     let dmaLenPipeOut <- mkRandomLenPipeOut(minLength, maxLength);
     Vector#(vSz, PipeOut#(WorkReq)) resultPipeOutVec <-
-        mkForkVector(convertFifo2PipeOut(workReqOutQ));
+        mkForkVector(toPipeOut(workReqOutQ));
 
     rule genWorkReq;
         let wrID = workReqIdPipeOut.first;
@@ -769,7 +768,7 @@ module mkGenIllegalAtomicWorkReq(PipeOut#(WorkReq));
         // $display("time=%0t: generate illegal atomic WR=", $time, fshow(workReq));
     endrule
 
-    return convertFifo2PipeOut(workReqOutQ);
+    return toPipeOut(workReqOutQ);
 endmodule
 
 module mkGenNormalOrDupWorkReq#(
@@ -819,37 +818,38 @@ module mkGenNormalOrDupWorkReq#(
 endmodule
 
 module mkExistingPendingWorkReqPipeOut#(
-    Controller cntrl,
+    CntrlQP cntrl,
     PipeOut#(WorkReq) workReqPipeIn
 )(Vector#(vSz, PipeOut#(PendingWorkReq)));
     FIFOF#(PendingWorkReq) pendingWorkReqOutQ <- mkFIFOF;
-    let pendingWorkReqPipeOut = convertFifo2PipeOut(pendingWorkReqOutQ);
+    let pendingWorkReqPipeOut = toPipeOut(pendingWorkReqOutQ);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
 
-    rule checkExpectedPSN if (cntrl.cntrlStatus.isRTR2RTS);
+    rule checkExpectedPSN if (cntrlStatus.comm.isRTR2RTS);
         immAssert(
-            cntrl.contextRQ.getEPSN == cntrl.cntrlStatus.getNPSN,
+            cntrl.contextRQ.getEPSN == cntrl.contextSQ.getNPSN,
             "ePSN == nPSN assertion @ mkExistingPendingWorkReqPipeOut",
             $format(
-                "cntrl.contextRQ.getEPSN=%h should == cntrl.cntrlStatus.getNPSN=%h",
-                cntrl.contextRQ.getEPSN, cntrl.cntrlStatus.getNPSN,
+                "cntrl.contextRQ.getEPSN=%h should == cntrl.contextSQ.getNPSN=%h",
+                cntrl.contextRQ.getEPSN, cntrl.contextSQ.getNPSN,
                 " which is required by mkExistingPendingWorkReqPipeOut"
             )
         );
     endrule
 
-    rule genExistingPendingWorkReq if (cntrl.cntrlStatus.isRTS);
+    rule genExistingPendingWorkReq if (cntrlStatus.comm.isRTS);
         let wr = workReqPipeIn.first;
         workReqPipeIn.deq;
 
-        let startPktSeqNum = cntrl.cntrlStatus.getNPSN;
+        let startPktSeqNum = cntrl.contextSQ.getNPSN;
         let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } =
             calcPktNumNextAndEndPSN(
                 startPktSeqNum,
                 wr.len,
-                cntrl.cntrlStatus.getPMTU
+                cntrlStatus.comm.getPMTU
             );
 
-        cntrl.setNPSN(nextPktSeqNum);
+        cntrl.contextSQ.setNPSN(nextPktSeqNum);
         let isOnlyReqPkt = isOnlyPkt || isReadWorkReq(wr.opcode);
 
         let pendingWR = PendingWorkReq {
@@ -940,7 +940,7 @@ module mkSimQpAttrPipeOut#(
         qpAttrQ.enq(qpAttr);
     endrule
 
-    return convertFifo2PipeOut(qpAttrQ);
+    return toPipeOut(qpAttrQ);
 endmodule
 
 typedef enum {
@@ -1084,8 +1084,8 @@ module mkChange2CntrlStateRTS#(
     endrule
 endmodule
 
-module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(Controller);
-    let cntrl <- mkController;
+module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(CntrlQP);
+    let cntrl <- mkCntrlQP;
     let setExpectedPsnAsNextPSN = True;
     let setZero2ExpectedPsnAndNextPSN = False;
     let setCntrl2RTS <- mkChange2CntrlStateRTS(
@@ -1096,10 +1096,10 @@ module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(Controller);
 endmodule
 
 /*
-module mkSimController#(
+module mkSimCntrlQP#(
     TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
-)(Controller);
-    let cntrl <- mkController;
+)(CntrlQP);
+    let cntrl <- mkCntrlQP;
     let setZero2ExpectedPsnAndNextPSN = False;
     let setCntrl2RTS <- mkChange2CntrlStateRTS(
         cntrl.srvPort, qpType, pmtu,
@@ -1108,17 +1108,17 @@ module mkSimController#(
     return cntrl;
 endmodule
 
-module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(Controller);
+module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(CntrlQP);
     let setExpectedPsnAsNextPSN = True;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
     return cntrl;
 endmodule
 
-module mkSimController#(
+module mkSimCntrlQP#(
     TypeQP qpType, PMTU pmtu, Bool setExpectedPsnAsNextPSN
-)(Controller);
+)(CntrlQP);
     let qpAttrPipeOut <- mkSimQpAttrPipeOut(pmtu, setExpectedPsnAsNextPSN);
-    let cntrl <- mkController;
+    let cntrl <- mkCntrlQP;
 
     Reg#(SimCntrlState) simCntrlStateReg <- mkReg(SIM_CNTRL_CREATE_QP);
     // Reg#(Bool) qpCreateDoneReg <- mkReg(False);
@@ -1151,7 +1151,7 @@ module mkSimController#(
         let qpCreateResp <- cntrl.srvPort.response.get;
         immAssert(
             qpCreateResp.successOrNot,
-            "qpCreateResp.successOrNot assertion @ mkSimController",
+            "qpCreateResp.successOrNot assertion @ mkSimCntrlQP",
             $format(
                 "qpCreateResp.successOrNot=", fshow(qpCreateResp.successOrNot),
                 " should be true when create QP"
@@ -1180,7 +1180,7 @@ module mkSimController#(
 
         immAssert(
             qpInitResp.successOrNot,
-            "qpInitResp.successOrNot assertion @ mkSimController",
+            "qpInitResp.successOrNot assertion @ mkSimCntrlQP",
             $format(
                 "qpInitResp.successOrNot=", fshow(qpInitResp.successOrNot),
                 " should be true when qpInitResp=", fshow(qpInitResp)
@@ -1210,7 +1210,7 @@ module mkSimController#(
 
         immAssert(
             qpRtrResp.successOrNot,
-            "qpRtrResp.successOrNot assertion @ mkSimController",
+            "qpRtrResp.successOrNot assertion @ mkSimCntrlQP",
             $format(
                 "qpRtrResp.successOrNot=", fshow(qpRtrResp.successOrNot),
                 " should be true when qpRtrResp=", fshow(qpRtrResp)
@@ -1241,7 +1241,7 @@ module mkSimController#(
 
         immAssert(
             qpRtsResp.successOrNot,
-            "qpRtsResp.successOrNot assertion @ mkSimController",
+            "qpRtsResp.successOrNot assertion @ mkSimCntrlQP",
             $format(
                 "qpRtsResp.successOrNot=", fshow(qpRtsResp.successOrNot),
                 " should be true when qpRtsResp=", fshow(qpRtsResp)
@@ -1296,7 +1296,7 @@ endmodule
 module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
     // TODO: merge mkExistingPendingWorkReqPipeOut into here
     let setExpectedPsnAsNextPSN = True;
-    let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     interface srvPort = cntrl.srvPort; // toGPServer(reqQ, respQ);
 
@@ -1305,8 +1305,8 @@ module mkSimMetaData4SinigleQP#(TypeQP qpType, PMTU pmtu)(MetaDataQPs);
     method Maybe#(HandlerPD) getPD(QPN qpn);
         return tagged Valid dontCareValue;
     endmethod
-    method Controller getCntrlByQPN(QPN qpn) = cntrl;
-    method Controller getCntrlByIndexQP(IndexQP qpIndex) = cntrl;
+    method CntrlQP getCntrlByQPN(QPN qpn) = cntrl;
+    method CntrlQP getCntrlByIndexQP(IndexQP qpIndex) = cntrl;
 
     method Action clear();
         noAction;
@@ -1334,7 +1334,7 @@ module mkSimGenRecvReq(Vector#(vSz, PipeOut#(RecvReq)));
     endrule
 
     Vector#(vSz, PipeOut#(RecvReq)) resultPipeOutVec <-
-        mkForkVector(convertFifo2PipeOut(recvReqQ));
+        mkForkVector(toPipeOut(recvReqQ));
     return resultPipeOutVec;
 endmodule
 
@@ -1567,7 +1567,7 @@ module mkPipeFilter#(
         pipeIn.deq;
     endrule
 
-    return convertFifo2PipeOut(outQ);
+    return toPipeOut(outQ);
 endmodule
 
 module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));

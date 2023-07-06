@@ -4,6 +4,7 @@ import PAClib :: *;
 import PrimUtils :: *;
 import Vector :: *;
 
+import PrimUtils :: *;
 // interface ScanOutIfc#(type anytype);
 //     method anytype current();
 //     method Action next();
@@ -20,6 +21,7 @@ interface ScanCntrl#(type anytype);
     method Action clear();
     method Bool hasScanOut();
     method Bool isScanDone();
+    method Bool deqPulse();
     // method Bool isScanMode();
 endinterface
 
@@ -85,6 +87,8 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule clearAll if (clearReg[1]);
+        scanOutQ.clear;
+
         enqPtrReg     <= 0;
         deqPtrReg     <= 0;
         itemCnt       <= 0;
@@ -484,10 +488,11 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
 
         method Bool hasScanOut() = !inFifoMode || scanOutQ.notEmpty;
         method Bool isScanDone() = inFifoMode;
+        method Bool   deqPulse() = popReg[1];
         // method Bool isScanMode() = inScanMode;
     endinterface;
 
-    interface scanPipeOut = f_FIFOF_to_PipeOut(scanOutQ);
+    interface scanPipeOut = toPipeOut(scanOutQ);
 
     method UInt#(cntSz) size() = unpack(itemCnt);
 endmodule

@@ -1,15 +1,15 @@
 import BuildVector :: *;
+import ClientServer :: *;
 import Connectable :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
 
+import Controller :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
 import Headers :: *;
-// import InputPktHandle :: *;
-// import MetaData :: *;
 import PrimUtils :: *;
 import QueuePair :: *;
 import Settings :: *;
@@ -18,286 +18,401 @@ import SimExtractRdmaHeaderPayload :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-/*
-module mkTestSimExtractNormalHeaderPayload(Empty);
+typedef enum {
+    TEST_TIMEOUT_CREATE_QP,
+    TEST_TIMEOUT_INIT_QP,
+    TEST_TIMEOUT_SET_QP_RTR,
+    TEST_TIMEOUT_SET_QP_RTS,
+    TEST_TIMEOUT_CHECK_QP_RTS,
+    TEST_TIMEOUT_ERR_NOTIFY,
+    TEST_TIMEOUT_DELETE_QP,
+    TEST_TIMEOUT_CHECK_QP_DELETED,
+    TEST_TIMEOUT_WAIT_RESET
+} TestTimeOutErrState deriving(Bits, Eq, FShow);
+
+(* synthesize *)
+module mkTestQueuePairTimeOutErrResetCase(Empty);
     let minPayloadLen = 1;
     let maxPayloadLen = 2048;
     let qpType = IBV_QPT_RC;
     let pmtu = IBV_MTU_256;
 
-    Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <- mkRandomWorkReq(
-        minPayloadLen, maxPayloadLen
+    let qpInitAttr = QpInitAttr {
+        qpType  : qpType,
+        sqSigAll: False
+    };
+
+    let sendSideQP <- mkQP;
+
+    // // Set QP to RTS
+    // let setExpectedPsnAsNextPSN = True;
+    // let setZero2ExpectedPsnAndNextPSN = True;
+    // let setSendQ2RTS <- mkChange2CntrlStateRTS(
+    //     sendSideQP.srvPortQP, qpType, pmtu,
+    //     setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    // );
+
+    // WorkReq
+    Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <-
+        mkRandomWorkReq(minPayloadLen, maxPayloadLen);
+    let workReqPipeOut = workReqPipeOutVec[0];
+    // FIFOF#(WorkReq) workReqQ <- mkFIFOF;
+    // mkConnection(toGet(workReqQ), sendSideQP.workReqIn);
+    // let workReqPipeOut4Ref <- mkBufferN(valueOf(MAX_QP_WR), workReqPipeOutVec[1]);
+    mkConnection(toGet(workReqPipeOut), sendSideQP.workReqIn);
+
+    // RecvReq
+    FIFOF#(RecvReq) emptyRecvReqQ <- mkFIFOF;
+    mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
+
+    // DMA
+    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let simDmaReadSrv  <- mkSimDmaReadSrv;
+    // let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    // mkConnection(dmaReadClt, simDmaReadSrv);
+    // mkConnection(dmaWriteClt, simDmaWriteSrv);
+    Vector#(2, DmaReadClt)  dmaReadCltVec  = vec(sendSideQP.dmaReadClt4SQ, sendSideQP.dmaReadClt4RQ);
+    Vector#(2, DmaWriteClt) dmaWriteCltVec = vec(sendSideQP.dmaWriteClt4SQ, sendSideQP.dmaWriteClt4RQ);
+    Vector#(2, DmaReadSrv)  simDmaReadSrvVec  <- replicateM(mkSimDmaReadSrv);
+    Vector#(2, DmaWriteSrv) simDmaWriteSrvVec <- replicateM(mkSimDmaWriteSrv);
+    for (Integer idx = 0; idx < 2; idx = idx + 1) begin
+        mkConnection(dmaReadCltVec[idx], simDmaReadSrvVec[idx]);
+        mkConnection(dmaWriteCltVec[idx], simDmaWriteSrvVec[idx]);
+    end
+
+    // MR permission check
+    let mrCheckPassOrFail = True;
+    Vector#(2, PermCheckSrv) simPermCheckVec <- replicateM(mkSimPermCheckSrv(mrCheckPassOrFail));
+    Vector#(2, PermCheckClt) permCheckCltVec = vec(
+        sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ
     );
-    let newPendingWorkReqPipeOut =
-        genNewPendingWorkReqPipeOut(workReqPipeOutVec[0]);
+    for (Integer idx = 0; idx < 2; idx = idx + 1) begin
+        mkConnection(permCheckCltVec[idx], simPermCheckVec[idx]);
+    end
+    // let simPermCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
+    // let permCheckClt <- mkPermCheckCltArbiter(vec(
+    //     sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ
+    // ));
+    // mkConnection(permCheckClt, simPermCheckSrv);
 
-    // Generate RDMA requests
-    let reqGenSQ <- mkSimGenRdmaReq(
-        newPendingWorkReqPipeOut, qpType, pmtu
+    mkSink(sendSideQP.rdmaReqRespPipeOut);
+    // // Extract RDMA request metadata and payload
+    // let reqPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(sendSideQP.rdmaReqRespPipeOut);
+    // let reqPayloadSink <- mkSink(reqPktMetaDataAndPayloadPipeOut.payload);
+    // let reqPktMetaDataPipeOut = reqPktMetaDataAndPayloadPipeOut.pktMetaData;
+    // let reqPktMetaDataSink <- mkSink(reqPktMetaDataPipeOut);
+
+    // Empty pipe check
+    let addSendQNoWorkCompOutRule <- addRules(genEmptyPipeOutRule(
+        sendSideQP.workCompPipeOutRQ,
+        "sendSideQP.workCompPipeOutRQ empty assertion @ mkTestQueuePairTimeOutCase"
+    ));
+    // let addRecvQNoWorkCompOutRule <- addRules(genEmptyPipeOutRule(
+    //     sendSideQP.workCompPipeOutSQ,
+    //     "sendSideQP.workCompPipeOutSQ empty assertion @ mkTestQueuePairTimeOutCase"
+    // ));
+
+    // For controller initialization
+    let qpAttrPipeOut <- mkQpAttrPipeOut;
+
+    Reg#(TestTimeOutErrState) testStateReg <- mkReg(TEST_TIMEOUT_CREATE_QP);
+    Reg#(Bool) firstWorkReqSavedReg <- mkRegU;
+    Reg#(WorkReq) firstWorkReqReg <- mkRegU;
+
+    let countDown <- mkCountDown(valueOf(TDiv#(MAX_CMP_CNT, 50)));
+
+    rule createQP if (testStateReg == TEST_TIMEOUT_CREATE_QP);
+        immAssert(
+            sendSideQP.statusSQ.comm.isReset,
+            "sendSideQP state assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "sendSideQP.statusSQ.comm.isReset=", fshow(sendSideQP.statusSQ.comm.isReset),
+                " should be true"
+            )
+        );
+
+        let qpCreateReq = ReqQP {
+            qpReqType : REQ_QP_CREATE,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: dontCareValue,
+            qpAttr    : dontCareValue,
+            qpInitAttr: qpInitAttr
+        };
+
+        sendSideQP.srvPortQP.request.put(qpCreateReq);
+        testStateReg <= TEST_TIMEOUT_INIT_QP;
+        // $display("time=%0t:", $time, " create QP");
+    endrule
+
+    rule initQP if (testStateReg == TEST_TIMEOUT_INIT_QP);
+        let qpCreateResp <- sendSideQP.srvPortQP.response.get;
+        immAssert(
+            qpCreateResp.successOrNot,
+            "qpCreateResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "qpCreateResp.successOrNot=", fshow(qpCreateResp.successOrNot),
+                " should be true when qpCreateResp=", fshow(qpCreateResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_INIT;
+        let modifyReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getReset2InitRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        sendSideQP.srvPortQP.request.put(modifyReqQP);
+
+        testStateReg <= TEST_TIMEOUT_SET_QP_RTR;
+        // $display("time=%0t:", $time, " init QP");
+    endrule
+
+    rule setCntrlRTR if (testStateReg == TEST_TIMEOUT_SET_QP_RTR);
+        let qpInitResp <- sendSideQP.srvPortQP.response.get;
+        immAssert(
+            qpInitResp.successOrNot,
+            "qpInitResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "qpInitResp.successOrNot=", fshow(qpInitResp.successOrNot),
+                " should be true when qpInitResp=", fshow(qpInitResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_RTR;
+        qpAttr.pmtu = pmtu;
+        let modifyReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getInit2RtrRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        sendSideQP.srvPortQP.request.put(modifyReqQP);
+
+        testStateReg <= TEST_TIMEOUT_SET_QP_RTS;
+        // $display("time=%0t:", $time, " set QP 2 RTR");
+    endrule
+
+    rule setCntrlRTS if (testStateReg == TEST_TIMEOUT_SET_QP_RTS);
+        let qpRtrResp <- sendSideQP.srvPortQP.response.get;
+        immAssert(
+            qpRtrResp.successOrNot,
+            "qpRtrResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "qpRtrResp.successOrNot=", fshow(qpRtrResp.successOrNot),
+                " should be true when qpRtrResp=", fshow(qpRtrResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_RTS;
+        let modifyReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : getDefaultQPN,
+            qpAttrMask: getRtr2RtsRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        sendSideQP.srvPortQP.request.put(modifyReqQP);
+
+        testStateReg <= TEST_TIMEOUT_CHECK_QP_RTS;
+        firstWorkReqSavedReg <= False;
+        // $display("time=%0t:", $time, " set QP 2 RTS");
+    endrule
+
+    rule checkStateRTS if (
+        testStateReg == TEST_TIMEOUT_CHECK_QP_RTS
     );
-    let discardPendingWR <- mkSink(reqGenSQ.pendingWorkReqPipeOut);
-    Vector#(2, DataStreamPipeOut) rdmaReqPipeOutVec <-
-        mkForkVector(reqGenSQ.rdmaReqDataStreamPipeOut);
-    let rdmaReqPipeOut4InputPktBuf <- mkBufferN(8, rdmaReqPipeOutVec[0]);
-    let rdmaReqPipeOut4DUT <- mkBufferN(8, rdmaReqPipeOutVec[1]);
-    // let rdmaReqPipeOut4DUT = reqGenSQ.rdmaReqDataStreamPipeOut;
-
-    // QP metadata
-    let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
-
-    // InputPktBuf
-    let isRespPktPipeIn = False;
-    let inputPktBuf <- mkSimInputPktBuf4SingleQP(isRespPktPipeIn, rdmaReqPipeOut4InputPktBuf, qpMetaData);
-
-    // DUT
-    let dut <- mkSimExtractNormalHeaderPayload(rdmaReqPipeOut4DUT);
-
-    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
-
-    // mkSink(rdmaReqPipeOut4InputPktBuf);
-    // mkSink(rdmaReqPipeOut4DUT);
-    // mkSink(inputPktBuf.pktMetaData);
-    // mkSink(dut.pktMetaData);
-    // mkSink(inputPktBuf.payload);
-    // mkSink(dut.payload);
-
-    rule comparePktMetaData;
-        let pktMetaDataRef = inputPktBuf.pktMetaData.first;
-        inputPktBuf.pktMetaData.deq;
-
-        let pktMetaData = dut.pktMetaData.first;
-        dut.pktMetaData.deq;
-
+        let qpRtsResp <- sendSideQP.srvPortQP.response.get;
         immAssert(
-            pktMetaData.pktPayloadLen == pktMetaDataRef.pktPayloadLen    &&
-            pktMetaData.pktFragNum    == pktMetaDataRef.pktFragNum,
-            "pktPayloadLen and pktFragNum assertion @ mkTestSimExtractNormalHeaderPayload",
+            qpRtsResp.successOrNot,
+            "qpRtsResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
             $format(
-                "pktMetaData.pktPayloadLen=%0d should == pktMetaDataRef.pktPayloadLen=%0d",
-                pktMetaData.pktPayloadLen, pktMetaDataRef.pktPayloadLen,
-                ", pktMetaData.pktFragNum=%0d should == pktMetaDataRef.pktFragNum=%0d",
-                pktMetaData.pktFragNum, pktMetaDataRef.pktFragNum
+                "qpRtsResp.successOrNot=", fshow(qpRtsResp.successOrNot),
+                " should be true when qpRtsResp=", fshow(qpRtsResp)
             )
         );
 
         immAssert(
-            pktMetaData.isZeroPayloadLen == pktMetaDataRef.isZeroPayloadLen &&
-            pktMetaData.pktValid         == pktMetaDataRef.pktValid         &&
-            pktMetaData.pktStatus        == pktMetaDataRef.pktStatus,
-            "pktMetaData assertion @ mkTestSimExtractNormalHeaderPayload",
+            sendSideQP.statusSQ.comm.isRTS,
+            "sendSideQP.statusSQ.comm.isRTS assertion @ mkTestQueuePairTimeOutErrResetCase",
             $format(
-                "pktMetaData.isZeroPayloadLen=", fshow(pktMetaData.isZeroPayloadLen),
-                " should == pktMetaDataRef.isZeroPayloadLen", fshow(pktMetaDataRef.isZeroPayloadLen),
-                ", pktMetaData.pktValid=", fshow(pktMetaData.pktValid),
-                " should == pktMetaDataRef.pktValid", fshow(pktMetaDataRef.pktValid),
-                ", pktMetaData.pktStatus=", fshow(pktMetaData.pktStatus),
-                " should == pktMetaDataRef.pktStatus", fshow(pktMetaDataRef.pktStatus)
+                "sendSideQP.statusSQ.comm.isRTS=", fshow(sendSideQP.statusSQ.comm.isRTS),
+                " should be true when qpRtsResp=", fshow(qpRtsResp)
             )
         );
-        immAssert(
-            pktMetaData.pktHeader.headerData     == pktMetaDataRef.pktHeader.headerData   &&
-            pktMetaData.pktHeader.headerByteEn   == pktMetaDataRef.pktHeader.headerByteEn &&
-            pktMetaData.pktHeader.headerMetaData == pktMetaDataRef.pktHeader.headerMetaData,
-            "pktHeader assertion @ mkTestSimExtractNormalHeaderPayload",
-            $format(
-                "pktMetaData.pktHeader=", fshow(pktMetaData.pktHeader),
-                " should == pktMetaDataRef.pktHeader", fshow(pktMetaDataRef.pktHeader)
-            )
-        );
-
-        countDown.decr;
-        // $display(
-        //     "time=%0t: pktMetaData=", $time, fshow(pktMetaData),
-        //     " should match pktMetaDataRef=", fshow(pktMetaDataRef)
+        // immAssert(
+        //     !dut.hasRetryErr,
+        //     "hasRetryErr assertion @ mkTestQueuePairTimeOutErrResetCase",
+        //     $format(
+        //         "dut.hasRetryErr=", fshow(dut.hasRetryErr),
+        //         " should be false"
+        //     )
         // );
+
+        testStateReg <= TEST_TIMEOUT_ERR_NOTIFY;
+        // $display("time=%0t:", $time, " check QP in RTS state");
     endrule
+/*
+    rule compareWorkReq;
+        let pktMetaData = reqPktMetaDataPipeOut.first;
+        reqPktMetaDataPipeOut.deq;
 
-    rule comparePayload;
-        let payloadFragRef = inputPktBuf.payload.first;
-        inputPktBuf.payload.deq;
+        let bth = extractBTH(pktMetaData.pktHeader.headerData);
+        let rdmaOpCode = bth.opcode;
 
-        let payloadFrag = dut.payload.first;
-        dut.payload.deq;
+        // let workReq4Ref = workReqPipeOut4Ref.first;
+        // if (isLastOrOnlyRdmaOpCode(rdmaOpCode)) begin
+        //     workReqPipeOut4Ref.deq;
+        // end
 
-        immAssert(
-            payloadFrag == payloadFragRef,
-            "payloadFrag assertion @ mkTestSimExtractNormalHeaderPayload",
-            $format(
-                "payloadFrag=", fshow(payloadFrag),
-                " should == payloadFragRef=", fshow(payloadFragRef)
-            )
-        );
-        // $display(
-        //     "time=%0t: payloadFrag=", $time, fshow(payloadFrag),
-        //     " should match payloadFragRef=", fshow(payloadFragRef)
+        // immAssert(
+        //     rdmaReqOpCodeMatchWorkReqOpCode(rdmaOpCode, workReq4Ref.opcode),
+        //     "rdmaReqOpCodeMatchWorkReqOpCode assertion @ mkTestQueuePairTimeOutCase",
+        //     $format(
+        //         "RDMA request opcode=", fshow(rdmaOpCode),
+        //         " should match workReqOpCode=", fshow(workReq4Ref.opcode)
+        //     )
         // );
-    endrule
-endmodule
 
-module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
-    RdmaPktMetaDataAndPayloadPipeOut
-);
-    FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkFIFOF;
-    FIFOF#(DataStream)          payloadOutQ <- mkFIFOF;
-
-    // Reg#(Bool)        isValidPktReg <- mkRegU;
-    Reg#(RdmaHeader)  rdmaHeaderReg <- mkRegU;
-    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
-    Reg#(PktLen)          pktLenReg <- mkRegU;
-    Reg#(Bool)          pktValidReg <- mkRegU;
-
-    let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
-        rdmaPktPipeIn
-    );
-    let payloadPipeIn <- mkBuffer(headerAndMetaDataAndPayloadPipeOut.payload);
-    let rdmaHeaderPipeOut <- mkDataStream2Header(
-        headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
-        headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData
-    );
-
-    rule extractHeader;
-        let payloadFrag = payloadPipeIn.first;
-        payloadPipeIn.deq;
-
-        let rdmaHeader = rdmaHeaderReg;
-        if (payloadFrag.isFirst) begin
-            rdmaHeader = rdmaHeaderPipeOut.first;
-            rdmaHeaderPipeOut.deq;
-            rdmaHeaderReg <= rdmaHeader;
-        end
-        let bth  = extractBTH(rdmaHeader.headerData);
-        let aeth = extractAETH(rdmaHeader.headerData);
-        let bthPadCnt = bth.padCnt;
-
-        let bthCheckResult = checkZeroFields4BTH(bth);
-        let headerCheckResult =
-            padCntCheckReqHeader(bth) || padCntCheckRespHeader(bth, aeth);
-        immAssert(
-            bthCheckResult && headerCheckResult,
-            "bth valid assertion @ mkSimExtractNormalHeaderPayload",
-            $format(
-                "bth=", fshow(bth),
-                " should be valid, but bthCheckResult=", fshow(bthCheckResult),
-                " and headerCheckResult=", fshow(headerCheckResult)
-            )
+        $display(
+            "time=%0t: rdmaOpCode=", $time, fshow(rdmaOpCode)
+            // " not match WR=", fshow(workReq4Ref)
         );
-
-        let isFirstOrMidPkt = isFirstOrMiddleRdmaOpCode(bth.opcode);
-        let isLastPkt       = isLastRdmaOpCode(bth.opcode);
-
-        let pktLen = pktLenReg;
-        let pktFragNum = pktFragNumReg;
-        let pktValid = False;
-
-        let isByteEnAllOne = isAllOnesR(payloadFrag.byteEn);
-        let payloadFragLen = calcFragByteNumFromByteEn(payloadFrag.byteEn);
-        immAssert(
-            isValid(payloadFragLen),
-            "isValid(payloadFragLen) assertion @ mkSimExtractNormalHeaderPayload",
-            $format(
-                "payloadFragLen=", fshow(payloadFragLen), " should be valid"
-            )
-        );
-
-        let fragLen = unwrapMaybe(payloadFragLen);
-        let isByteEnNonZero = !isZero(fragLen);
-        ByteEnBitNum fragLenWithOutPad = fragLen - zeroExtend(bthPadCnt);
-        PktLen fragLenExtWithOutPad = zeroExtend(fragLenWithOutPad);
-        case ({ pack(payloadFrag.isFirst), pack(payloadFrag.isLast) })
-            2'b11: begin // payloadFrag.isFirst && payloadFrag.isLast
-                pktLen = fragLenExtWithOutPad;
-                pktFragNum = 1;
-                pktValid = (isFirstOrMidPkt ? False : (isLastPkt ? isByteEnNonZero : True));
-            end
-            2'b10: begin // payloadFrag.isFirst && !payloadFrag.isLast
-                pktLen = fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
-                pktFragNum = 1;
-                pktValid = isByteEnAllOne;
-            end
-            2'b01: begin // !payloadFrag.isFirst && payloadFrag.islast
-                pktLen = pktLenAddFragLen(pktLenReg, fragLenWithOutPad);
-                // pktLen = pktLenReg + fragLenExtWithOutPad;
-                pktFragNum = pktFragNumReg + 1;
-                pktValid = pktValidReg;
-            end
-            2'b00: begin // !payloadFrag.isFirst && !payloadFrag.islast
-                pktLen = pktLenAddBusByteWidth(pktLenReg);
-                // pktLen = pktLenReg + fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
-                pktFragNum = pktFragNumReg + 1;
-                pktValid = pktValidReg && isByteEnAllOne;
-            end
-        endcase
-
-        pktLenReg     <= pktLen;
-        pktValidReg   <= pktValid;
-        pktFragNumReg <= pktFragNum;
-
-        let pktStatus = PKT_ST_VALID;
-        if (!pktValid) begin
-            // Invalid packet length
-            pktStatus = PKT_ST_LEN_ERR;
-        end
-
-        let isZeroPayloadLen = isZeroR(pktLen);
-        if (payloadFrag.isLast) begin
-            let pktMetaData = RdmaPktMetaData {
-                pktPayloadLen   : pktLen,
-                pktFragNum      : (isZeroPayloadLen ? 0 : pktFragNum),
-                isZeroPayloadLen: isZeroPayloadLen,
-                pktHeader       : rdmaHeader,
-                pdHandler       : dontCareValue,
-                pktValid        : pktValid,
-                pktStatus       : pktStatus
-            };
-            pktMetaDataOutQ.enq(pktMetaData);
-        end
-
-        // if (rdmaHeader.headerMetaData.hasPayload) begin
-        if (!isZeroPayloadLen) begin
-            payloadOutQ.enq(payloadFrag);
-        end
-        else begin
-            immAssert(
-                !rdmaHeader.headerMetaData.hasPayload,
-                "hasPayload assertion @ mkSimExtractNormalHeaderPayload",
-                $format(
-                    "hasPayload=", fshow(rdmaHeader.headerMetaData.hasPayload),
-                    " should be false when isZeroPayloadLen=", fshow(isZeroPayloadLen)
-                )
-            );
-        end
-
-        if (bth.opcode == ACKNOWLEDGE) begin
-            $display(
-                "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
-                ", bth.opcode=", fshow(bth.opcode),
-                ", bth.psn=%h", bth.psn,
-                ", bthPadCnt=%0d", bthPadCnt,
-                ", fragLen=%0d", fragLen,
-                ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
-                ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
-                ", fragLenWithOutPad=%0d", fragLenWithOutPad,
-                ", pktFragNum=%0d", pktFragNum,
-                ", pktLen=%0d", pktLen,
-                ", rdmaHeader=", fshow(rdmaHeader)
-            );
-            immAssert(
-                isZeroPayloadLen && payloadFrag.isLast && payloadFrag.isFirst,
-                "isZeroPayloadLen assertion @ mkSimExtractNormalHeaderPayload",
-                $format(
-                    "isZeroPayloadLen=", fshow(isZeroPayloadLen),
-                    ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
-                    ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
-                    " should all be true when bth.opcode=", fshow(bth.opcode)
-                )
-            );
-        end
+        // countDown.decr;
     endrule
 
-    interface pktMetaData = convertFifo2PipeOut(pktMetaDataOutQ);
-    interface payload     = convertFifo2PipeOut(payloadOutQ);
-endmodule
+    // TODO: find out why workReqPipeOut4Ref size > MAX_QP_WR or flush this buffer will deadlock?
+    rule passWorkReq if (
+        sendSideQP.cntrlStatus.isRTS &&
+        testStateReg != TEST_TIMEOUT_SET_QP_RTS
+    );
+        let workReq = workReqPipeOut.first;
+        workReqPipeOut.deq;
+
+        workReqQ.enq(workReq);
+        if (!firstWorkReqSavedReg) begin
+            firstWorkReqReg <= workReq;
+            firstWorkReqSavedReg <= True;
+        end
+        $display("time=%0t:", $time, " save first WR");
+    endrule
 */
+    rule checkTimeOutErrWC if (
+        // firstWorkReqSavedReg &&
+        testStateReg == TEST_TIMEOUT_ERR_NOTIFY
+    );
+        let timeOutErrWC = sendSideQP.workCompPipeOutSQ.first;
+        sendSideQP.workCompPipeOutSQ.deq;
+
+        // immAssert(
+        //     workCompMatchWorkReqInSQ(timeOutErrWC, firstWorkReqReg),
+        //     "workCompMatchWorkReqInSQ assertion @ mkTestQueuePairTimeOutErrCase",
+        //     $format(
+        //         "timeOutErrWC=", fshow(timeOutErrWC),
+        //         " not match WR=", fshow(firstWorkReqReg)
+        //     )
+        // );
+
+        let expectedWorkCompStatus = IBV_WC_RESP_TIMEOUT_ERR;
+        immAssert(
+            timeOutErrWC.status == expectedWorkCompStatus,
+            "workCompSQ.status assertion @ mkTestQueuePairTimeOutErrCase",
+            $format(
+                "timeOutErrWC=", fshow(timeOutErrWC),
+                " not match expected status=", fshow(expectedWorkCompStatus)
+            )
+        );
+
+        testStateReg <= TEST_TIMEOUT_DELETE_QP;
+        // $display(
+        //     "time=%0t: timeOutErrWC=", $time, fshow(timeOutErrWC)
+        //     // " not match WR=", fshow(firstWorkReqReg)
+        // );
+    endrule
+
+    rule deleteQP if (
+        testStateReg == TEST_TIMEOUT_DELETE_QP
+    );
+        // let qpModifyResp <- sendSideQP.srvPortQP.response.get;
+        // immAssert(
+        //     qpModifyResp.successOrNot,
+        //     "qpModifyResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
+        //     $format(
+        //         "qpModifyResp.successOrNot=", fshow(qpModifyResp.successOrNot),
+        //         " should be true when qpModifyResp=", fshow(qpModifyResp)
+        //     )
+        // );
+
+        immAssert(
+            sendSideQP.statusSQ.comm.isERR,
+            "sendSideQP.statusSQ.comm.isERR assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "sendSideQP.statusSQ.comm.isERR=", fshow(sendSideQP.statusSQ.comm.isERR), " should be true"
+                // " when qpModifyResp=", fshow(qpModifyResp)
+            )
+        );
+
+        let qpAttr = qpAttrPipeOut.first;
+        // qpAttr.qpState = IBV_QPS_UNKNOWN;
+        let deleteReqQP = ReqQP {
+            qpReqType   : REQ_QP_DESTROY,
+            pdHandler   : dontCareValue,
+            qpn         : getDefaultQPN,
+            qpAttrMask  : dontCareValue,
+            qpAttr      : qpAttr,
+            qpInitAttr  : qpInitAttr
+        };
+        sendSideQP.srvPortQP.request.put(deleteReqQP);
+
+        testStateReg <= TEST_TIMEOUT_CHECK_QP_DELETED;
+        // $display("time=%0t:", $time, " delete QP");
+    endrule
+
+    rule checkDeleteQP if (
+        testStateReg == TEST_TIMEOUT_CHECK_QP_DELETED
+    );
+        let qpDeleteResp <- sendSideQP.srvPortQP.response.get;
+        immAssert(
+            qpDeleteResp.successOrNot,
+            "qpDeleteResp.successOrNot assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "qpDeleteResp.successOrNot=", fshow(qpDeleteResp.successOrNot),
+                " should be true when qpDeleteResp=", fshow(qpDeleteResp)
+            )
+        );
+
+        immAssert(
+            sendSideQP.statusSQ.comm.isUnknown,
+            "sendSideQP.statusSQ.comm.isUnknown assertion @ mkTestQueuePairTimeOutErrResetCase",
+            $format(
+                "sendSideQP.statusSQ.comm.isUnknown=", fshow(sendSideQP.statusSQ.comm.isUnknown),
+                " should be true when qpDeleteResp=", fshow(qpDeleteResp)
+            )
+        );
+
+        testStateReg <= TEST_TIMEOUT_WAIT_RESET;
+        // $display("time=%0t:", $time, " check QP deleted");
+    endrule
+
+    rule waitResetQP if (
+        testStateReg == TEST_TIMEOUT_WAIT_RESET &&
+        sendSideQP.statusSQ.comm.isReset
+    );
+        testStateReg <= TEST_TIMEOUT_CREATE_QP;
+        countDown.decr;
+        // $display("time=%0t:", $time, " wait QP reset");
+    endrule
+endmodule
 
 (* synthesize *)
 module mkTestQueuePairTimeOutErrCase(Empty);
@@ -506,7 +621,7 @@ module mkTestQueuePairNormalCase(Empty);
     //     sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ, recvSideQP.permCheckClt4RQ, recvSideQP.permCheckClt4SQ
     // ));
     // mkConnection(permCheckClt, simPermCheckSrv);
-    Vector#(4, PermCheckSrv) simPermCheckVec  <- replicateM(mkSimPermCheckSrv(mrCheckPassOrFail));
+    Vector#(4, PermCheckSrv) simPermCheckVec <- replicateM(mkSimPermCheckSrv(mrCheckPassOrFail));
     Vector#(4, PermCheckClt) permCheckCltVec = vec(
         sendSideQP.permCheckClt4RQ, sendSideQP.permCheckClt4SQ, recvSideQP.permCheckClt4RQ, recvSideQP.permCheckClt4SQ
     );

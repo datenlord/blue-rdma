@@ -1,4 +1,5 @@
 import FIFOF :: *;
+import PAClib :: *;
 
 typedef 2 TWO;
 
@@ -131,7 +132,7 @@ function Action immAssert(Bool condition, String assertName, Fmt assertFmtMsg);
         let pos = printPosition(getStringPosition(assertName));
         // let pos = printPosition(getEvalPosition(condition));
         if (!condition) begin
-            $display(
+            $error(
                 "ImmAssert failed in %m @time=%0t: %s-- %s: ",
                 $time, pos, assertName, assertFmtMsg
             );
@@ -144,13 +145,20 @@ function Action immFail(String assertName, Fmt assertFmtMsg);
     action
         let pos = printPosition(getStringPosition(assertName));
         // let pos = printPosition(getEvalPosition(condition));
-        $display(
+        $error(
             "ImmAssert failed in %m @time=%0t: %s-- %s: ",
             $time, pos, assertName, assertFmtMsg
         );
         $finish(1);
     endaction
 endfunction
+
+// PipeOut related
+
+function PipeOut#(anytype) toPipeOut(FIFOF#(anytype) queue);
+    return f_FIFOF_to_PipeOut(queue);
+endfunction
+
 
 // FlagsType related
 

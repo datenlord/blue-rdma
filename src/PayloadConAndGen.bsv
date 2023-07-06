@@ -12,23 +12,189 @@ import DataTypes :: *;
 import PrimUtils :: *;
 import Utils :: *;
 
-// TODO: add clearAndReset rule
+interface DmaCntrl;
+    method Bool isIdle();
+    method Action cancel();
+endinterface
+
+interface DmaReadCntrl;
+    interface DmaReadSrv srvPort;
+    interface DmaCntrl dmaCntrl;
+endinterface
+
+interface DmaWriteCntrl;
+    interface DmaWriteSrv srvPort;
+    interface DmaCntrl dmaCntrl;
+endinterface
+
+// TODO: merge DMA read control logic into DMAC
+module mkDmaReadCntrl#(DmaReadSrv dmaReadSrv)(DmaReadCntrl);
+    FIFOF#(DmaReadReq)   dmaReqQ <- mkFIFOF;
+    FIFOF#(DmaReadResp) dmaRespQ <- mkFIFOF;
+
+    Reg#(DmaReadReq) pendingReqReg <- mkRegU;
+    Reg#(Bool)      busyReg <- mkReg(False);
+    Reg#(Bool) cancelReg[2] <- mkCReg(2, False);
+
+    rule issueReq if (!cancelReg[1] && !busyReg);
+        let dmaReq = dmaReqQ.first;
+        dmaReqQ.deq;
+
+        dmaReadSrv.request.put(dmaReq);
+        pendingReqReg <= dmaReq;
+        busyReg <= True;
+    endrule
+
+    rule recvResp if (!cancelReg[1] && busyReg);
+        let dmaResp <- dmaReadSrv.response.get;
+        dmaRespQ.enq(dmaResp);
+        busyReg <= !dmaResp.dataStream.isLast;
+    endrule
+
+    rule discardResp if (cancelReg[1] && busyReg);
+        let dmaResp <- dmaReadSrv.response.get;
+        // $display("time=%0t: DmaReadCntrl discard read response", $time);
+
+        if (dmaResp.dataStream.isLast) begin
+            busyReg <= False;
+            cancelReg[1] <= False;
+
+            // $display("time=%0t: DmaReadCntrl cancel read done", $time);
+        end
+    endrule
+
+    rule clearCancel if (cancelReg[1] && !busyReg);
+        cancelReg[1] <= False;
+        // $display("time=%0t: DmaReadCntrl no read to cancel", $time);
+    endrule
+
+    rule clearQ if (cancelReg[1]);
+        dmaReqQ.clear;
+        dmaRespQ.clear;
+    endrule
+
+    interface srvPort = toGPServer(dmaReqQ, dmaRespQ);
+
+    interface dmaCntrl = interface DmaCntrl;
+        method Action cancel();
+            cancelReg[0] <= True;
+        endmethod
+
+        method Bool isIdle() = !busyReg && !dmaReqQ.notEmpty && !dmaRespQ.notEmpty;
+    endinterface;
+endmodule
+
+typedef enum {
+    DMA_WRITE_CNTRL_IDLE,
+    DMA_WRITE_CNTRL_SEND_REQ,
+    DMA_WRITE_CNTRL_WAIT_RESP
+} DmaWriteCntrlState deriving(Bits, Eq);
+
+// TODO: merge DMA write control logic into DMAC
+module mkDmaWriteCntrl#(
+    CntrlStatus cntrlStatus,
+    DmaWriteSrv dmaWriteSrv
+)(DmaWriteCntrl);
+    FIFOF#(DmaWriteReq)   dmaReqQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) dmaRespQ <- mkFIFOF;
+
+    Reg#(DmaWriteReq) preReqReg <- mkRegU;
+    Reg#(DmaWriteCntrlState) stateReg <- mkReg(DMA_WRITE_CNTRL_IDLE);
+    // Reg#(Bool)  sendReqReg <- mkReg(False);
+    // Reg#(Bool) waitRespReg <- mkReg(False);
+    Reg#(Bool) cancelReg[2] <- mkCReg(2, False);
+
+    rule issueReq if (!cancelReg[1] && stateReg != DMA_WRITE_CNTRL_WAIT_RESP);
+        let dmaReq = dmaReqQ.first;
+        dmaReqQ.deq;
+
+        dmaWriteSrv.request.put(dmaReq);
+        preReqReg <= dmaReq;
+        if (dmaReq.dataStream.isLast) begin
+            stateReg <= DMA_WRITE_CNTRL_WAIT_RESP;
+        end
+        else begin
+            stateReg <= DMA_WRITE_CNTRL_SEND_REQ;
+        end
+        // sendReqReg <= !dmaWriteReq.dataStream.isLast;
+        // waitRespReg <= dmaWriteReq.dataStream.isLast;
+    endrule
+
+    rule recvResp if (!cancelReg[1] && stateReg == DMA_WRITE_CNTRL_WAIT_RESP);
+        let dmaResp <- dmaWriteSrv.response.get;
+        dmaRespQ.enq(dmaResp);
+        stateReg <= DMA_WRITE_CNTRL_IDLE;
+        // waitRespReg <= False;
+    endrule
+
+    rule cancelReq if (cancelReg[1] && stateReg == DMA_WRITE_CNTRL_SEND_REQ);
+        let dmaReq = preReqReg;
+        dmaReq.metaData.initiator =
+            cntrlStatus.isSQ ? DMA_SRC_SQ_CANCEL : DMA_SRC_RQ_CANCEL;
+        dmaReq.dataStream.isLast = True;
+        dmaWriteSrv.request.put(dmaReq);
+        stateReg <= DMA_WRITE_CNTRL_WAIT_RESP;
+
+        // $display("time=%0t: DmaWriteCntrl cancel write request", $time);
+    endrule
+
+    rule discardResp if (cancelReg[1] && stateReg == DMA_WRITE_CNTRL_WAIT_RESP);
+        let dmaResp <- dmaWriteSrv.response.get;
+        stateReg <= DMA_WRITE_CNTRL_IDLE;
+        cancelReg[1] <= False;
+
+        // $display("time=%0t: DmaWriteCntrl cancel write done", $time);
+    endrule
+
+    rule clearCancel if (cancelReg[1] && stateReg == DMA_WRITE_CNTRL_IDLE);
+        cancelReg[1] <= False;
+        // $display("time=%0t: DmaWriteCntrl no write to cancel", $time);
+    endrule
+
+    rule clearQ if (cancelReg[1]);
+        dmaReqQ.clear;
+        dmaRespQ.clear;
+    endrule
+
+    interface srvPort = toGPServer(dmaReqQ, dmaRespQ);
+
+    interface dmaCntrl = interface DmaCntrl;
+        method Action cancel();
+            cancelReg[0] <= True;
+        endmethod
+
+        method Bool isIdle() = stateReg == DMA_WRITE_CNTRL_IDLE && !dmaReqQ.notEmpty && !dmaRespQ.notEmpty;
+    endinterface;
+endmodule
+
+interface BramPipe#(type anytype);
+    interface PipeOut#(anytype) pipeOut;
+    method Action clear();
+endinterface
+
 module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
-    PipeOut#(anytype)
+    BramPipe#(anytype)
 ) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) postBramQ <- mkFIFOF;
     mkConnection(toPut(postBramQ), toGet(bramQ));
-    return convertFifo2PipeOut(postBramQ);
+    // return toPipeOut(postBramQ);
+    interface pipeOut = toPipeOut(postBramQ);
+    method Action clear();
+        postBramQ.clear;
+    endmethod
 endmodule
 
-// TODO: add clearAndReset rule
 module mkConnectPipeOut2BramQ#(
     PipeOut#(anytype) pipeIn, FIFOF#(anytype) bramQ
-)(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
+)(BramPipe#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) postBramQ <- mkFIFOF;
     mkConnection(toPut(bramQ), toGet(pipeIn));
     mkConnection(toPut(postBramQ), toGet(bramQ));
-    return convertFifo2PipeOut(postBramQ);
+    // return toPipeOut(postBramQ);
+    interface pipeOut = toPipeOut(postBramQ);
+    method Action clear();
+        postBramQ.clear;
+    endmethod
 endmodule
 
 function Bool isDiscardPayload(PayloadConInfo payloadConInfo);
@@ -39,8 +205,9 @@ function Bool isDiscardPayload(PayloadConInfo payloadConInfo);
 endfunction
 
 interface PayloadGenerator;
+    interface Server#(PayloadGenReq, PayloadGenResp) srvPort;
     interface DataStreamPipeOut payloadDataStreamPipeOut;
-    interface PipeOut#(PayloadGenResp) respPipeOut;
+    // interface PipeOut#(PayloadGenResp) respPipeOut;
 endinterface
 
 // If segment payload DataStream, then PayloadGenResp is sent
@@ -49,11 +216,12 @@ endinterface
 // fragment of the payload DataStream.
 // Flush DMA read responses when error
 module mkPayloadGenerator#(
-    Controller cntrl,
-    DmaReadSrv dmaReadSrv,
-    PipeOut#(PayloadGenReq) payloadGenReqPipeIn
+    CntrlStatus cntrlStatus,
+    DmaReadCntrl dmaReadCntrl
+    // DmaReadSrv dmaReadSrv,
+    // PipeOut#(PayloadGenReq) payloadGenReqQ
 )(PayloadGenerator);
-    // Output FIFO for PipeOut
+    FIFOF#(PayloadGenReq)   payloadGenReqQ <- mkFIFOF;
     FIFOF#(PayloadGenResp) payloadGenRespQ <- mkFIFOF;
 
     // Pipeline FIFO
@@ -62,14 +230,19 @@ module mkPayloadGenerator#(
     FIFOF#(Tuple3#(DataStream, Bool, Bool)) payloadSegmentQ <- mkFIFOF;
     // TODO: check payloadOutQ buffer size is enough for DMA read delay?
     FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
-    let payloadBufPipeOut <- mkConnectBramQ2PipeOut(payloadBufQ);
+    let bramQ2PipeOut <- mkConnectBramQ2PipeOut(payloadBufQ);
+    let payloadBufPipeOut = bramQ2PipeOut.pipeOut;
+    // let payloadBufPipeOut <- mkConnectBramQ2PipeOut(payloadBufQ);
 
     Reg#(PmtuFragNum) pmtuFragCntReg <- mkRegU;
     Reg#(Bool)     shouldSetFirstReg <- mkReg(False);
     Reg#(Bool)      isFragCntZeroReg <- mkReg(False);
     Reg#(Bool)      isNormalStateReg <- mkReg(True);
 
-    rule clearAndReset if (cntrl.cntrlStatus.isReset);
+    let dmaReadSrv = dmaReadCntrl.srvPort;
+
+    rule resetAndClear if (cntrlStatus.comm.isReset);
+        payloadGenReqQ.clear;
         payloadGenRespQ.clear;
 
         pendingGenReqQ.clear;
@@ -77,20 +250,33 @@ module mkPayloadGenerator#(
         payloadSegmentQ.clear;
         payloadBufQ.clear;
 
-        // if (payloadBufPipeOut.notEmpty) begin
-        //     payloadBufPipeOut.deq;
-        // end
+        bramQ2PipeOut.clear;
 
         shouldSetFirstReg <= False;
         isFragCntZeroReg  <= False;
         isNormalStateReg  <= True;
 
-        // $display("time=%0t: clearAndReset @ mkPayloadGenerator", $time);
+        // $display(
+        //     "time=%0t: reset and clear mkPayloadGenerator", $time,
+        //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
+        // );
     endrule
-
-    rule recvPayloadGenReq if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
-        let payloadGenReq = payloadGenReqPipeIn.first;
-        payloadGenReqPipeIn.deq;
+/*
+    rule debug if (cntrlStatus.comm.isNonErr && isNormalStateReg);
+        $display(
+            "time=%0t:", $time,
+            " payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+            " payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+            " pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+            " pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+            " payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+            " payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+        );
+    endrule
+*/
+    rule recvPayloadGenReq if (cntrlStatus.comm.isNonErr && isNormalStateReg);
+        let payloadGenReq = payloadGenReqQ.first;
+        payloadGenReqQ.deq;
         immAssert(
             !isZero(payloadGenReq.dmaReadReq.len),
             "payloadGenReq.dmaReadReq.len assertion @ mkPayloadGenerator",
@@ -99,7 +285,9 @@ module mkPayloadGenerator#(
                 payloadGenReq.dmaReadReq.len
             )
         );
-        // $display("time=%0t: payloadGenReq=", $time, fshow(payloadGenReq));
+        // $display(
+        //     "time=%0t: recvPayloadGenReq, payloadGenReq=", $time, fshow(payloadGenReq)
+        // );
 
         let dmaLen = payloadGenReq.dmaReadReq.len;
         let padCnt = calcPadCnt(dmaLen);
@@ -122,7 +310,7 @@ module mkPayloadGenerator#(
         dmaReadSrv.request.put(payloadGenReq.dmaReadReq);
     endrule
 
-    rule lastFragAddPadding if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
+    rule lastFragAddPadding if (cntrlStatus.comm.isNonErr && isNormalStateReg);
         let dmaReadResp <- dmaReadSrv.response.get;
         let { payloadGenReq, lastFragByteEnWithPadding, pmtuFragNum } = pendingGenReqQ.first;
 
@@ -147,8 +335,14 @@ module mkPayloadGenerator#(
             ));
         end
 
+        // $display(
+        //     "time=%0t: lastFragAddPadding", $time,
+        //     ", payloadGenReq.addPadding=", fshow(payloadGenReq.addPadding),
+        //     ", isOrigFirstFrag=", fshow(isOrigFirstFrag),
+        //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
+        //     ", dmaReadResp=", fshow(dmaReadResp)
+        // );
         payloadSegmentQ.enq(tuple3(curData, dmaReadResp.isRespErr, isOrigLastFrag));
-        // $display("time=%0t: generateResp=", $time, fshow(generateResp));
         // if (dmaReadResp.isRespErr) begin
         //     $display(
         //         "time=%0t:", $time, " dmaReadResp.isRespErr=", fshow(dmaReadResp.isRespErr)
@@ -156,7 +350,7 @@ module mkPayloadGenerator#(
         // end
     endrule
 
-    rule segmentPayload if (cntrl.cntrlStatus.isNonErr && isNormalStateReg);
+    rule segmentPayload if (cntrlStatus.comm.isNonErr && isNormalStateReg);
         let { curData, hasDmaRespErr, isOrigLastFrag } = payloadSegmentQ.first;
         payloadSegmentQ.deq;
 
@@ -171,7 +365,7 @@ module mkPayloadGenerator#(
 
         isNormalStateReg <= !hasDmaRespErr;
         // $display(
-        //     "time=%0t:", $time, " isOrigFirstFrag=", fshow(isOrigFirstFrag),
+        //     "time=%0t: segmentPayload", $time,
         //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
         //     ", curData.isFirst=", fshow(curData.isFirst),
         //     ", curData.isLast=", fshow(curData.isLast)
@@ -209,34 +403,42 @@ module mkPayloadGenerator#(
             };
 
             payloadGenRespQ.enq(payloadGenResp);
+            // $display("time=%0t: payloadGenResp=", $time, fshow(payloadGenResp));
         end
 
         payloadBufQ.enq(curData);
     endrule
 
-    rule flushDmaReadResp if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
+    rule flushDmaReadResp if (cntrlStatus.comm.isERR || (cntrlStatus.comm.isNonErr && !isNormalStateReg));
         let dmaReadResp <- dmaReadSrv.response.get;
     endrule
 
-    rule flushPayloadGenReqPipeIn if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
-        payloadGenReqPipeIn.deq;
+    rule flushReqQ if (cntrlStatus.comm.isERR || (cntrlStatus.comm.isNonErr && !isNormalStateReg));
+        payloadGenReqQ.clear;
+        // payloadGenReqQ.deq;
     endrule
 
-    rule flushPipelineQ if (cntrl.cntrlStatus.isERR || (cntrl.cntrlStatus.isNonErr && !isNormalStateReg));
+    rule flushPipelineQ if (cntrlStatus.comm.isERR || (cntrlStatus.comm.isNonErr && !isNormalStateReg));
         pendingGenReqQ.clear;
         pendingGenRespQ.clear;
         payloadSegmentQ.clear;
     endrule
 
-    rule flushRespQ if (cntrl.cntrlStatus.isERR);
+    rule flushRespQ if (cntrlStatus.comm.isERR);
         // Response related queues cannot be cleared once isNormalStateReg is False,
         // since some payload DataStream in payloadBufQ might be still under processing.
         payloadGenRespQ.clear;
         payloadBufQ.clear;
     endrule
 
-    interface payloadDataStreamPipeOut = payloadBufPipeOut; // convertFifo2PipeOut(payloadBufQ);
-    interface respPipeOut = convertFifo2PipeOut(payloadGenRespQ);
+    rule cancelPendingDmaReadReq if (cntrlStatus.comm.isERR);
+        dmaReadCntrl.dmaCntrl.cancel;
+        // $display("time=%0t: DmaReadCntrl cancel read", $time);
+    endrule
+
+    interface srvPort = toGPServer(payloadGenReqQ, payloadGenRespQ);
+    interface payloadDataStreamPipeOut = payloadBufPipeOut; // toPipeOut(payloadBufQ);
+    // interface respPipeOut = toPipeOut(payloadGenRespQ);
 endmodule
 
 interface PayloadConsumer;
@@ -245,16 +447,16 @@ endinterface
 
 // Flush DMA write responses when error
 module mkPayloadConsumer#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     DataStreamPipeOut payloadPipeIn,
-    DmaWriteSrv dmaWriteSrv,
+    // DmaWriteSrv dmaWriteSrv,
+    DmaWriteCntrl dmaWriteCntrl,
     PipeOut#(PayloadConReq) payloadConReqPipeIn
 )(PayloadConsumer);
-    // Output FIFO for PipeOut
-    FIFOF#(PayloadConResp) consumeRespQ <- mkFIFOF;
+    // FIFOF#(PayloadConReq)   payloadConReqPipeIn <- mkFIFOF;
+    FIFOF#(PayloadConResp) payloadConRespQ <- mkFIFOF;
 
     // Pipeline FIFO
-    // FIFOF#(Tuple4#(PayloadConReq, PmtuFragNum, Bool, Bool)) consumeReqQ <- mkFIFOF;
     FIFOF#(Tuple2#(PayloadConReq, Bool))              countReqFragQ <- mkFIFOF;
     FIFOF#(Tuple4#(PayloadConReq, Bool, Bool, Bool)) pendingConReqQ <- mkFIFOF;
     FIFOF#(PayloadConReq)                               genConRespQ <- mkFIFOF;
@@ -262,25 +464,35 @@ module mkPayloadConsumer#(
 
     // TODO: check payloadOutQ buffer size is enough for DMA write delay?
     FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
-    let payloadBufPipeOut <- mkConnectPipeOut2BramQ(payloadPipeIn, payloadBufQ);
+    let pipeOut2Bram <- mkConnectPipeOut2BramQ(payloadPipeIn, payloadBufQ);
+    let payloadBufPipeOut = pipeOut2Bram.pipeOut;
+    // let payloadBufPipeOut <- mkConnectPipeOut2BramQ(payloadPipeIn, payloadBufQ);
 
     Reg#(PmtuFragNum) remainingFragNumReg <- mkRegU;
     Reg#(Bool)  isRemainingFragNumZeroReg <- mkReg(False);
     Reg#(Bool)       isFirstOrOnlyFragReg <- mkReg(True);
     // Reg#(Bool) busyReg <- mkReg(False);
+    let dmaWriteSrv = dmaWriteCntrl.srvPort;
 
-    rule clearAndReset if (cntrl.cntrlStatus.isReset);
-        consumeRespQ.clear;
+    rule resetAndClear if (cntrlStatus.comm.isReset);
+        // payloadConReqPipeIn.clear;
+        payloadConRespQ.clear;
+
         countReqFragQ.clear;
         pendingConReqQ.clear;
         genConRespQ.clear;
         pendingDmaReqQ.clear;
         payloadBufQ.clear;
 
+        pipeOut2Bram.clear;
         // busyReg <= False;
         isFirstOrOnlyFragReg      <= True;
         isRemainingFragNumZeroReg <= False;
-        // $display("time=%0t: clearAndReset @ mkPayloadConsumer", $time);
+
+        // $display(
+        //     "time=%0t: reset and clear mkPayloadConsumer", $time,
+        //     ", genConRespQ.notEmpty=", fshow(genConRespQ.notEmpty)
+        // );
     endrule
 
     function Action checkIsOnlyPayloadFragment(
@@ -300,7 +512,7 @@ module mkPayloadConsumer#(
         endaction
     endfunction
 
-    rule recvReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule recvReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let consumeReq = payloadConReqPipeIn.first;
         payloadConReqPipeIn.deq;
 
@@ -346,14 +558,9 @@ module mkPayloadConsumer#(
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
         countReqFragQ.enq(tuple2(consumeReq, isFragNumLessOrEqOne));
-        // let isFragNumEqTwo       = isTwo(consumeReq.fragNum);
-        // let fragNumMinusTwo      = consumeReq.fragNum - 2;
-        // consumeReqQ.enq(tuple4(
-        //     consumeReq, fragNumMinusTwo, isFragNumLessOrEqOne, isFragNumEqTwo
-        // ));
     endrule
 
-    rule countReqFrag if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule countReqFrag if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { consumeReq, isFragNumLessOrEqOne } = countReqFragQ.first;
 
         let isLastReqFrag = isFragNumLessOrEqOne ? True : isRemainingFragNumZeroReg;
@@ -387,7 +594,7 @@ module mkPayloadConsumer#(
         // );
     endrule
 
-    rule consumePayload if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule consumePayload if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFrag, isLastReqFrag
         } = pendingConReqQ.first;
@@ -536,7 +743,7 @@ module mkPayloadConsumer#(
         endcase
     endrule
 
-    rule issueDmaReq if (cntrl.cntrlStatus.isNonErr);
+    rule issueDmaReq if (cntrlStatus.comm.isNonErr);
         let { consumeReq, payload } = pendingDmaReqQ.first;
         pendingDmaReqQ.deq;
 
@@ -575,7 +782,7 @@ module mkPayloadConsumer#(
         endcase
     endrule
 
-    rule genConResp if (cntrl.cntrlStatus.isNonErr);
+    rule genConResp if (cntrlStatus.comm.isNonErr);
         let dmaWriteResp <- dmaWriteSrv.response.get;
         let consumeReq = genConRespQ.first;
         genConRespQ.deq;
@@ -594,7 +801,7 @@ module mkPayloadConsumer#(
                         psn      : sendWriteReqReadRespInfo.psn
                     }
                 };
-                consumeRespQ.enq(consumeResp);
+                payloadConRespQ.enq(consumeResp);
 
                 immAssert(
                     dmaWriteResp.sqpn == sendWriteReqReadRespInfo.sqpn &&
@@ -619,7 +826,7 @@ module mkPayloadConsumer#(
                     }
                 };
                 // $display("time=%0t: consumeResp=", $time, fshow(consumeResp));
-                consumeRespQ.enq(consumeResp);
+                payloadConRespQ.enq(consumeResp);
 
                 immAssert(
                     dmaWriteResp.sqpn == atomicRespInfo.atomicRespDmaWriteMetaData.sqpn &&
@@ -646,30 +853,37 @@ module mkPayloadConsumer#(
     // When error, continue send DMA write requests,
     // so as to flush payload data properly later.
     // But discard DMA write responses when error.
-    rule flushDmaWriteResp if (cntrl.cntrlStatus.isERR);
+    rule flushDmaWriteResp if (cntrlStatus.comm.isERR);
         let dmaWriteResp <- dmaWriteSrv.response.get;
     endrule
 
-    // rule flushPayloadBufPipeOut if (cntrl.cntrlStatus.isERR);
+    // rule flushPayloadBufPipeOut if (cntrlStatus.comm.isERR);
     //     payloadBufPipeOut.deq;
     // endrule
 
-    rule flushPipelineQ if (cntrl.cntrlStatus.isERR);
+    rule flushPipelineQ if (cntrlStatus.comm.isERR);
         payloadBufQ.clear;
         pendingConReqQ.clear;
         pendingDmaReqQ.clear;
     endrule
 
-    rule flushPayloadConResp if (cntrl.cntrlStatus.isERR);
-        consumeRespQ.clear;
+    rule flushPayloadConResp if (cntrlStatus.comm.isERR);
+        payloadConRespQ.clear;
     endrule
 
-    interface respPipeOut = convertFifo2PipeOut(consumeRespQ);
+    rule cancelPendingDmaWriteReq if (cntrlStatus.comm.isERR);
+        dmaWriteCntrl.dmaCntrl.cancel;
+        // $display("time=%0t: DmaWriteCntrl cancel write", $time);
+    endrule
+
+    // return toGPServer(payloadConReqPipeIn, payloadConRespQ);
+    interface respPipeOut = toPipeOut(payloadConRespQ);
 endmodule
 
+// TODO: add atomic support
 typedef Server#(AtomicOpReq, AtomicOpResp) AtomicSrv;
 // Atomic operation will not generate error
-module mkAtomicSrv#(Controller cntrl)(AtomicSrv);
+module mkAtomicSrv#(CntrlStatus cntrlStatus)(AtomicSrv);
     FIFOF#(AtomicOpReq)   atomicOpReqQ <- mkFIFOF;
     FIFOF#(AtomicOpResp) atomicOpRespQ <- mkFIFOF;
 

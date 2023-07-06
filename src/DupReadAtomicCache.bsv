@@ -2,7 +2,7 @@ import FIFOF :: *;
 import PAClib :: *;
 import Vector :: *;
 
-import Controller :: *;
+// import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
 import PrimUtils :: *;
@@ -219,7 +219,7 @@ module mkRecursiveSearch#(
 
         // FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
 
-        // rule clearAndReset if (clearAll);
+        // rule resetAndClear if (clearAll);
         //     resultQ.clear;
         // endrule
 
@@ -230,11 +230,11 @@ module mkRecursiveSearch#(
         //     resultQ.enq(result);
         // endrule
 
-        // return convertFifo2PipeOut(resultQ);
+        // return toPipeOut(resultQ);
     end
     else begin
         Vector#(TDiv#(qSz, 2), FIFOF#(Maybe#(anytype))) nextLayerVec <- replicateM(mkFIFOF);
-        let nextLayerPipeOut = map(convertFifo2PipeOut, nextLayerVec);
+        let nextLayerPipeOut = map(toPipeOut, nextLayerVec);
         let resultPipeOut <- mkRecursiveSearch(clearAll, nextLayerPipeOut);
 
         for (Integer idx = 0; idx < valueOf(qSz); idx = idx + valueOf(TWO)) begin
@@ -262,7 +262,7 @@ module mkRecursiveSearch#(
         end
 
         for (Integer idx = 0; idx < valueOf(TDiv#(qSz, 2)); idx = idx + 1) begin
-            rule clearAndReset if (clearAll);
+            rule resetAndClear if (clearAll);
                 nextLayerVec[idx].clear;
             endrule
         end
@@ -299,7 +299,7 @@ module mkCacheFIFO#(
     Vector#(qSz, FIFOF#(Maybe#(anytype)))         searchResultVec <- replicateM(mkFIFOF);
 
     let firstSearchStageZipVec = zip3(readVReg(tagVec), readVReg(dataVec), searchDataVec);
-    let searchResultPipeOutVec = map(convertFifo2PipeOut, searchResultVec);
+    let searchResultPipeOutVec = map(toPipeOut, searchResultVec);
     let searchResultPipeOut   <- mkRecursiveSearch(clearReg[1], searchResultPipeOutVec);
 
     function Action clearSearchDataQ(FIFOF#(Tuple2#(Bool, searchType)) searchDataQ);

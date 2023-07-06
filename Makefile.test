@@ -47,8 +47,11 @@ TestMetaData.bsv                 = mkTestMetaDataMRs \
                                     mkTestBramCache \
                                     mkTestTLB
 TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
-                                    mkTestPayloadGenSegmentAndPaddingCase
-TestQueuePair.bsv                = mkTestQueuePairTimeOutErrCase \
+                                    mkTestPayloadGenSegmentAndPaddingCase \
+                                    mkTestDmaReadCntrl \
+                                    mkTestDmaWriteCntrl
+TestQueuePair.bsv                = mkTestQueuePairTimeOutErrResetCase \
+                                    mkTestQueuePairTimeOutErrCase \
                                     mkTestQueuePairNormalCase
 TestReqGenSQ.bsv                 = mkTestReqGenNormalCase \
                                     mkTestReqGenZeroLenCase \

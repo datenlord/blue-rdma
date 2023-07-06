@@ -65,7 +65,7 @@ typedef enum {
 } RetryCntrlState deriving(Bits, Eq, FShow);
 
 module mkRetryHandleSQ#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     Bool pendingWorkReqNotEmpty,
     ScanCntrl#(PendingWorkReq) pendingWorkReqScanCntrl
 )(RetryHandleSQ);
@@ -106,7 +106,7 @@ module mkRetryHandleSQ#(
     Reg#(Bool)             pauseRetryHandleReg <- mkReg(False);
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.cntrlStatus.isReset);
+    rule resetAndClear if (cntrlStatus.comm.isReset);
         pendingWorkReqScanCntrl.clear;
 
         resetReqQ.clear;
@@ -126,7 +126,7 @@ module mkRetryHandleSQ#(
         retryHandleStateReg   <= RETRY_HANDLE_ST_NOT_RETRY;
         pauseRetryHandleReg   <= False;
 
-        // $display("time=%0t: reset and clear retry handler", $time);
+        // $display("time=%0t: reset and clear mkRetryHandleSQ", $time);
     endrule
 
     let notRetrying = retryCntrlStateReg[0] == RETRY_CNTRL_ST_NOT_RETRY;
@@ -179,25 +179,25 @@ module mkRetryHandleSQ#(
 
     function Action resetRetryCntInternal();
         action
-            retryCntReg        <= cntrl.cntrlStatus.getMaxRetryCnt;
-            rnrCntReg          <= cntrl.cntrlStatus.getMaxRnrCnt;
-            disableRetryCntReg <= cntrl.cntrlStatus.getMaxRetryCnt == fromInteger(valueOf(INFINITE_RETRY));
+            retryCntReg        <= cntrlStatus.comm.getMaxRetryCnt;
+            rnrCntReg          <= cntrlStatus.comm.getMaxRnrCnt;
+            disableRetryCntReg <= cntrlStatus.comm.getMaxRetryCnt == fromInteger(valueOf(INFINITE_RETRY));
         endaction
     endfunction
 
     function Action resetTimeOutCntInternal();
         action
-            timeOutCntReg       <= fromInteger(getTimeOutValue(cntrl.cntrlStatus.getMaxTimeOut));
-            disableTimeOutReg   <= isZero(cntrl.cntrlStatus.getMaxTimeOut);
+            timeOutCntReg       <= fromInteger(getTimeOutValue(cntrlStatus.comm.getMaxTimeOut));
+            disableTimeOutReg   <= isZero(cntrlStatus.comm.getMaxTimeOut);
             // isTimeOutCntZeroReg <= False;
             isTimeOutCntHighPartZeroReg <= False;
             isTimeOutCntLowPartZeroReg  <= False;
             // timeOutNotificationQ.clear;
-            // $display("time=%0t: cntrl.cntrlStatus.getMaxTimeOut=%0d", $time, origMaxTimeOutReg);
+            // $display("time=%0t: cntrlStatus.comm.getMaxTimeOut=%0d", $time, origMaxTimeOutReg);
         endaction
     endfunction
 
-    rule initRetryCntAndTimeOutTimer if (cntrl.cntrlStatus.isRTR2RTS);
+    rule initRetryCntAndTimeOutTimer if (cntrlStatus.comm.isRTR2RTS);
         resetRetryCntInternal;
         resetTimeOutCntInternal;
         timeOutNotificationQ.clear;
@@ -222,7 +222,7 @@ module mkRetryHandleSQ#(
     //                     handleRetryCntUpdate, \
     //                     sendRetryResp" *)
     // TODO: add conflict_free, no_implicit_conditions and fire_when_enabled attributes
-    rule recvResetReq if (cntrl.cntrlStatus.isStableRTS);
+    rule recvResetReq if (cntrlStatus.comm.isStableRTS);
         let resetReq = resetReqQ.first;
         resetReqQ.deq;
 
@@ -252,7 +252,7 @@ module mkRetryHandleSQ#(
         // );
     endrule
 
-    rule recvRetryReq if (cntrl.cntrlStatus.isStableRTS);
+    rule recvRetryReq if (cntrlStatus.comm.isStableRTS);
         let maybeRetryReq = tagged Invalid;
         let shouldResetRetryCnt = False;
         if (resetRetryCntQ.notEmpty) begin
@@ -291,7 +291,7 @@ module mkRetryHandleSQ#(
         end
     endrule
 
-    rule checkTimeOut if (cntrl.cntrlStatus.isStableRTS);
+    rule checkTimeOut if (cntrlStatus.comm.isStableRTS);
         let hasResetTimeOutReq = resetTimeOutQ.notEmpty;
         if (hasResetTimeOutReq) begin
             resetTimeOutQ.deq;
@@ -330,7 +330,7 @@ module mkRetryHandleSQ#(
         end
     endrule
 
-    rule handleNotifiedRetryAndTimeOut if (cntrl.cntrlStatus.isStableRTS);
+    rule handleNotifiedRetryAndTimeOut if (cntrlStatus.comm.isStableRTS);
         let maybeRetryReq = tagged Invalid;
 
         let hasNotifiedTimeOut = timeOutTriggerQ.notEmpty;
@@ -359,7 +359,7 @@ module mkRetryHandleSQ#(
         end
     endrule
 
-    rule handleRetryAction if (cntrl.cntrlStatus.isStableRTS);
+    rule handleRetryAction if (cntrlStatus.comm.isStableRTS);
         let maybeRetryReq = retryActionQ.first;
         retryActionQ.deq;
 
@@ -407,7 +407,7 @@ module mkRetryHandleSQ#(
         // );
     endrule
 
-    rule handleRetryCntUpdate if (cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg);
+    rule handleRetryCntUpdate if (cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg);
         let maybeRetryReason = updateRetryCntQ.first;
         updateRetryCntQ.deq;
 
@@ -473,7 +473,7 @@ module mkRetryHandleSQ#(
         end
     endrule
 
-    rule sendRetryResp if (cntrl.cntrlStatus.isStableRTS);
+    rule sendRetryResp if (cntrlStatus.comm.isStableRTS);
         let { hasRetryErr, retryReason } = prepareRetryRespQ.first;
         prepareRetryRespQ.deq;
 
@@ -504,7 +504,7 @@ module mkRetryHandleSQ#(
     // Retry control FSM
 
     rule initRetry if (
-        cntrl.cntrlStatus.isStableRTS && pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && pauseRetryHandleReg &&
         retryCntrlStateReg[0] == RETRY_CNTRL_ST_INIT_RETRY
     );
         pauseRetryHandleReg <= False;
@@ -515,7 +515,7 @@ module mkRetryHandleSQ#(
     endrule
 
     rule waitRetryFinish if (
-        cntrl.cntrlStatus.isStableRTS &&
+        cntrlStatus.comm.isStableRTS &&
         retryCntrlStateReg[0] == RETRY_CNTRL_ST_WAIT_RETRY_DONE &&
         retryHandleStateReg == RETRY_HANDLE_ST_WAIT_RETRY_DONE
     );
@@ -524,13 +524,13 @@ module mkRetryHandleSQ#(
 
             // $display(
             //     "time=%0t: retry finished", $time,
-            //     ", cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS)
+            //     ", cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS)
             // );
         end
     endrule
 
     rule stopScanQ if (
-        cntrl.cntrlStatus.isERR ||
+        cntrlStatus.comm.isERR ||
         (pauseRetryHandleReg && retryCntrlStateReg[0] == RETRY_CNTRL_ST_RETRY_LIMIT_EXC)
     );
         pendingWorkReqScanCntrl.scanStop;
@@ -541,7 +541,7 @@ module mkRetryHandleSQ#(
     // Retry handle FSM
 
     rule startPreRetry if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_START_PRE_RETRY
     );
         immAssert(
@@ -583,10 +583,10 @@ module mkRetryHandleSQ#(
     endrule
 
     rule rnrCheck if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_RNR_CHECK
     );
-        let rnrTimer = cntrl.cntrlStatus.getMinRnrTimer;
+        let rnrTimer = cntrlStatus.comm.getMinRnrTimer;
         rnrTimer = retryRnrTimerReg > rnrTimer ? retryRnrTimerReg : rnrTimer;
         rnrWaitCntReg <= fromInteger(getRnrTimeOutValue(rnrTimer));
         isRnrWaitCntZeroReg <= False;
@@ -599,7 +599,7 @@ module mkRetryHandleSQ#(
     endrule
 
     rule rnrWait if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_RNR_WAIT
     );
         if (isRnrWaitCntZeroReg) begin
@@ -617,7 +617,7 @@ module mkRetryHandleSQ#(
     endrule
 
     rule checkPartialRetry if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_CHECK_PARTIAL_RETRY_WR
     );
         let firstRetryWR = pendingWorkReqScanCntrl.getHead;
@@ -660,7 +660,7 @@ module mkRetryHandleSQ#(
     endrule
 
     rule modifyPartialRetryWR if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_MODIFY_PARTIAL_RETRY_WR
     );
         let firstRetryWR = pendingWorkReqScanCntrl.getHead;
@@ -668,9 +668,9 @@ module mkRetryHandleSQ#(
         let wrLen = firstRetryWR.wr.len;
         let laddr = firstRetryWR.wr.laddr;
         let raddr = firstRetryWR.wr.raddr;
-        let retryWorkReqLen       = lenSubtractPsnMultiplyPMTU(wrLen, psnDiffReg, cntrl.cntrlStatus.getPMTU);
-        let retryWorkReqLocalAddr = addrAddPsnMultiplyPMTU(laddr, psnDiffReg, cntrl.cntrlStatus.getPMTU);
-        let retryWorkReqRmtAddr   = addrAddPsnMultiplyPMTU(raddr, psnDiffReg, cntrl.cntrlStatus.getPMTU);
+        let retryWorkReqLen       = lenSubtractPsnMultiplyPMTU(wrLen, psnDiffReg, cntrlStatus.comm.getPMTU);
+        let retryWorkReqLocalAddr = addrAddPsnMultiplyPMTU(laddr, psnDiffReg, cntrlStatus.comm.getPMTU);
+        let retryWorkReqRmtAddr   = addrAddPsnMultiplyPMTU(raddr, psnDiffReg, cntrlStatus.comm.getPMTU);
         if (retryReasonReg != RETRY_REASON_TIMEOUT) begin
             firstRetryWR.startPSN = tagged Valid retryStartPsnReg;
         end
@@ -685,19 +685,21 @@ module mkRetryHandleSQ#(
     endrule
 
     rule startRetry if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_START_RETRY
     );
         pendingWorkReqScanCntrl.scanStart;
         retryHandleStateReg <= RETRY_HANDLE_ST_WAIT_RETRY_DONE;
+
         // $display(
         //     "time=%0t:", $time,
-        //     " startRetry, cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS)
+        //     " startRetry, cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
+        //     ", pendingWorkReqScanCntrl.hasScanOut=", fshow(pendingWorkReqScanCntrl.hasScanOut)
         // );
     endrule
 
     rule waitRetryDone if (
-        cntrl.cntrlStatus.isStableRTS && !pauseRetryHandleReg &&
+        cntrlStatus.comm.isStableRTS && !pauseRetryHandleReg &&
         retryHandleStateReg == RETRY_HANDLE_ST_WAIT_RETRY_DONE
     );
         if (pendingWorkReqScanCntrl.isScanDone) begin
@@ -705,7 +707,8 @@ module mkRetryHandleSQ#(
 
             // $display(
             //     "time=%0t: retry done", $time,
-            //     ", cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS)
+            //     ", cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
+            //     ", pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty)
             // );
         end
     endrule
@@ -716,7 +719,7 @@ module mkRetryHandleSQ#(
 
     method Action resetRetryCntAndTimeOutBySQ(
         ResetRetryCntAndTimeOutReq resetReq
-    ) if (cntrl.cntrlStatus.isStableRTS);
+    ) if (cntrlStatus.comm.isStableRTS);
         resetReqQ.enq(resetReq);
     endmethod
 

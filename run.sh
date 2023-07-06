@@ -52,7 +52,10 @@ ALL_LOG=$TEST_DIR/run.log
 
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaReadCntrl 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaWriteCntrl 2>&1 | tee -a $ALL_LOG
 
+# make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairTimeOutErrResetCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairTimeOutErrCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestQueuePairNormalCase 2>&1 | tee -a $ALL_LOG
 

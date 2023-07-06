@@ -51,12 +51,12 @@ function Bool isNormalOrErrorReqStatus(RdmaReqStatus reqStatus);
     endcase;
 endfunction
 
-function Maybe#(QPN) getMaybeDestQpnRQ(Controller cntrl);
-    return case (cntrl.cntrlStatus.getTypeQP)
+function Maybe#(QPN) getMaybeDestQpnRQ(CntrlStatus cntrlStatus);
+    return case (cntrlStatus.getTypeQP)
         IBV_QPT_RC      ,
         IBV_QPT_UC      ,
-        IBV_QPT_XRC_SEND, // TODO: XRC RQ should have its own controller
-        IBV_QPT_XRC_RECV: tagged Valid cntrl.cntrlStatus.getDQPN;
+        IBV_QPT_XRC_RECV: tagged Valid cntrlStatus.comm.getDQPN;
+        // IBV_QPT_XRC_SEND
         // IBV_QPT_UD
         default: tagged Invalid;
     endcase;
@@ -122,7 +122,7 @@ function Maybe#(RdmaOpCode) genMiddleOrLastRespRdmaOpCode(RdmaReqStatus reqStatu
     endcase;
 endfunction
 
-function Maybe#(AETH) genAethByReqStatus(RdmaReqStatus reqStatus, Controller cntrl, MSN msn);
+function Maybe#(AETH) genAethByReqStatus(RdmaReqStatus reqStatus, CntrlStatus cntrlStatus, MSN msn);
     return case (reqStatus)
         RDMA_REQ_ST_NORMAL,
         RDMA_REQ_ST_DUP   : begin
@@ -137,7 +137,7 @@ function Maybe#(AETH) genAethByReqStatus(RdmaReqStatus reqStatus, Controller cnt
             tagged Valid AETH {
                 rsvd : unpack(0),
                 code : AETH_CODE_RNR,
-                value: cntrl.cntrlStatus.getMinRnrTimer,
+                value: cntrlStatus.comm.getMinRnrTimer,
                 msn  : msn
             };
         end
@@ -188,12 +188,12 @@ endfunction
 function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus,
     Length payloadLen, Maybe#(Long) atomicOrigData,
-    Controller cntrl, PSN psn, MSN msn, Bool isOnlyReadRespPkt
+    CntrlStatus cntrlStatus, PSN psn, MSN msn, Bool isOnlyReadRespPkt
 );
-    let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
+    let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);
     let maybeOpCode = genFirstOrOnlyRespRdmaOpCode(reqOpCode, reqStatus, isOnlyReadRespPkt);
-    let maybeDQPN   = getMaybeDestQpnRQ(cntrl);
-    let maybeAETH   = genAethByReqStatus(reqStatus, cntrl, msn);
+    let maybeDQPN   = getMaybeDestQpnRQ(cntrlStatus);
+    let maybeAETH   = genAethByReqStatus(reqStatus, cntrlStatus, msn);
 
     let maybeAtomicAckEth = case (atomicOrigData) matches
         tagged Valid .origData: tagged Valid AtomicAckEth { orig: origData };
@@ -213,7 +213,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
             migReq   : unpack(0),
             padCnt   : isOnlyReadRespPkt ? calcPadCnt(payloadLen) : 0,
             tver     : unpack(0),
-            pkey     : cntrl.cntrlStatus.getPKEY,
+            pkey     : cntrlStatus.comm.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
@@ -257,12 +257,12 @@ endfunction
 
 function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus, Length payloadLen,
-    Controller cntrl, PSN psn, MSN msn, Bool isLastRespPkt
+    CntrlStatus cntrlStatus, PSN psn, MSN msn, Bool isLastRespPkt
 );
-    let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
+    let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);
     let maybeOpCode = genMiddleOrLastRespRdmaOpCode(reqStatus, isLastRespPkt);
-    let maybeDQPN   = getMaybeDestQpnRQ(cntrl);
-    let maybeAETH   = genAethByReqStatus(reqStatus, cntrl, msn);
+    let maybeDQPN   = getMaybeDestQpnRQ(cntrlStatus);
+    let maybeAETH   = genAethByReqStatus(reqStatus, cntrlStatus, msn);
 
     if (
         maybeTrans  matches tagged Valid .trans  &&&
@@ -277,7 +277,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
             migReq   : unpack(0),
             padCnt   : isLastRespPkt ? calcPadCnt(payloadLen) : 0,
             tver     : unpack(0),
-            pkey     : cntrl.cntrlStatus.getPKEY,
+            pkey     : cntrlStatus.comm.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
@@ -419,9 +419,9 @@ interface ReqHandleRQ;
 endinterface
 
 module mkReqHandleRQ#(
-    Controller cntrl,
-    DmaReadSrv dmaReadSrv,
-    // PayloadGenerator payloadGenerator,
+    ContextRQ contextRQ,
+    // DmaReadSrv dmaReadSrv,
+    PayloadGenerator payloadGenerator,
     PermCheckSrv permCheckSrv,
     DupReadAtomicCache dupReadAtomicCache,
     RecvReqBuf recvReqBuf,
@@ -429,7 +429,7 @@ module mkReqHandleRQ#(
 )(ReqHandleRQ);
     // Output FIFO for PipeOut
     FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
-    FIFOF#(PayloadGenReq)     payloadGenReqOutQ <- mkFIFOF;
+    // FIFOF#(PayloadGenReq)     payloadGenReqOutQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqRQ) workCompGenReqOutQ <- mkFIFOF;
     FIFOF#(RdmaHeader)                  headerQ <- mkFIFOF;
 
@@ -495,17 +495,19 @@ module mkReqHandleRQ#(
     // Reg#(Bool) hasReqStatusErrReg[2] <- mkCReg(2, False);
     // Reg#(Bool)  readRespErrNotifyReg[2] <- mkCReg(2, False);
 
-    // TODO: move the two counters into Controller
+    // TODO: move the two counters into CntrlQP
     Count#(PendingReqCnt) coalesceWorkReqCnt <- mkCount(fromInteger(valueOf(TSub#(MAX_QP_WR, 1))));
     CountCF#(PendingReqCnt) pendingDestReadAtomicReqCnt <- mkCountCF(0);
     Reg#(Bool) isCoalesceWorkReqCntZeroReg <- mkReg(False);
 
-    let atomicSrv <- mkAtomicSrv(cntrl);
-    let payloadGenerator <- mkPayloadGenerator(
-        cntrl, dmaReadSrv, convertFifo2PipeOut(payloadGenReqOutQ)
-    );
+    let cntrlStatus = contextRQ.statusRQ;
+
+    let atomicSrv <- mkAtomicSrv(cntrlStatus);
+    // let payloadGenerator <- mkPayloadGenerator(
+    //     cntrlStatus, dmaReadSrv, toPipeOut(payloadGenReqOutQ)
+    // );
     let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
-        convertFifo2PipeOut(headerQ)
+        toPipeOut(headerQ)
     );
     let rdmaRespPipeOut <- mkPrependHeader2PipeOut(
         headerDataStreamAndMetaDataPipeOut.headerDataStream,
@@ -517,15 +519,15 @@ module mkReqHandleRQ#(
         return hasReqStatusErrReg || hasDmaReadRespErrReg; // readRespErrNotifyReg;
     endfunction
 
-    let inErrorState = (cntrl.cntrlStatus.isNonErr && hasErrHappened) || cntrl.cntrlStatus.isERR;
+    let inErrorState = (cntrlStatus.comm.isNonErr && hasErrHappened) || cntrlStatus.comm.isERR;
 
-    function Epoch  getEpoch() = cntrl.contextRQ.getEpoch;
-    function Action incEpoch() = cntrl.contextRQ.incEpoch;
+    function Epoch  getEpoch() = contextRQ.getEpoch;
+    function Action incEpoch() = contextRQ.incEpoch;
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.cntrlStatus.isReset);
+    rule resetAndClear if (cntrlStatus.comm.isReset);
         payloadConReqOutQ.clear;
-        payloadGenReqOutQ.clear;
+        // payloadGenReqOutQ.clear;
         workCompGenReqOutQ.clear;
         headerQ.clear;
 
@@ -579,13 +581,14 @@ module mkReqHandleRQ#(
         coalesceWorkReqCnt          <= fromInteger(valueOf(TSub#(MAX_QP_WR, 1)));
         pendingDestReadAtomicReqCnt <= 0;
         isCoalesceWorkReqCntZeroReg <= False;
-        // $display("time=%0t: reset and clear retry handler", $time);
+
+        // $display("time=%0t: reset and clear mkReqHandleRQ", $time);
     endrule
 
     // TODO: check preBuildReqInfo and preCalcReqInfo having negative impact on throughput,
     // since preBuildReqInfo and preCalcReqInfo is not pipelined.
     rule preBuildReqInfo if (
-        cntrl.cntrlStatus.isNonErr                         &&
+        cntrlStatus.comm.isNonErr                         &&
         preStageStateReg == RQ_PRE_BUILD_STAGE &&
         !hasErrHappened
     );
@@ -610,15 +613,15 @@ module mkReqHandleRQ#(
         let isMidPkt   = isMiddleRdmaOpCode(bth.opcode);
         let isLastPkt  = isLastRdmaOpCode(bth.opcode);
 
-        let expectedPSN  = cntrl.contextRQ.getEPSN;
+        let expectedPSN  = contextRQ.getEPSN;
         let oldestPSN    = calcOldestValidPsn4RQ(expectedPSN);
         let isIllegalReq = !curPktMetaData.pktValid;
         let isExpected   = bth.psn == expectedPSN;
         let isDuplicated = psnInRangeExclusive(bth.psn, oldestPSN, expectedPSN);
 
-        let { totalRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrl.cntrlStatus.getPMTU);
-        // let totalRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrl.cntrlStatus.getPMTU);
-        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrl.cntrlStatus.getPMTU);
+        let { totalRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let totalRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         // let reqStatus = pktStatus2ReqStatusRQ(curPktMetaData.pktStatus, bth.trans);
 
         immAssert(
@@ -681,7 +684,7 @@ module mkReqHandleRQ#(
     endrule
 
     rule preCalcReqInfo if (
-        cntrl.cntrlStatus.isNonErr                        &&
+        cntrlStatus.comm.isNonErr             &&
         preStageStateReg == RQ_PRE_CALC_STAGE &&
         !hasErrHappened
     );
@@ -695,7 +698,7 @@ module mkReqHandleRQ#(
         let isReadReq   = reqPktInfo.isReadReq;
         let isAtomicReq = reqPktInfo.isAtomicReq;
 
-        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrl.cntrlStatus.getPMTU);
+        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         let totalRespPktNum = preStageIsZeroPmtuResidueReg ? reqPktInfo.respPktNum : reqPktInfo.respPktNum + 1;
         let isOnlyRespPkt = isLessOrEqOne(totalRespPktNum);
         reqPktInfo.isOnlyRespPkt = reqPktInfo.isReadReq ? isOnlyRespPkt : True;
@@ -704,13 +707,13 @@ module mkReqHandleRQ#(
         let isAccCheckPass = False;
         case ({ pack(isSendReq || isWriteReq), pack(isReadReq), pack(isAtomicReq) })
             3'b100: begin
-                isAccCheckPass = containAccessTypeFlag(cntrl.cntrlStatus.getAccessFlags, IBV_ACCESS_REMOTE_WRITE);
+                isAccCheckPass = containAccessTypeFlag(cntrlStatus.comm.getAccessFlags, IBV_ACCESS_REMOTE_WRITE);
             end
             3'b010: begin
-                isAccCheckPass = containAccessTypeFlag(cntrl.cntrlStatus.getAccessFlags, IBV_ACCESS_REMOTE_READ);
+                isAccCheckPass = containAccessTypeFlag(cntrlStatus.comm.getAccessFlags, IBV_ACCESS_REMOTE_READ);
             end
             3'b001: begin
-                isAccCheckPass = containAccessTypeFlag(cntrl.cntrlStatus.getAccessFlags, IBV_ACCESS_REMOTE_ATOMIC);
+                isAccCheckPass = containAccessTypeFlag(cntrlStatus.comm.getAccessFlags, IBV_ACCESS_REMOTE_ATOMIC);
             end
             default: begin
                 immFail(
@@ -806,7 +809,7 @@ module mkReqHandleRQ#(
                         // retryDone, \
                         // retryFlush" *)
     rule checkEPSN if (
-        cntrl.cntrlStatus.isNonErr   && !hasErrHappened   &&
+        cntrlStatus.comm.isNonErr   && !hasErrHappened   &&
         preStageStateReg == RQ_PRE_STAGE_DONE &&
         retryStateReg    == RQ_NOT_RETRY
     );
@@ -826,10 +829,10 @@ module mkReqHandleRQ#(
 
         // reqPktInfo.isOnlyRespPkt = isLessOrEqOne(reqPktInfo.respPktNum);
         let { nextPktSeqNum, endPktSeqNum } = calcNextAndEndPSN(
-            bth.psn, reqPktInfo.respPktNum, reqPktInfo.isOnlyRespPkt, cntrl.cntrlStatus.getPMTU
+            bth.psn, reqPktInfo.respPktNum, reqPktInfo.isOnlyRespPkt, cntrlStatus.comm.getPMTU
         );
 
-        let curEPSN = cntrl.contextRQ.getEPSN;
+        let curEPSN = contextRQ.getEPSN;
         let nextEPSN = curEPSN;
         if (epoch == getEpoch) begin
             if (reqStatus == RDMA_REQ_ST_NORMAL) begin
@@ -839,11 +842,11 @@ module mkReqHandleRQ#(
                         2'b10: begin
                             if (isReadReq) begin
                                 nextEPSN = nextPktSeqNum;
-                                // cntrl.contextRQ.setEPSN(nextPktSeqNum);
+                                // contextRQ.setEPSN(nextPktSeqNum);
                             end
                             else begin
                                 nextEPSN = bth.psn + 1;
-                                // cntrl.contextRQ.setEPSN(bth.psn + 1);
+                                // contextRQ.setEPSN(bth.psn + 1);
                             end
                             reqStatus = RDMA_REQ_ST_NORMAL;
                         end
@@ -868,7 +871,7 @@ module mkReqHandleRQ#(
 
         reqPktInfo.endPSN = endPktSeqNum;
         preStageStateReg <= RQ_PRE_BUILD_STAGE;
-        cntrl.contextRQ.setEPSN(nextEPSN);
+        contextRQ.setEPSN(nextEPSN);
 
         supportedReqOpCodeCheckQ.enq(tuple4(curPktMetaData, reqStatus, reqPktInfo, curEPSN));
         // $display(
@@ -879,14 +882,14 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry state
-    rule checkSupportedReqOpCode if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkSupportedReqOpCode if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { pktMetaData, reqStatus, reqPktInfo, curEPSN } = supportedReqOpCodeCheckQ.first;
         supportedReqOpCodeCheckQ.deq;
 
         let bth   = reqPktInfo.bth;
         let epoch = reqPktInfo.epoch;
 
-        let isSupportedReqOpCode = isSupportedReqOpCodeRQ(cntrl.cntrlStatus.getTypeQP, bth.opcode);
+        let isSupportedReqOpCode = isSupportedReqOpCodeRQ(cntrlStatus.getTypeQP, bth.opcode);
 
         if (epoch == getEpoch) begin
             if (!hasErrHappened) begin
@@ -931,19 +934,19 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry state
-    rule checkNormalReqOpCodeSeq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkNormalReqOpCodeSeq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { pktMetaData, reqStatus, reqPktInfo } = reqOpCodeSeqCheckQ.first;
         reqOpCodeSeqCheckQ.deq;
 
         let bth       = reqPktInfo.bth;
         let epoch     = reqPktInfo.epoch;
-        let preOpCode = cntrl.contextRQ.getPreReqOpCode;
+        let preOpCode = contextRQ.getPreReqOpCode;
 
         if (epoch == getEpoch) begin
             if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
                 let seqCheckResult = checkNormalReqOpCodeSeqRQ(preOpCode, bth.opcode);
                 if (seqCheckResult) begin
-                    cntrl.contextRQ.setPreReqOpCode(bth.opcode);
+                    contextRQ.setPreReqOpCode(bth.opcode);
                 end
                 else begin
                     reqStatus = getInvReqStatusByTransType(bth.trans);
@@ -961,7 +964,7 @@ module mkReqHandleRQ#(
             reqStatus = RDMA_REQ_ST_DISCARD;
 
             $display(
-                "time=%0t: epoch mismatch in 4th stage, epoch=", $time, fshow(epoch),
+                "time=%0t: epoch mismatch in 3rd stage, epoch=", $time, fshow(epoch),
                 ", getEpoch=", fshow(getEpoch)
             );
         end
@@ -976,7 +979,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry state
-    rule checkRNR if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkRNR if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { pktMetaData, reqStatus, reqPktInfo, preOpCode } = rnrCheckQ.first;
         rnrCheckQ.deq;
 
@@ -1014,7 +1017,7 @@ module mkReqHandleRQ#(
                 end
                 else begin
                     reqStatus = RDMA_REQ_ST_RNR;
-                    cntrl.contextRQ.restorePreReqOpCodeAndEPSN(preOpCode, bth.psn);
+                    contextRQ.restorePreReqOpCodeAndEPSN(preOpCode, bth.psn);
                 end
             end
         end
@@ -1032,7 +1035,7 @@ module mkReqHandleRQ#(
             );
 
             $display(
-                "time=%0t: epoch mismatch in 5th stage, epoch=", $time, fshow(epoch),
+                "time=%0t: epoch mismatch in 4th stage, epoch=", $time, fshow(epoch),
                 ", getEpoch=", fshow(getEpoch)
             );
         end
@@ -1060,7 +1063,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule triggerRNR if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule triggerRNR if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, reqPktInfo, preOpCode, maybeRecvReq
         } = rnrTriggerQ.first;
@@ -1076,8 +1079,8 @@ module mkReqHandleRQ#(
             // if (retryStateReg == RQ_NOT_RETRY && !hasErrHappened) begin
                 if (reqStatus == RDMA_REQ_ST_RNR) begin
                     incEpoch;
-                    // cntrl.contextRQ.restorePreReqOpCode(preOpCode);
-                    // cntrl.contextRQ.restoreEPSN(bth.psn);
+                    // contextRQ.restorePreReqOpCode(preOpCode);
+                    // contextRQ.restoreEPSN(bth.psn);
                     retryStartState = tagged Valid RQ_RNR_RETRY_FLUSH;
                     // retryStateReg <= RQ_RNR_RETRY_FLUSH;
                 end
@@ -1092,13 +1095,13 @@ module mkReqHandleRQ#(
             reqStatus = RDMA_REQ_ST_DISCARD;
 
             $display(
-                "time=%0t: epoch mismatch in 6th stage, epoch=", $time, fshow(epoch),
+                "time=%0t: epoch mismatch in 5th stage, epoch=", $time, fshow(epoch),
                 ", getEpoch=", fshow(getEpoch)
             );
         end
 
         retryStartReg[0] <= retryStartState;
-        minRnrTimerReg   <= cntrl.cntrlStatus.getMinRnrTimer;
+        minRnrTimerReg   <= cntrlStatus.comm.getMinRnrTimer;
         // reqPermInfoBuildQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
         qpAccPermCheckQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
         // $display(
@@ -1109,7 +1112,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkQpAccPermAndReadAtomicReqNum if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkQpAccPermAndReadAtomicReqNum if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { pktMetaData, reqStatus, reqPktInfo, maybeRecvReq } = qpAccPermCheckQ.first;
         qpAccPermCheckQ.deq;
 
@@ -1125,7 +1128,7 @@ module mkReqHandleRQ#(
                 pendingDestReadAtomicReqCnt.incrOne;
 
                 if (
-                    pendingDestReadAtomicReqCnt >= cntrl.cntrlStatus.getPendingDestReadAtomicReqNum
+                    pendingDestReadAtomicReqCnt >= cntrlStatus.comm.getPendingDestReadAtomicReqNum
                 ) begin
                     hasTooManyReadAtomicReqs = True;
                     reqStatus = getInvReqStatusByTransType(bth.trans);
@@ -1137,15 +1140,15 @@ module mkReqHandleRQ#(
                         )
                     );
 
-                    $display(
-                        "time=%0t:", $time,
-                        " pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
-                        " must < cntrl.cntrlStatus.getPendingDestReadAtomicReqNum=%0d",
-                        cntrl.cntrlStatus.getPendingDestReadAtomicReqNum,
-                        " when bth.psn=%h", bth.psn,
-                        ", bth.opcode=", fshow(bth.opcode),
-                        ", reqStatus=", fshow(reqStatus)
-                    );
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     " pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
+                    //     " must < cntrlStatus.comm.getPendingDestReadAtomicReqNum=%0d",
+                    //     cntrlStatus.comm.getPendingDestReadAtomicReqNum,
+                    //     " when bth.psn=%h", bth.psn,
+                    //     ", bth.opcode=", fshow(bth.opcode),
+                    //     ", reqStatus=", fshow(reqStatus)
+                    // );
                 end
             end
         end
@@ -1161,7 +1164,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule buildPermCheckReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule buildPermCheckReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let { pktMetaData, reqStatus, reqPktInfo, maybeRecvReq } = reqPermInfoBuildQ.first;
         reqPermInfoBuildQ.deq;
 
@@ -1179,7 +1182,7 @@ module mkReqHandleRQ#(
         let isWriteImmReq    = reqPktInfo.isWriteImmReq;
         let isAtomicReq      = reqPktInfo.isAtomicReq;
 
-        let curPermCheckReq = cntrl.contextRQ.getPermCheckReq;
+        let curPermCheckReq = contextRQ.getPermCheckReq;
         // Duplicate requests no use PermCheckReq
         if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
             case ({ pack(isFirstOrOnlyPkt && isSendReq), pack(hasReth), pack(isAtomicReq) })
@@ -1308,7 +1311,7 @@ module mkReqHandleRQ#(
 
                 curPermCheckReq.wrID = tagged Valid recvReq.id;
             end
-            cntrl.contextRQ.setPermCheckReq(curPermCheckReq);
+            contextRQ.setPermCheckReq(curPermCheckReq);
         end
 
         reqPermQueryQ.enq(tuple5(
@@ -1321,7 +1324,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule queryPerm4NormalReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule queryPerm4NormalReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth
         } = reqPermQueryQ.first;
@@ -1348,7 +1351,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkPerm4NormalReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkPerm4NormalReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth, expectPermCheckResp
         } = reqPermCheckQ.first;
@@ -1396,10 +1399,10 @@ module mkReqHandleRQ#(
                                 "reqStatus=", fshow(reqStatus), " should not be unknown"
                             )
                         );
-                        $display(
-                            "time=%0d:", $time,
-                            " un-aligned atomicEth.va=%h", atomicEth.va
-                        );
+                        // $display(
+                        //     "time=%0d:", $time,
+                        //     " un-aligned atomicEth.va=%h", atomicEth.va
+                        // );
                     end
                     // $display("time=%0t: atomicEth.va=%h", $time, atomicEth.va);
                 end
@@ -1420,7 +1423,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule insertIntoReadCache if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule insertIntoReadCache if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth
         } = readCacheInsertQ.first;
@@ -1452,7 +1455,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule queryPerm4DupReadReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule queryPerm4DupReadReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth
         } = dupReadReqPermQueryQ.first;
@@ -1486,7 +1489,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkPerm4DupReadReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkPerm4DupReadReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth, expectDupReadCheckResp
         } = dupReadReqPermCheckQ.first;
@@ -1551,7 +1554,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule calcNormalSendWriteReqDmaAddr if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule calcNormalSendWriteReqDmaAddr if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState
         } = reqAddrCalcQ.first;
@@ -1567,8 +1570,8 @@ module mkReqHandleRQ#(
         let isLastPkt  = reqPktInfo.isLastPkt;
 
         let curDmaWriteAddr    = permCheckReq.reqAddr;
-        let nextDmaWriteAddr   = cntrl.contextRQ.getNextDmaWriteAddr;
-        let sendWriteReqPktNum = cntrl.contextRQ.getSendWriteReqPktNum;
+        let nextDmaWriteAddr   = contextRQ.getNextDmaWriteAddr;
+        let sendWriteReqPktNum = contextRQ.getSendWriteReqPktNum;
         let oneAsPSN           = 1;
 
         if (isSendReq || isWriteReq) begin
@@ -1579,19 +1582,19 @@ module mkReqHandleRQ#(
                     sendWriteReqPktNum = 1;
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    nextDmaWriteAddr   = addrAddPsnMultiplyPMTU(permCheckReq.reqAddr, oneAsPSN, cntrl.cntrlStatus.getPMTU);
+                    nextDmaWriteAddr   = addrAddPsnMultiplyPMTU(permCheckReq.reqAddr, oneAsPSN, cntrlStatus.comm.getPMTU);
                     sendWriteReqPktNum = 1;
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    curDmaWriteAddr    = cntrl.contextRQ.getNextDmaWriteAddr;
-                    nextDmaWriteAddr   = addrAddPsnMultiplyPMTU(cntrl.contextRQ.getNextDmaWriteAddr, oneAsPSN, cntrl.cntrlStatus.getPMTU);
-                    sendWriteReqPktNum = cntrl.contextRQ.getSendWriteReqPktNum + 1;
+                    curDmaWriteAddr    = contextRQ.getNextDmaWriteAddr;
+                    nextDmaWriteAddr   = addrAddPsnMultiplyPMTU(contextRQ.getNextDmaWriteAddr, oneAsPSN, cntrlStatus.comm.getPMTU);
+                    sendWriteReqPktNum = contextRQ.getSendWriteReqPktNum + 1;
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                    curDmaWriteAddr    = cntrl.contextRQ.getNextDmaWriteAddr;
+                    curDmaWriteAddr    = contextRQ.getNextDmaWriteAddr;
                     // No need to calculate next DMA write address for last send/write responses
                     nextDmaWriteAddr   = permCheckReq.reqAddr;
-                    sendWriteReqPktNum = cntrl.contextRQ.getSendWriteReqPktNum + 1;
+                    sendWriteReqPktNum = contextRQ.getSendWriteReqPktNum + 1;
                 end
                 default: begin
                     immFail(
@@ -1607,8 +1610,8 @@ module mkReqHandleRQ#(
             endcase
 
             if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
-                cntrl.contextRQ.setNextDmaWriteAddr(nextDmaWriteAddr);
-                cntrl.contextRQ.setSendWriteReqPktNum(sendWriteReqPktNum);
+                contextRQ.setNextDmaWriteAddr(nextDmaWriteAddr);
+                contextRQ.setSendWriteReqPktNum(sendWriteReqPktNum);
                 // $display(
                 //     "time=%0t: nextDmaWriteAddr=%h, sendWriteReqPktNum=%0d",
                 //     $time, nextDmaWriteAddr, sendWriteReqPktNum
@@ -1627,7 +1630,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule calcNormalSendWriteReqDmaRemainingLen if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule calcNormalSendWriteReqDmaRemainingLen if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, dupReadReqStartState, curDmaWriteAddr
@@ -1643,7 +1646,7 @@ module mkReqHandleRQ#(
         let isMidPkt   = reqPktInfo.isMidPkt;
         let isLastPkt  = reqPktInfo.isLastPkt;
 
-        let remainingDmaWriteLen = cntrl.contextRQ.getRemainingDmaWriteLen;
+        let remainingDmaWriteLen = contextRQ.getRemainingDmaWriteLen;
         let pktPayloadLen        = pktMetaData.pktPayloadLen;
         // let enoughDmaSpace       = False;
         let oneAsPSN             = 1;
@@ -1652,17 +1655,17 @@ module mkReqHandleRQ#(
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
                     // Exact remaining length is not necessory, zero or non-zero is enough
-                    remainingDmaWriteLen = lenSubtractPktLen(permCheckReq.totalLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
+                    remainingDmaWriteLen = lenSubtractPktLen(permCheckReq.totalLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(permCheckReq.totalLen, oneAsPSN, cntrl.cntrlStatus.getPMTU);
+                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(permCheckReq.totalLen, oneAsPSN, cntrlStatus.comm.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(cntrl.contextRQ.getRemainingDmaWriteLen, oneAsPSN, cntrl.cntrlStatus.getPMTU);
+                    remainingDmaWriteLen = lenSubtractPsnMultiplyPMTU(contextRQ.getRemainingDmaWriteLen, oneAsPSN, cntrlStatus.comm.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     // Exact remaining length is not necessory, zero or non-zero is enough
-                    remainingDmaWriteLen = lenSubtractPktLen(cntrl.contextRQ.getRemainingDmaWriteLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
+                    remainingDmaWriteLen = lenSubtractPktLen(contextRQ.getRemainingDmaWriteLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
                 end
                 default: begin
                     immFail(
@@ -1678,7 +1681,7 @@ module mkReqHandleRQ#(
             endcase
 
             if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
-                cntrl.contextRQ.setRemainingDmaWriteLen(remainingDmaWriteLen);
+                contextRQ.setRemainingDmaWriteLen(remainingDmaWriteLen);
                 // $display(
                 //     "time=%0t: remainingDmaWriteLen=%h, enoughDmaSpace=",
                 //     $time, remainingDmaWriteLen, fshow(enoughDmaSpace)
@@ -1689,7 +1692,7 @@ module mkReqHandleRQ#(
         // reqTotalLenCalcQ.enq(tuple8(
         reqEnoughDmaSpaceQ.enq(tuple8(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
-            curDmaWriteAddr, remainingDmaWriteLen, cntrl.contextRQ.getRemainingDmaWriteLen
+            curDmaWriteAddr, remainingDmaWriteLen, contextRQ.getRemainingDmaWriteLen
         ));
         // $display(
         //     "time=%0t: 14th stage, bth.opcode=", $time, fshow(bth.opcode),
@@ -1698,7 +1701,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule calcNormalSendWriteReqEnoughDmaSpace if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule calcNormalSendWriteReqEnoughDmaSpace if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
             curDmaWriteAddr, remainingDmaWriteLen, preRemainingDmaWriteLen
@@ -1720,16 +1723,16 @@ module mkReqHandleRQ#(
         if (isSendReq || isWriteReq) begin
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
-                    enoughDmaSpace = lenGtEqPktLen(permCheckReq.totalLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
+                    enoughDmaSpace = lenGtEqPktLen(permCheckReq.totalLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    enoughDmaSpace = lenGtEqPMTU(permCheckReq.totalLen, cntrl.cntrlStatus.getPMTU);
+                    enoughDmaSpace = lenGtEqPMTU(permCheckReq.totalLen, cntrlStatus.comm.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    enoughDmaSpace = lenGtEqPMTU(preRemainingDmaWriteLen, cntrl.cntrlStatus.getPMTU);
+                    enoughDmaSpace = lenGtEqPMTU(preRemainingDmaWriteLen, cntrlStatus.comm.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                    enoughDmaSpace = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
+                    enoughDmaSpace = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
                 end
                 default: begin
                     immFail(
@@ -1756,7 +1759,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule calcNormalSendWriteReqDmaTotalLen if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule calcNormalSendWriteReqDmaTotalLen if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
             curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpace // preRemainingDmaWriteLen
@@ -1772,7 +1775,7 @@ module mkReqHandleRQ#(
         let isMidPkt   = reqPktInfo.isMidPkt;
         let isLastPkt  = reqPktInfo.isLastPkt;
 
-        Length totalDmaWriteLen  = cntrl.contextRQ.getTotalDmaWriteLen;
+        Length totalDmaWriteLen  = contextRQ.getTotalDmaWriteLen;
         let pktPayloadLen        = pktMetaData.pktPayloadLen;
         // let enoughDmaSpace       = False;
         let isLastPayloadLenZero = False;
@@ -1784,13 +1787,13 @@ module mkReqHandleRQ#(
                     totalDmaWriteLen     = zeroExtend(pktPayloadLen);
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrl.cntrlStatus.getPMTU);
+                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrlStatus.comm.getPMTU);
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
-                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(cntrl.contextRQ.getTotalDmaWriteLen, oneAsPSN, cntrl.cntrlStatus.getPMTU);
+                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(contextRQ.getTotalDmaWriteLen, oneAsPSN, cntrlStatus.comm.getPMTU);
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
-                    totalDmaWriteLen     = lenAddPktLen(cntrl.contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrl.cntrlStatus.getPMTU);
+                    totalDmaWriteLen     = lenAddPktLen(contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
                     isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin
@@ -1807,7 +1810,7 @@ module mkReqHandleRQ#(
             endcase
 
             if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
-                cntrl.contextRQ.setTotalDmaWriteLen(totalDmaWriteLen);
+                contextRQ.setTotalDmaWriteLen(totalDmaWriteLen);
                 // $display(
                 //     "time=%0t: totalDmaWriteLen=%h, enoughDmaSpace=",
                 //     $time, totalDmaWriteLen, fshow(enoughDmaSpace)
@@ -1833,7 +1836,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkReqLen if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkReqLen if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, reqLenCheckResult, dupReadReqStartState
@@ -1900,7 +1903,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule issuePayloadConReqOrDiscard if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule issuePayloadConReqOrDiscard if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, curDmaWriteAddr, dupReadReqStartState
@@ -1919,8 +1922,8 @@ module mkReqHandleRQ#(
                 let payloadConReq = PayloadConReq {
                     fragNum      : pktMetaData.pktFragNum,
                     consumeInfo  : tagged SendWriteReqReadRespInfo DmaWriteMetaData {
-                        initiator: DMA_INIT_RQ_WR,
-                        sqpn     : cntrl.cntrlStatus.getSQPN,
+                        initiator: DMA_SRC_RQ_WR,
+                        sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: curDmaWriteAddr,
                         len      : pktMetaData.pktPayloadLen,
                         psn      : bth.psn
@@ -1932,9 +1935,9 @@ module mkReqHandleRQ#(
         // if (reqStatus != RDMA_REQ_ST_NORMAL || hasErrHappened) begin
         else if (!isZeroPayloadLen) begin
             // Discard request payload if duplicate, error or flushing
-            let initiator = DMA_INIT_RQ_DISCARD;
+            let initiator = DMA_SRC_RQ_DISCARD;
             genDiscardPayloadReq(
-                pktMetaData.pktFragNum, initiator, cntrl.cntrlStatus.getSQPN,
+                pktMetaData.pktFragNum, initiator, cntrlStatus.comm.getSQPN,
                 curDmaWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
                 payloadConReqOutQ
             );
@@ -1970,7 +1973,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule issuePayloadGenReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule issuePayloadGenReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, hasReqStatusErr, dupReadReqStartState
         } = issuePayloadGenReqQ.first;
@@ -1994,26 +1997,27 @@ module mkReqHandleRQ#(
                 let payloadGenReq = PayloadGenReq {
                     addPadding   : True,
                     segment      : True,
-                    pmtu         : cntrl.cntrlStatus.getPMTU,
+                    pmtu         : cntrlStatus.comm.getPMTU,
                     dmaReadReq   : DmaReadReq {
-                        initiator: DMA_INIT_RQ_RD,
-                        sqpn     : cntrl.cntrlStatus.getSQPN,
+                        initiator: DMA_SRC_RQ_RD,
+                        sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: permCheckReq.reqAddr, // reth.va
                         len      : permCheckReq.totalLen, // reth.dlen
                         wrID     : dontCareValue
                     }
                 };
-                payloadGenReqOutQ.enq(payloadGenReq);
+                // payloadGenReqOutQ.enq(payloadGenReq);
+                payloadGenerator.srvPort.request.put(payloadGenReq);
                 expectReadRespPayload = True;
             end
             else if (reqStatus == RDMA_REQ_ST_NORMAL && isAtomicReq) begin
                 let atomicOpReq = AtomicOpReq {
-                    initiator    : DMA_INIT_RQ_ATOMIC,
+                    initiator    : DMA_SRC_RQ_ATOMIC,
                     casOrFetchAdd: bth.opcode == COMPARE_SWAP,
                     startAddr    : atomicEth.va,
                     compData     : atomicEth.comp,
                     swapData     : atomicEth.swap,
-                    sqpn         : cntrl.cntrlStatus.getSQPN,
+                    sqpn         : cntrlStatus.comm.getSQPN,
                     psn          : bth.psn
                 };
                 atomicSrv.request.put(atomicOpReq);
@@ -2047,7 +2051,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule shouldGenResp4NormalCase if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule shouldGenResp4NormalCase if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         } = respGenCheck4NormalCaseQ.first;
@@ -2108,13 +2112,13 @@ module mkReqHandleRQ#(
                 // without AckReq, and if more than MAX_QP_WR consecutive send/write requests
                 // without AckReq, enforce a response to avoid SQ deadlock.
                 if (reloadPendingWorkReqCnt) begin
-                    coalesceWorkReqCnt <= cntrl.cntrlStatus.getPendingWorkReqNum - 1;
-                    // cntrl.contextRQ.setPendingWorkReqCnt(cntrl.cntrlStatus.getPendingWorkReqNum - 1);
-                    isCoalesceWorkReqCntZeroReg <= isOne(cntrl.cntrlStatus.getPendingWorkReqNum);
+                    coalesceWorkReqCnt <= cntrlStatus.comm.getPendingWorkReqNum - 1;
+                    // contextRQ.setPendingWorkReqCnt(cntrlStatus.comm.getPendingWorkReqNum - 1);
+                    isCoalesceWorkReqCntZeroReg <= isOne(cntrlStatus.comm.getPendingWorkReqNum);
                 end
                 else if (decrPendingWorkReqCnt) begin
                     coalesceWorkReqCnt.decr(1);
-                    // cntrl.contextRQ.setPendingWorkReqCnt(cntrl.contextRQ.getPendingWorkReqCnt - 1);
+                    // contextRQ.setPendingWorkReqCnt(contextRQ.getPendingWorkReqCnt - 1);
                     isCoalesceWorkReqCntZeroReg <= isOne(coalesceWorkReqCnt);
                 end
                 // $display(
@@ -2144,7 +2148,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule shouldGenResp4OtherCases if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule shouldGenResp4OtherCases if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         } = respGenCheck4OtherCasesQ.first;
@@ -2232,19 +2236,19 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule countPendingResp if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule countPendingResp if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         } = respCountQ.first;
 
         let bth = reqPktInfo.bth;
 
-        let remainingRespPktNum  = cntrl.contextRQ.getRespPktNum;
+        let remainingRespPktNum  = contextRQ.getRespPktNum;
         // let isFirstOrOnlyRespPkt = isFirstOrOnlyRespPktReg || hasErrRespGenReg;
         // let isLastOrOnlyRespPkt  = isLastOrOnlyRespPkt || hasErrRespGenReg;
         let isFirstOrOnlyRespPkt = isFirstOrOnlyRespPktReg;
         let isLastOrOnlyRespPkt  = reqPktInfo.isOnlyRespPkt ||
-            (!isFirstOrOnlyRespPktReg && cntrl.contextRQ.getIsRespPktNumZero);
+            (!isFirstOrOnlyRespPktReg && contextRQ.getIsRespPktNumZero);
         // If hasErrRespGenReg, no need to count response packets
         isFirstOrOnlyRespPktReg <= isLastOrOnlyRespPkt || hasErrRespGenReg;
 
@@ -2266,10 +2270,10 @@ module mkReqHandleRQ#(
                 else begin
                     remainingRespPktNum = reqPktInfo.respPktNum - 2;
                 end
-                cntrl.contextRQ.setRespPktNum(remainingRespPktNum);
+                contextRQ.setRespPktNum(remainingRespPktNum);
             end
             else if (!isLastOrOnlyRespPkt) begin
-                cntrl.contextRQ.setRespPktNum(remainingRespPktNum - 1);
+                contextRQ.setRespPktNum(remainingRespPktNum - 1);
             end
         end
 
@@ -2297,7 +2301,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule updateRespPsnAndMsn if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule updateRespPsnAndMsn if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktSeqInfo
         } = respPsnAndMsnQ.first;
@@ -2310,15 +2314,15 @@ module mkReqHandleRQ#(
         let isFirstOrOnlyRespPkt = respPktSeqInfo.isFirstOrOnlyRespPkt;
         let isLastOrOnlyRespPkt  = respPktSeqInfo.isLastOrOnlyRespPkt;
 
-        let respPSN = isFirstOrOnlyRespPkt ? bth.psn : cntrl.contextRQ.getCurRespPSN;
-        let msn     = cntrl.contextRQ.getMSN;
+        let respPSN = isFirstOrOnlyRespPkt ? bth.psn : contextRQ.getCurRespPSN;
+        let msn     = contextRQ.getMSN;
 
         if (!hasErrRespGenReg) begin
-            cntrl.contextRQ.setCurRespPSN(respPSN + 1);
+            contextRQ.setCurRespPSN(respPSN + 1);
 
             if (reqStatus == RDMA_REQ_ST_NORMAL && isLastOrOnlyReqPkt && isLastOrOnlyRespPkt) begin
                 msn = msn + 1;
-                cntrl.contextRQ.setMSN(msn);
+                contextRQ.setMSN(msn);
             end
 
             if (
@@ -2366,7 +2370,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule waitAtomicResp if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule waitAtomicResp if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
@@ -2418,7 +2422,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule insertIntoAtomicCache if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule insertIntoAtomicCache if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
@@ -2484,7 +2488,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkReadResp if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkReadResp if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, atomicEth
@@ -2545,8 +2549,9 @@ module mkReqHandleRQ#(
                     )
                 );
 
-                let payloadGenResp = payloadGenerator.respPipeOut.first;
-                payloadGenerator.respPipeOut.deq;
+                let payloadGenResp <- payloadGenerator.srvPort.response.get;
+                // let payloadGenResp = payloadGenerator.respPipeOut.first;
+                // payloadGenerator.respPipeOut.deq;
 
                 if (payloadGenResp.isRespErr) begin
                     hasDmaReadRespErr     = True;
@@ -2559,26 +2564,6 @@ module mkReqHandleRQ#(
                         ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
                         ", reqStatus=", fshow(reqStatus)
                     );
-/*
-                    // Only change to error state when normal read requests have response error,
-                    // but if duplicate read requests have response error, it will postpone
-                    // the error response generation to next normal or error request.
-                    if (reqStatus == RDMA_REQ_ST_NORMAL) begin
-                        reqStatus = RDMA_REQ_ST_RMT_OP;
-                        $display(
-                            "time=%0t:", $time,
-                            " set readRespErrNotifyReg",
-                            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-                            ", reqStatus=", fshow(reqStatus)
-                        );
-                    end
-                    else begin
-                        // Can not change to error state if duplicate read request have
-                        // error read response
-                        reqStatus = RDMA_REQ_ST_DISCARD;
-                        respPktGenInfo.shouldGenResp = False;
-                    end
-*/
                 end
             end
         end
@@ -2606,7 +2591,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule queryPerm4DupAtomicReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule queryPerm4DupAtomicReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo, atomicEth
         } = dupAtomicReqPermQueryQ.first;
@@ -2643,7 +2628,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule checkPerm4DupAtomicReq if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule checkPerm4DupAtomicReq if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         } = dupAtomicReqPermCheckQ.first;
@@ -2696,7 +2681,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule genRespHeader if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule genRespHeader if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         } = respHeaderGenQ.first;
@@ -2736,14 +2721,14 @@ module mkReqHandleRQ#(
                 let isOnlyReadRespPkt = reqPktInfo.isOnlyRespPkt && reqPktInfo.isReadReq;
                 let maybeFirstOrOnlyHeader = genFirstOrOnlyRespHeader(
                     bth.opcode, reqStatus, permCheckReq.totalLen, respPktGenInfo.atomicAckOrig,
-                    cntrl, psn, msn, isOnlyReadRespPkt
+                    cntrlStatus, psn, msn, isOnlyReadRespPkt
                 );
                 maybeHeader = maybeFirstOrOnlyHeader;
             end
             else begin
                 let maybeMiddleOrLastHeader = genMiddleOrLastRespHeader(
                     bth.opcode, reqStatus, permCheckReq.totalLen,
-                    cntrl, psn, msn, respPktHeaderInfo.isLastOrOnlyRespPkt
+                    cntrlStatus, psn, msn, respPktHeaderInfo.isLastOrOnlyRespPkt
                 );
                 maybeHeader = maybeMiddleOrLastHeader;
             end
@@ -2811,7 +2796,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule genRespPkt if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule genRespPkt if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, maybeHeader
@@ -2971,7 +2956,7 @@ module mkReqHandleRQ#(
     endrule
 
     // This rule still runs at retry or error state
-    rule genWorkCompRQ if (cntrl.cntrlStatus.isNonErr || cntrl.cntrlStatus.isERR);
+    rule genWorkCompRQ if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         } = workCompReqQ.first;
@@ -3005,12 +2990,12 @@ module mkReqHandleRQ#(
 
                 if (pendingDestReadAtomicReqCnt > 0) begin
                     pendingDestReadAtomicReqCnt.decrOne;
-                    $display(
-                        "time=%0t:", $time,
-                        " decrease pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
-                        ", bth.opcode=", fshow(bth.opcode),
-                        ", bth.psn=%h", bth.psn
-                    );
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     " decrease pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
+                    //     ", bth.opcode=", fshow(bth.opcode),
+                    //     ", bth.psn=%h", bth.psn
+                    // );
                 end
                 else begin
                     immFail(
@@ -3031,7 +3016,7 @@ module mkReqHandleRQ#(
             let workCompReq = WorkCompGenReqRQ {
                 rrID        : permCheckReq.wrID,
                 len         : permCheckReq.totalLen,
-                sqpn        : cntrl.cntrlStatus.getSQPN,
+                sqpn        : cntrlStatus.comm.getSQPN,
                 reqPSN      : bth.psn,
                 isZeroDmaLen: isZeroDmaLen,
                 wcStatus    : workCompStatus,
@@ -3052,28 +3037,7 @@ module mkReqHandleRQ#(
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-/*
-    (* no_implicit_conditions, fire_when_enabled *)
-    rule canonicalize if (
-        cntrl.cntrlStatus.isNonErr && (hasReqStatusErrReg[1] || readRespErrNotifyReg[1])
-    );
-        hasErrOccurredReg       <= True;
-        hasReqStatusErrReg[1]   <= False;
-        readRespErrNotifyReg[1] <= False;
-        $display(
-            "time=%0t:", $time,
-            " set hasErrOccurredReg to True when hasReqStatusErrReg[1]=",
-            fshow(hasReqStatusErrReg[1]),
-            " and readRespErrNotifyReg[1]=",
-            fshow(readRespErrNotifyReg[1])
-        );
-    endrule
 
-    (* no_implicit_conditions, fire_when_enabled *)
-    rule errFlushPipelineQ if (inErrorState);
-        clearRetryRelatedPipelineQ;
-    endrule
-*/
     (* fire_when_enabled *)
     rule errFlushRecvReq if (inErrorState && recvReqBuf.notEmpty);
         let recvReq = recvReqBuf.first;
@@ -3091,7 +3055,7 @@ module mkReqHandleRQ#(
             // pktStatus    : PKT_ST_DISCARD
         };
         let reqStatus   = RDMA_REQ_ST_ERR_FLUSH_RR;
-        let maybeTrans  = qpType2TransType(cntrl.cntrlStatus.getTypeQP);
+        let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);
 
         let bth = BTH {
             trans    : unwrapMaybe(maybeTrans),
@@ -3100,7 +3064,7 @@ module mkReqHandleRQ#(
             migReq   : unpack(0),
             padCnt   : 0,
             tver     : unpack(0),
-            pkey     : cntrl.cntrlStatus.getPKEY,
+            pkey     : cntrlStatus.comm.getPKEY,
             fecn     : unpack(0),
             becn     : unpack(0),
             resv6    : unpack(0),
@@ -3132,7 +3096,7 @@ module mkReqHandleRQ#(
             isAccCheckPass  : False
         };
 
-        let curEPSN = cntrl.contextRQ.getEPSN;
+        let curEPSN = contextRQ.getEPSN;
         supportedReqOpCodeCheckQ.enq(tuple4(
             pktMetaData, reqStatus, reqPktInfo, curEPSN
         ));
@@ -3206,7 +3170,7 @@ module mkReqHandleRQ#(
                         retryFlush" *)
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryStageRnrRetryFlush if (
-        cntrl.cntrlStatus.isNonErr && !hasErrHappened && retryStateReg == RQ_RNR_RETRY_FLUSH
+        cntrlStatus.comm.isNonErr && !hasErrHappened && retryStateReg == RQ_RNR_RETRY_FLUSH
     );
         retryStateReg <= RQ_RNR_WAIT;
         rnrWaitCntReg <= fromInteger(getRnrTimeOutValue(minRnrTimerReg));
@@ -3215,7 +3179,7 @@ module mkReqHandleRQ#(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryStageRnrWait if (
-        cntrl.cntrlStatus.isNonErr && !hasErrHappened && retryStateReg == RQ_RNR_WAIT
+        cntrlStatus.comm.isNonErr && !hasErrHappened && retryStateReg == RQ_RNR_WAIT
     );
         if (isRnrWaitCntZeroReg) begin
             retryStateReg <= RQ_RNR_WAIT_DONE;
@@ -3229,7 +3193,7 @@ module mkReqHandleRQ#(
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryStart if (
         retryStartReg[1] matches tagged Valid .retryStartState &&&
-        cntrl.cntrlStatus.isNonErr &&& retryStateReg == RQ_NOT_RETRY &&& !hasErrHappened
+        cntrlStatus.comm.isNonErr &&& retryStateReg == RQ_NOT_RETRY &&& !hasErrHappened
     );
         retryStateReg    <= retryStartState;
         retryStartReg[1] <= tagged Invalid;
@@ -3237,7 +3201,7 @@ module mkReqHandleRQ#(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule retryDone if (
-        cntrl.cntrlStatus.isNonErr && !hasErrHappened && preStageStateReg == RQ_PRE_CALC_STAGE &&
+        cntrlStatus.comm.isNonErr && !hasErrHappened && preStageStateReg == RQ_PRE_CALC_STAGE &&
         (retryStateReg == RQ_RNR_WAIT_DONE || retryStateReg == RQ_SEQ_RETRY_FLUSH)
     );
         let reqPktInfo = preStageReqPktInfoReg;
@@ -3264,20 +3228,19 @@ module mkReqHandleRQ#(
 
     (* fire_when_enabled *)
     rule retryFlush if (
-        cntrl.cntrlStatus.isNonErr && preStageStateReg == RQ_PRE_STAGE_DONE &&
+        cntrlStatus.comm.isNonErr && preStageStateReg == RQ_PRE_STAGE_DONE &&
         retryStateReg != RQ_NOT_RETRY && !hasErrHappened
     );
         let reqPktInfo  = preStageReqPktInfoReg;
         let pktMetaData = preStagePktMetaDataReg;
-        // let bth         = reqPktInfo.bth;
-        // let reqStatus   = preStageReqStatusReg;
+        let bth         = reqPktInfo.bth;
 
         // $display(
         //     "time=%0t:", $time,
         //     // " isRetryFlushDoneReg=", fshow(isRetryFlushDoneReg),
         //     ", isRetryFlushDone=", fshow(isRetryFlushDone),
         //     ", bth.psn=%h", bth.psn,
-        //     ", ePSN=%h", cntrl.contextRQ.getEPSN
+        //     ", ePSN=%h", contextRQ.getEPSN
         // );
 
         // if (!isRetryFlushDone) begin
@@ -3287,20 +3250,20 @@ module mkReqHandleRQ#(
         let reqStatus = RDMA_REQ_ST_DISCARD;
         // let maybeRecvReq = tagged Invalid;
         // reqPermInfoBuildQ.enq(tuple4(
-        let curEPSN = cntrl.contextRQ.getEPSN; // bth.psn;
+        let curEPSN = contextRQ.getEPSN; // bth.psn;
         supportedReqOpCodeCheckQ.enq(tuple4(
             pktMetaData, reqStatus, reqPktInfo, curEPSN
         ));
         // end
-        // $display(
-        //     "time=%0t: 1st retry flush stage, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 1st retry flush stage, bth.opcode=", $time, fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
-    interface payloadConReqPipeOut      = convertFifo2PipeOut(payloadConReqOutQ);
-    // interface payloadGenReqPipeOut      = convertFifo2PipeOut(payloadGenReqOutQ);
+    interface payloadConReqPipeOut      = toPipeOut(payloadConReqOutQ);
+    // interface payloadGenReqPipeOut      = toPipeOut(payloadGenReqOutQ);
     interface rdmaRespDataStreamPipeOut = rdmaRespPipeOut;
-    interface workCompGenReqPipeOut     = convertFifo2PipeOut(workCompGenReqOutQ);
+    interface workCompGenReqPipeOut     = toPipeOut(workCompGenReqOutQ);
 endmodule

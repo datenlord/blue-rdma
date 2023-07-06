@@ -307,7 +307,7 @@ module mkTestPipeOutArbiter(Empty);
     Vector#(CLIENT_NUM, FIFOF#(PayloadType)) pipeInPayloadVec <- replicateM(mkFIFOF);
     Vector#(CLIENT_NUM, Count#(ClientIndex)) pipeInFragCntVec <- genWithM(genClientFragCnt);
 
-    let dut <- mkPipeOutArbiter(map(convertFifo2PipeOut, pipeInPayloadVec), isPipePayloadFinished);
+    let dut <- mkPipeOutArbiter(map(toPipeOut, pipeInPayloadVec), isPipePayloadFinished);
 
     Count#(ClientIndex) expectedPipeOutValCnt <- mkCount(fromInteger(valueOf(CLIENT_NUM) - 1));
     Count#(ClientIndex) expectedPipeFragLastCnt <- mkCount(fromInteger(valueOf(CLIENT_NUM) - 1));

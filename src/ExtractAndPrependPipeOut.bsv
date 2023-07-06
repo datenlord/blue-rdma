@@ -81,8 +81,8 @@ module mkHeader2DataStream#(
         headerDataStreamOutQ.enq(dataStream);
     endrule
 
-    interface headerDataStream = convertFifo2PipeOut(headerDataStreamOutQ);
-    interface headerMetaData   = convertFifo2PipeOut(headerMetaDataOutQ);
+    interface headerDataStream = toPipeOut(headerDataStreamOutQ);
+    interface headerMetaData   = toPipeOut(headerMetaDataOutQ);
 endmodule
 
 // dataPipeIn must have multi-fragment data no more than HeaderByteNum
@@ -176,7 +176,7 @@ module mkDataStream2Header#(
         rdmaHeaderReg <= rdmaHeader;
     endrule
 
-    return convertFifo2PipeOut(headerOutQ);
+    return toPipeOut(headerOutQ);
 endmodule
 
 typedef enum {
@@ -356,7 +356,7 @@ module mkPrependHeader2PipeOut#(
         stageReg <= HEADER_META_DATA_POP;
     endrule
 
-    return convertFifo2PipeOut(dataStreamOutQ);
+    return toPipeOut(dataStreamOutQ);
 endmodule
 
 interface HeaderAndPayloadSeperateDataStreamPipeOut;
@@ -570,6 +570,6 @@ module mkExtractHeaderFromDataStreamPipeOut#(
         stageReg <= HEADER_META_DATA_POP;
     endrule
 
-    interface header = convertFifo2PipeOut(headerDataStreamOutQ);
-    interface payload = convertFifo2PipeOut(payloadDataStreamOutQ);
+    interface header = toPipeOut(headerDataStreamOutQ);
+    interface payload = toPipeOut(payloadDataStreamOutQ);
 endmodule

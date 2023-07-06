@@ -13,15 +13,15 @@ module mkTestCntrlInVec(Empty);
     let qpType = IBV_QPT_XRC_RECV;
     let pmtu = IBV_MTU_1024;
 
-    Vector#(MAX_QP, Controller) cntrlVec <- replicateM(
+    Vector#(MAX_QP, CntrlQP) cntrlVec <- replicateM(
         mkSimCntrl(qpType, pmtu)
     );
     // let setExpectedPsnAsNextPSN = False;
-    // Vector#(MAX_QP, Controller) cntrlVec <- replicateM(mkSimController(
+    // Vector#(MAX_QP, CntrlQP) cntrlVec <- replicateM(mkSimCntrlQP(
     //     qpType, pmtu, setExpectedPsnAsNextPSN
     // ));
-    Array#(Controller) cntrlArray = vectorToArray(cntrlVec);
-    List#(Controller) cntrlList = toList(cntrlVec);
+    Array#(CntrlQP) cntrlArray = vectorToArray(cntrlVec);
+    List#(CntrlQP) cntrlList = toList(cntrlVec);
 
     Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) qpCnt <- mkCount(0);
     Reg#(Bool) stateReg <- mkReg(True);
@@ -30,12 +30,13 @@ module mkTestCntrlInVec(Empty);
 
     rule setCntrl if (stateReg);
         let cntrl = cntrlArray[qpCnt];
+        let cntrlStatus = cntrl.contextSQ.statusSQ;
 
         if (qpCnt == fromInteger(valueOf(MAX_QP))) begin
             stateReg <= False;
             qpCnt <= 0;
         end
-        else if (cntrl.cntrlStatus.isStableRTS) begin
+        else if (cntrlStatus.comm.isStableRTS) begin
             cntrl.contextRQ.setCurRespPSN(cntrl.contextRQ.getEPSN);
             qpCnt.incr(1);
 
@@ -60,11 +61,11 @@ module mkTestCntrlInVec(Empty);
             let cntrl2 = cntrlArray[qpCnt];
 
             immAssert(
-                cntrl1.cntrlStatus.getQKEY == cntrl2.cntrlStatus.getQKEY,
+                cntrl1.contextSQ.statusSQ.comm.getQKEY == cntrl2.contextSQ.statusSQ.comm.getQKEY,
                 "qkey assertion @ mkTestCntrlInVec",
                 $format(
-                    "cntrl1.cntrlStatus.getQKEY=%h == cntrl2.cntrlStatus.getQKEY=%h",
-                    cntrl1.cntrlStatus.getQKEY, cntrl2.cntrlStatus.getQKEY
+                    "cntrl1.contextSQ.statusSQ.comm.getQKEY=%h == cntrl2.contextSQ.statusSQ.comm.getQKEY=%h",
+                    cntrl1.contextSQ.statusSQ.comm.getQKEY, cntrl2.contextSQ.statusSQ.comm.getQKEY
                 )
             );
             immAssert(
@@ -76,8 +77,8 @@ module mkTestCntrlInVec(Empty);
                 )
             );
             // $display(
-            //     "time=%0t: cntrl1.cntrlStatus.getQKEY=%h == cntrl2.cntrlStatus.getQKEY=%h",
-            //     $time, cntrl1.cntrlStatus.getQKEY, cntrl2.cntrlStatus.getQKEY
+            //     "time=%0t: cntrl1.cntrlStatus.comm.getQKEY=%h == cntrl2.cntrlStatus.comm.getQKEY=%h",
+            //     $time, cntrl1.cntrlStatus.comm.getQKEY, cntrl2.cntrlStatus.comm.getQKEY
             // );
         end
     endrule

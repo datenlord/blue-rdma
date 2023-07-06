@@ -93,10 +93,10 @@ module mkDmaArbiterInsideQP#(
     rule recvDmaReadResp;
         let dmaReadResp <- dmaReadSrv.response.get;
         case (dmaReadResp.initiator)
-            DMA_INIT_RQ_RD    ,
-            DMA_INIT_RQ_WR    ,
-            DMA_INIT_RQ_DUP_RD,
-            DMA_INIT_RQ_ATOMIC: dmaReadRespQ4RQ.enq(dmaReadResp);
+            DMA_SRC_RQ_RD    ,
+            DMA_SRC_RQ_WR    ,
+            DMA_SRC_RQ_DUP_RD,
+            DMA_SRC_RQ_ATOMIC: dmaReadRespQ4RQ.enq(dmaReadResp);
             default           : dmaReadRespQ4SQ.enq(dmaReadResp);
         endcase
     endrule
@@ -104,10 +104,10 @@ module mkDmaArbiterInsideQP#(
     rule recvDmaWriteResp;
         let dmaWriteResp <- dmaWriteSrv.response.get;
         case (dmaWriteResp.initiator)
-            DMA_INIT_RQ_RD    ,
-            DMA_INIT_RQ_WR    ,
-            DMA_INIT_RQ_DUP_RD,
-            DMA_INIT_RQ_ATOMIC: dmaWriteRespQ4RQ.enq(dmaWriteResp);
+            DMA_SRC_RQ_RD    ,
+            DMA_SRC_RQ_WR    ,
+            DMA_SRC_RQ_DUP_RD,
+            DMA_SRC_RQ_ATOMIC: dmaWriteRespQ4RQ.enq(dmaWriteResp);
             default           : dmaWriteRespQ4SQ.enq(dmaWriteResp);
         endcase
     endrule
@@ -166,7 +166,7 @@ module mkNewPendingWorkReqPipeOut#(
         newPendingWorkReqOutQ.enq(newPendingWR);
     endrule
 
-    return convertFifo2PipeOut(newPendingWorkReqOutQ);
+    return toPipeOut(newPendingWorkReqOutQ);
 endmodule
 
 interface SQ;
@@ -175,7 +175,7 @@ interface SQ;
 endinterface
 
 module mkSQ#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     DmaReadSrv dmaReadSrv,
     DmaWriteSrv dmaWriteSrv,
     PermCheckSrv permCheckSrv,
@@ -208,7 +208,7 @@ module mkSQ#(
         cntrl,
         retryHandler,
         permCheckSrv,
-        convertFifo2PipeOut(pendingWorkReqBuf.fifof),
+        toPipeOut(pendingWorkReqBuf.fifof),
         respPktPipeOut.pktMetaData
     );
 
@@ -238,14 +238,14 @@ interface RQ;
 endinterface
 
 module mkRQ#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     DmaReadSrv dmaReadSrv,
     DmaWriteSrv dmaWriteSrv,
     PermCheckSrv permCheckSrv,
     RecvReqBuf recvReqBuf,
     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn
 )(RQ);
-    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrl.cntrlStatus.getPMTU);
+    let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     let reqHandlerRQ <- mkReqHandleRQ(
         cntrl,
@@ -281,7 +281,7 @@ interface QP;
 endinterface
 
 module mkQP#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     PipeOut#(RecvReq) recvReqPipeIn,
     PipeOut#(WorkReq) workReqPipeIn,
     DmaReadSrv dmaReadSrv,
@@ -296,8 +296,8 @@ module mkQP#(
     FIFOF#(WorkReq) workReqQ <- mkFIFOF;
     mkConnection(toPut(recvReqQ), toGet(recvReqPipeIn));
     mkConnection(toPut(workReqQ), toGet(workReqPipeIn));
-    let recvReqBufPipeOut = convertFifo2PipeOut(recvReqQ);
-    let workReqBufPipeOut = convertFifo2PipeOut(workReqQ);
+    let recvReqBufPipeOut = toPipeOut(recvReqQ);
+    let workReqBufPipeOut = toPipeOut(workReqQ);
     // let recvReqBufPipeOut <- mkPipeOutBuffer(recvReqPipeIn);
     // let workReqBufPipeOut <- mkPipeOutBuffer(workReqPipeIn);
 
@@ -326,7 +326,7 @@ module mkQP#(
     let reqRespPipeOut <- mkFixedBinaryPipeOutArbiter(
         rq.rdmaRespDataStreamPipeOut, sq.rdmaReqDataStreamPipeOut
     );
-    rule errFlush if (cntrl.cntrlStatus.isERR);
+    rule errFlush if (cntrlStatus.comm.isERR);
         // TODO: if pending WR queue is empty, then error flush is done
         if (!workReqQ.notEmpty && !recvReqQ.notEmpty) begin
             // Notify controller when flush done
@@ -371,8 +371,8 @@ module mkWorkReqAndRecvReqDispatcher#(
     endrule
 
     return tuple2(
-        map(convertFifo2PipeOut, workReqOutVec),
-        map(convertFifo2PipeOut, recvReqOutVec)
+        map(toPipeOut, workReqOutVec),
+        map(toPipeOut, recvReqOutVec)
     );
 endmodule
 
@@ -386,7 +386,7 @@ endinterface
 (* synthesize *)
 module mkTransportLayerRDMA(TransportLayerRDMA);
     FIFOF#(DataStream) inputDataStreamQ <- mkFIFOF;
-    let rdmaReqRespPipeIn = convertFifo2PipeOut(inputDataStreamQ);
+    let rdmaReqRespPipeIn = toPipeOut(inputDataStreamQ);
 
     FIFOF#(WorkReqOrRecvReq) inputWorkReqOrRecvReqQ <- mkFIFOF;
 
@@ -403,7 +403,7 @@ module mkTransportLayerRDMA(TransportLayerRDMA);
     // let initMetaData <- mkInitMetaData(metaDataSrv, qpInitAttr, qpAttrPipeOut);
 
     let { workReqPipeOutVec, recvPipeOutVec } <- mkWorkReqAndRecvReqDispatcher(
-        convertFifo2PipeOut(inputWorkReqOrRecvReqQ)
+        toPipeOut(inputWorkReqOrRecvReqQ)
     );
 
     PermCheckSrvArbiter#(TMul#(2, MAX_QP)) permCheckSrvArbiter <- mkPermCheckSrvArbiter(permCheckSrv);

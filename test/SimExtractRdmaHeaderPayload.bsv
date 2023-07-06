@@ -174,8 +174,8 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
         end
     endrule
 
-    interface pktMetaData = convertFifo2PipeOut(pktMetaDataOutQ);
-    interface payload     = convertFifo2PipeOut(payloadOutQ);
+    interface pktMetaData = toPipeOut(pktMetaDataOutQ);
+    interface payload     = toPipeOut(payloadOutQ);
 endmodule
 
 (* synthesize *)

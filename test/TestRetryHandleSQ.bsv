@@ -1,5 +1,6 @@
 import ClientServer :: *;
 import Cntrs :: *;
+import Connectable :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
@@ -75,6 +76,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -91,13 +93,13 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     let pendingWorkReqPipeOut4RetryWR <- mkBufferN(
         valueOf(MAX_QP_WR), existingPendingWorkReqPipeOutVec[1]
     );
-    let pendingWorkReq2Q <- mkConnectPendingWorkReqPipeOut2PendingWorkReqQ(
-        pendingWorkReqPipeOut4PendingQ, pendingWorkReqBuf.fifof
+    let pendingWorkReq2Q <- mkConnection(
+        toGet(pendingWorkReqPipeOut4PendingQ), toPut(pendingWorkReqBuf.fifof)
     );
 
     // DUT
     let dut <- mkRetryHandleSQ(
-        cntrl, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
+        cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
     );
 
     Reg#(Bool) isPartialRetryWorkReqReg <- mkRegU;
@@ -118,7 +120,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endfunction
 
     rule triggerRetry if (
-        cntrl.cntrlStatus.isRTS                        &&
+        cntrlStatus.comm.isRTS                        &&
         !pendingWorkReqBuf.fifof.notFull &&
         retryHandleTestStateReg == TEST_RETRY_TRIGGER_REQ
     );
@@ -140,7 +142,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
         // If partial retry, then retry from wrEndPSN
         let retryStartPSN = isPartialRetry ? wrEndPSN : wrStartPSN;
         let retryRnrTimer = retryCase == TEST_RETRY_CASE_RNR ?
-            tagged Valid cntrl.cntrlStatus.getMinRnrTimer : tagged Invalid;
+            tagged Valid cntrlStatus.comm.getMinRnrTimer : tagged Invalid;
 
         isPartialRetryWorkReqReg <= isPartialRetry;
         if (retryCase != TEST_RETRY_CASE_TIMEOUT) begin
@@ -160,7 +162,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule recvRetryResp if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_TRIGGER_RESP
     );
         let retryResp <- dut.srvPort.response.get;
@@ -177,7 +179,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule recvTimeOutNotification if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_TIMEOUT_NOTIFY
     );
         let timeOutNotification <- dut.notifyTimeOut2SQ;
@@ -194,7 +196,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule waitUtilRetryStart if (
-        cntrl.cntrlStatus.isRTS && dut.isRetrying &&
+        cntrlStatus.comm.isRTS && dut.isRetrying &&
         retryHandleTestStateReg == TEST_RETRY_WAIT_UNTIL_START
     );
         if (
@@ -209,7 +211,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule triggerRetryRestart if (
-        cntrl.cntrlStatus.isRTS && dut.isRetrying &&
+        cntrlStatus.comm.isRTS && dut.isRetrying &&
         retryHandleTestStateReg == TEST_RETRY_RESTART_REQ
     );
         let firstRetryWR = retryWorkReqPipeOut.first;
@@ -239,7 +241,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule recvRetryRestartResp if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_RESTART_RESP
     );
         let retryRestartResp <- dut.srvPort.response.get;
@@ -256,7 +258,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule waitUtilRetryRestart if (
-        cntrl.cntrlStatus.isRTS && dut.isRetrying &&
+        cntrlStatus.comm.isRTS && dut.isRetrying &&
         retryHandleTestStateReg == TEST_RETRY_WAIT_UNTIL_RESTART
     );
         retryHandleTestStateReg <= TEST_RETRY_RESTARTED;
@@ -264,7 +266,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule compare if (
-        cntrl.cntrlStatus.isRTS && (
+        cntrlStatus.comm.isRTS && (
             retryHandleTestStateReg == TEST_RETRY_STARTED ||
             retryHandleTestStateReg == TEST_RETRY_RESTARTED
         )
@@ -342,7 +344,7 @@ module mkTestRetryHandleSQ#(TestRetryCase retryCase)(Empty);
     endrule
 
     rule retryDone if (
-        cntrl.cntrlStatus.isRTS && dut.isRetryDone && (
+        cntrlStatus.comm.isRTS && dut.isRetryDone && (
             retryHandleTestStateReg == TEST_RETRY_STARTED ||
             retryHandleTestStateReg == TEST_RETRY_RESTARTED
         )
@@ -366,6 +368,7 @@ typedef enum {
     TEST_RETRY_DECR_RETRY_CNT,
     TEST_RETRY_STARTED,
     TEST_RETRY_SET_QP_ERR,
+    TEST_RETRY_DESTROY_QP,
     TEST_RETRY_RESET_QP
 } TestRetryErrState deriving(Bits, Eq, FShow);
 
@@ -392,7 +395,8 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
 
-    let cntrl <- mkController;
+    let cntrl <- mkCntrlQP;
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
 
     PendingWorkReqBuf pendingWorkReqBuf <- mkScanFIFOF;
     let retryWorkReqPipeOut = pendingWorkReqBuf.scanPipeOut;
@@ -403,13 +407,13 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     Vector#(1, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
     let pendingWorkReqPipeOut4PendingQ = existingPendingWorkReqPipeOutVec[0];
-    let pendingWorkReq2Q <- mkConnectPendingWorkReqPipeOut2PendingWorkReqQ(
-        pendingWorkReqPipeOut4PendingQ, pendingWorkReqBuf.fifof
+    let pendingWorkReq2Q <- mkConnection(
+        toGet(pendingWorkReqPipeOut4PendingQ), toPut(pendingWorkReqBuf.fifof)
     );
 
     // DUT
     let dut <- mkRetryHandleSQ(
-        cntrl, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
+        cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
     );
 
     Reg#(TestRetryErrState) retryHandleTestStateReg <- mkReg(TEST_RETRY_CREATE_QP);
@@ -421,14 +425,14 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     let qpAttrPipeOut <- mkQpAttrPipeOut;
 
     rule createQP if (retryHandleTestStateReg == TEST_RETRY_CREATE_QP);
-        // immAssert(
-        //     cntrl.cntrlStatus.getQPS == IBV_QPS_UNKNOWN,
-        //     "cntrl state assertion @ mkTestRetryHandleRetryErrCase",
-        //     $format(
-        //         "cntrl.cntrlStatus.getQPS=", fshow(cntrl.cntrlStatus.getQPS),
-        //         " should be IBV_QPS_UNKNOWN"
-        //     )
-        // );
+        immAssert(
+            cntrlStatus.comm.isReset,
+            "cntrl state assertion @ mkTestRetryHandleRetryErrCase",
+            $format(
+                "cntrlStatus.comm.isReset=", fshow(cntrlStatus.comm.isReset),
+                " should be true"
+            )
+        );
 
         let qpInitAttr = QpInitAttr {
             qpType  : qpType,
@@ -544,10 +548,10 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         );
 
         immAssert(
-            cntrl.cntrlStatus.isRTS,
-            "cntrl.cntrlStatus.isRTS assertion @ mkTestRetryHandleRetryErrCase",
+            cntrlStatus.comm.isRTS,
+            "cntrlStatus.comm.isRTS assertion @ mkTestRetryHandleRetryErrCase",
             $format(
-                "cntrl.cntrlStatus.isRTS=", fshow(cntrl.cntrlStatus.isRTS),
+                "cntrlStatus.comm.isRTS=", fshow(cntrlStatus.comm.isRTS),
                 " should be true when qpRtsResp=", fshow(qpRtsResp)
             )
         );
@@ -561,7 +565,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         );
 
         retryHandleTestStateReg <= TEST_RETRY_TRIGGER_REQ;
-        maxRetryCnt <= cntrl.cntrlStatus.getMaxRetryCnt; // - 1;
+        maxRetryCnt <= cntrlStatus.comm.getMaxRetryCnt; // - 1;
         // $display(
         //     "time=%0t:", $time, " check QP state",
         //     ", pendingWorkReqBuf.fifof.notEmpty=", fshow(pendingWorkReqBuf.fifof.notEmpty)
@@ -569,7 +573,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     endrule
 
     rule triggerRetry if (
-        cntrl.cntrlStatus.isRTS && // pendingWorkReqBuf.fifof.notEmpty &&
+        cntrlStatus.comm.isRTS && // pendingWorkReqBuf.fifof.notEmpty &&
         retryHandleTestStateReg == TEST_RETRY_TRIGGER_REQ
     );
         let firstRetryWR = pendingWorkReqBuf.fifof.first;
@@ -582,7 +586,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
             // If partial retry, then retry from wrEndPSN
             let retryStartPSN = isPartialRetry ? wrEndPSN : wrStartPSN;
             let retryRnrTimer = retryReason == RETRY_REASON_RNR ?
-                tagged Valid cntrl.cntrlStatus.getMinRnrTimer : tagged Invalid;
+                tagged Valid cntrlStatus.comm.getMinRnrTimer : tagged Invalid;
 
             let retryReq = RetryReq {
                 wrID         : firstRetryWR.wr.id,
@@ -602,7 +606,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     endrule
 
     rule recvRetryResp if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_TRIGGER_RESP
     );
         let retryResp <- dut.srvPort.response.get;
@@ -632,7 +636,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     endrule
 
     rule recvTimeOutNotification if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_TIMEOUT_NOTIFY
     );
         let timeOutNotification <- dut.notifyTimeOut2SQ;
@@ -686,7 +690,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     endrule
 
     rule retryDone if (
-        cntrl.cntrlStatus.isRTS && dut.isRetryDone &&
+        cntrlStatus.comm.isRTS && dut.isRetryDone &&
         retryHandleTestStateReg == TEST_RETRY_STARTED
     );
         retryHandleTestStateReg <= TEST_RETRY_TRIGGER_REQ;
@@ -695,7 +699,7 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
     endrule
 
     rule drainRetryWR if (
-        cntrl.cntrlStatus.isRTS &&
+        cntrlStatus.comm.isRTS &&
         retryHandleTestStateReg == TEST_RETRY_STARTED
     );
         let retryWR = retryWorkReqPipeOut.first;
@@ -736,45 +740,75 @@ module mkTestRetryHandleRetryErrCase#(TestRetryErrCase retryErrCase)(Empty);
         // };
         // cntrl.srvPort.request.put(modifyReqQP);
 
-        retryHandleTestStateReg <= TEST_RETRY_RESET_QP;
+        retryHandleTestStateReg <= TEST_RETRY_DESTROY_QP;
         // $display("time=%0t:", $time, " set QP 2 ERR");
     endrule
 
-    rule resetCntrl if (
-        retryHandleTestStateReg == TEST_RETRY_RESET_QP
+    rule destroyQP if (
+        retryHandleTestStateReg == TEST_RETRY_DESTROY_QP
     );
-        // let qpModifyResp <- cntrl.srvPort.response.get;
-        // immAssert(
-        //     qpModifyResp.successOrNot,
-        //     "qpModifyResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
-        //     $format(
-        //         "qpModifyResp.successOrNot=", fshow(qpModifyResp.successOrNot),
-        //         " should be true when qpModifyResp=", fshow(qpModifyResp)
-        //     )
-        // );
-
         immAssert(
-            cntrl.cntrlStatus.isERR,
-            "cntrl.cntrlStatus.isERR assertion @ mkTestRetryHandleRetryErrCase",
+            cntrlStatus.comm.isERR,
+            "cntrlStatus.comm.isERR assertion @ mkTestRetryHandleRetryErrCase",
             $format(
-                "cntrl.cntrlStatus.isERR=", fshow(cntrl.cntrlStatus.isERR), " should be true"
+                "cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR), " should be true"
                 // " when qpModifyResp=", fshow(qpModifyResp)
             )
         );
 
         let qpAttr = qpAttrPipeOut.first;
-        qpAttr.qpState = IBV_QPS_RESET;
-        let modifyReqQP = ReqQP {
-            qpReqType   : REQ_QP_MODIFY,
+        qpAttr.qpState = IBV_QPS_UNKNOWN;
+        let destroyReqQP = ReqQP {
+            qpReqType   : REQ_QP_DESTROY,
             pdHandler   : dontCareValue,
             qpn         : getDefaultQPN,
             qpAttrMask  : dontCareValue,
             qpAttr      : qpAttr,
             qpInitAttr  : dontCareValue
         };
-        cntrl.srvPort.request.put(modifyReqQP);
+        cntrl.srvPort.request.put(destroyReqQP);
 
-        retryHandleTestStateReg <= TEST_RETRY_INIT_QP;
+        retryHandleTestStateReg <= TEST_RETRY_RESET_QP;
+        // $display("time=%0t:", $time, " destroy QP");
+    endrule
+
+    rule resetCntrl if (
+        retryHandleTestStateReg == TEST_RETRY_RESET_QP
+    );
+        let qpDestroyResp <- cntrl.srvPort.response.get;
+        immAssert(
+            qpDestroyResp.successOrNot,
+            "qpDestroyResp.successOrNot assertion @ mkTestRetryHandleRetryErrCase",
+            $format(
+                "qpDestroyResp.successOrNot=", fshow(qpDestroyResp.successOrNot),
+                " should be true when qpDestroyResp=", fshow(qpDestroyResp)
+            )
+        );
+
+        immAssert(
+            cntrlStatus.comm.isUnknown,
+            "cntrlStatus.comm.isUnknown assertion @ mkTestRetryHandleRetryErrCase",
+            $format(
+                "cntrlStatus.comm.isUnknown=", fshow(cntrlStatus.comm.isUnknown), " should be true"
+                // " when qpModifyResp=", fshow(qpModifyResp)
+            )
+        );
+        cntrl.setStateReset;
+        // // Reset QP not delete QP,
+        // // So just init QP again, no need to create QP.
+        // let qpAttr = qpAttrPipeOut.first;
+        // qpAttr.qpState = IBV_QPS_RESET;
+        // let modifyReqQP = ReqQP {
+        //     qpReqType   : REQ_QP_MODIFY,
+        //     pdHandler   : dontCareValue,
+        //     qpn         : getDefaultQPN,
+        //     qpAttrMask  : dontCareValue,
+        //     qpAttr      : qpAttr,
+        //     qpInitAttr  : dontCareValue
+        // };
+        // cntrl.srvPort.request.put(modifyReqQP);
+
+        retryHandleTestStateReg <= TEST_RETRY_CREATE_QP;
         // $display("time=%0t:", $time, " reset QP");
     endrule
 endmodule

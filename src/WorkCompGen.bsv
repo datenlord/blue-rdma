@@ -12,7 +12,7 @@ import Utils :: *;
 // WC for SQ
 
 function Maybe#(WorkComp) genWorkComp4WorkReq(
-    Controller cntrl, WorkCompGenReqSQ wcGenReqSQ
+    CntrlStatus cntrlStatus, WorkCompGenReqSQ wcGenReqSQ
 );
     let wr = wcGenReqSQ.wr;
     let maybeWorkCompOpCode = workReqOpCode2WorkCompOpCode4SQ(wr.opcode);
@@ -27,9 +27,9 @@ function Maybe#(WorkComp) genWorkComp4WorkReq(
             flags   : wcFlags,
             status  : wcGenReqSQ.wcStatus,
             len     : wr.len,
-            pkey    : cntrl.cntrlStatus.getPKEY,
-            dqpn    : cntrl.cntrlStatus.getSQPN,
-            sqpn    : cntrl.cntrlStatus.getDQPN,
+            pkey    : cntrlStatus.comm.getPKEY,
+            dqpn    : cntrlStatus.comm.getSQPN,
+            sqpn    : cntrlStatus.comm.getDQPN,
             immDt   : tagged Invalid,
             rkey2Inv: tagged Invalid
         };
@@ -41,7 +41,7 @@ function Maybe#(WorkComp) genWorkComp4WorkReq(
 endfunction
 
 // function Maybe#(WorkComp) genErrFlushWorkComp4WorkReq(
-//     Controller cntrl, WorkReq wr
+//     CntrlStatus cntrlStatus, WorkReq wr
 // );
 //     let maybeWorkCompOpCode = workReqOpCode2WorkCompOpCode4SQ(wr.opcode);
 
@@ -52,9 +52,9 @@ endfunction
 //             flags   : IBV_WC_NO_FLAGS,
 //             status  : IBV_WC_WR_FLUSH_ERR,
 //             len     : wr.len,
-//             pkey    : cntrl.cntrlStatus.getPKEY,
-//             dqpn    : cntrl.cntrlStatus.getSQPN,
-//             sqpn    : cntrl.cntrlStatus.getDQPN,
+//             pkey    : cntrlStatus.comm.getPKEY,
+//             dqpn    : cntrlStatus.comm.getSQPN,
+//             sqpn    : cntrlStatus.comm.getDQPN,
 //             immDt   : tagged Invalid,
 //             rkey2Inv: tagged Invalid
 //         };
@@ -78,13 +78,18 @@ typedef enum {
     WC_GEN_ST_ERR_FLUSH
 } WorkCompGenState deriving(Bits, Eq);
 
+interface WorkCompGen;
+    interface PipeOut#(WorkComp) workCompPipeOut;
+    method Bool hasErr();
+endinterface
+
 module mkWorkCompGenSQ#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     PipeOut#(PayloadConResp)   payloadConRespPipeIn,
     PipeOut#(WorkCompGenReqSQ) wcGenReqPipeInFromReqGenInSQ,
-    PipeOut#(WorkCompGenReqSQ) wcGenReqPipeInFromRespHandleInSQ,
-    PipeOut#(WorkCompStatus)   workCompStatusPipeInFromRQ
-)(PipeOut#(WorkComp));
+    PipeOut#(WorkCompGenReqSQ) wcGenReqPipeInFromRespHandleInSQ
+    // PipeOut#(WorkCompStatus)   workCompStatusPipeInFromRQ
+)(WorkCompGen);
     // Output FIFO for PipeOut
     FIFOF#(WorkComp)             workCompOutQ4SQ <- mkSizedFIFOF(valueOf(MAX_CQE));
 
@@ -93,31 +98,35 @@ module mkWorkCompGenSQ#(
     FIFOF#(PendingWorkCompSQ)       genWorkCompQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqSQ) pendingWorkCompQ4SQ <- mkSizedFIFOF(valueOf(MAX_PENDING_WORK_COMP_NUM));
 
-    Reg#(Bool)                      rqHasErrReg[2] <- mkCReg(2, False);
+    // Reg#(Bool)                      rqHasErrReg[2] <- mkCReg(2, False);
     Reg#(WorkCompGenState)     workCompGenStateReg <- mkReg(WC_GEN_ST_STOP);
     Reg#(Bool)      isFirstErrPartialAckWorkReqReg <- mkRegU;
     Reg#(WorkReqID) firstErrPartialAckWorkReqIdReg <- mkRegU;
 
-    let inNormalState = cntrl.cntrlStatus.isRTS && workCompGenStateReg == WC_GEN_ST_NORMAL;
-    let inErrorState  = cntrl.cntrlStatus.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
+    let inNormalState = cntrlStatus.comm.isStableRTS && workCompGenStateReg == WC_GEN_ST_NORMAL;
+    let inErrorState  = cntrlStatus.comm.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.cntrlStatus.isReset);
-        dmaWaitingQ.clear;
+    rule resetAndClear if (cntrlStatus.comm.isReset);
         workCompOutQ4SQ.clear;
+
+        dmaWaitingQ.clear;
+        genWorkCompQ.clear;
         pendingWorkCompQ4SQ.clear;
 
-        rqHasErrReg[1]      <= False;
+        // rqHasErrReg[1]      <= False;
         workCompGenStateReg <= WC_GEN_ST_STOP;
+
+        // $display("time=%0t: reset and clear mkWorkCompGenSQ", $time);
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule start if (cntrl.cntrlStatus.isRTS && workCompGenStateReg == WC_GEN_ST_STOP);
+    rule start if (cntrlStatus.comm.isRTS && workCompGenStateReg == WC_GEN_ST_STOP);
         workCompGenStateReg <= WC_GEN_ST_NORMAL;
     endrule
 
+                        // recvWorkCompStatusRQ, \
     (* conflict_free = "recvWorkCompGenReqSQ, \
-                        recvWorkCompStatusRQ, \
                         genPendingWorkCompSQ, \
                         waitDmaDoneSQ, \
                         genWorkCompSQ, \
@@ -143,25 +152,25 @@ module mkWorkCompGenSQ#(
         end
     endrule
 
-    rule recvWorkCompStatusRQ if (inNormalState);
-        let wcStatusRQ = workCompStatusPipeInFromRQ.first;
-        workCompStatusPipeInFromRQ.deq;
+    // rule recvWorkCompStatusRQ if (inNormalState);
+    //     let wcStatusRQ = workCompStatusPipeInFromRQ.first;
+    //     workCompStatusPipeInFromRQ.deq;
 
-        if (wcStatusRQ != IBV_WC_SUCCESS) begin
-            rqHasErrReg[0] <= True;
-        end
-    endrule
+    //     if (wcStatusRQ != IBV_WC_SUCCESS) begin
+    //         rqHasErrReg[0] <= True;
+    //     end
+    // endrule
 
     rule genPendingWorkCompSQ if (inNormalState || inErrorState);
         let wcGenReqSQ = pendingWorkCompQ4SQ.first;
         pendingWorkCompQ4SQ.deq;
 
-        let maybeWorkComp = genWorkComp4WorkReq(cntrl, wcGenReqSQ);
+        let maybeWorkComp = genWorkComp4WorkReq(cntrlStatus, wcGenReqSQ);
 
         let wcReqType = wcGenReqSQ.wcReqType;
         let isWorkCompSuccess = wcGenReqSQ.wcStatus == IBV_WC_SUCCESS;
         // if (inErrorState) begin
-        //     maybeWorkComp = genErrFlushWorkComp4WorkReq(cntrl, wcGenReqSQ.wr);
+        //     maybeWorkComp = genErrFlushWorkComp4WorkReq(ccntrlStatus, wcGenReqSQ.wr);
         // end
         immAssert(
             isValid(maybeWorkComp),
@@ -172,7 +181,7 @@ module mkWorkCompGenSQ#(
         let workComp = unwrapMaybe(maybeWorkComp);
         let needWorkCompWhenNormal =
             wcGenReqSQ.wcReqType == WC_REQ_TYPE_FULL_ACK &&
-            (workReqNeedWorkCompSQ(wcGenReqSQ.wr) || cntrl.cntrlStatus.getSigAll);
+            (workReqNeedWorkCompSQ(wcGenReqSQ.wr) || cntrlStatus.comm.getSigAll);
 
         let pendingWorkCompSQ = PendingWorkCompSQ {
             wcGenReqSQ            : wcGenReqSQ,
@@ -249,22 +258,24 @@ module mkWorkCompGenSQ#(
 
         // TODO: handle CQ full
         // let hasErrWorkCompOrCompQueueFullSQ = !isWorkCompSuccess || isCompQueueFull;
-        if (!isWorkCompSuccess || rqHasErrReg[1]) begin
-            cntrl.setStateErr;
+        if (!isWorkCompSuccess) begin
+        // if (!isWorkCompSuccess || rqHasErrReg[1]) begin
+            // cntrl.setStateErr;
             workCompGenStateReg <= WC_GEN_ST_ERR_FLUSH;
             isFirstErrPartialAckWorkReqReg <=
                 wcGenReqSQ.wcReqType == WC_REQ_TYPE_PARTIAL_ACK;
             firstErrPartialAckWorkReqIdReg <= wcGenReqSQ.wr.id;
-            $display(
-                "time=%0t:", $time,
-                " set mkWorkCompGenSQ to error state, workComp.status=",
-                fshow(workComp.status),
-                ", isWorkCompSuccess=", fshow(isWorkCompSuccess),
-                ", rqHasErrReg[1]=", fshow(rqHasErrReg[1]),
-                // ", hasErrWorkCompOrCompQueueFullSQ=",
-                // fshow(hasErrWorkCompOrCompQueueFullSQ),
-                ", wcGenReqSQ=", fshow(wcGenReqSQ)
-            );
+
+            // $display(
+            //     "time=%0t:", $time,
+            //     " set mkWorkCompGenSQ to error state, workComp.status=",
+            //     fshow(workComp.status),
+            //     ", isWorkCompSuccess=", fshow(isWorkCompSuccess),
+            //     // ", rqHasErrReg[1]=", fshow(rqHasErrReg[1]),
+            //     // ", hasErrWorkCompOrCompQueueFullSQ=",
+            //     // fshow(hasErrWorkCompOrCompQueueFullSQ),
+            //     ", wcGenReqSQ=", fshow(wcGenReqSQ)
+            // );
         end
     endrule
 
@@ -335,13 +346,14 @@ module mkWorkCompGenSQ#(
         payloadConRespPipeIn.deq;
     endrule
 
-    return convertFifo2PipeOut(workCompOutQ4SQ);
+    interface workCompPipeOut = toPipeOut(workCompOutQ4SQ);
+    method Bool hasErr() = workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
 endmodule
 
 // WC for RQ
 
 function Maybe#(WorkComp) genWorkComp4RecvReq(
-    Controller cntrl, WorkCompGenReqRQ wcGenReqRQ
+    CntrlStatus cntrlStatus, WorkCompGenReqRQ wcGenReqRQ
 );
     let maybeWorkCompOpCode = rdmaOpCode2WorkCompOpCode4RQ(wcGenReqRQ.reqOpCode);
     let wcFlags = rdmaOpCode2WorkCompFlagsRQ(wcGenReqRQ.reqOpCode);
@@ -355,9 +367,9 @@ function Maybe#(WorkComp) genWorkComp4RecvReq(
             flags   : wcFlags,
             status  : wcGenReqRQ.wcStatus,
             len     : wcGenReqRQ.len,
-            pkey    : cntrl.cntrlStatus.getPKEY,
-            dqpn    : cntrl.cntrlStatus.getSQPN,
-            sqpn    : cntrl.cntrlStatus.getDQPN,
+            pkey    : cntrlStatus.comm.getPKEY,
+            dqpn    : cntrlStatus.comm.getSQPN,
+            sqpn    : cntrlStatus.comm.getDQPN,
             immDt   : wcGenReqRQ.immDt,
             rkey2Inv: wcGenReqRQ.rkey2Inv
         };
@@ -369,7 +381,7 @@ function Maybe#(WorkComp) genWorkComp4RecvReq(
 endfunction
 
 // function Maybe#(WorkComp) genErrFlushWorkComp4WorkCompGenReqRQ(
-//     Controller cntrl, WorkCompGenReqRQ wcGenReqRQ
+//     CntrlStatus cntrlStatus, WorkCompGenReqRQ wcGenReqRQ
 // );
 //     let maybeWorkCompOpCode = rdmaOpCode2WorkCompOpCode4RQ(wcGenReqRQ.reqOpCode);
 //     let wcFlags = rdmaOpCode2WorkCompFlagsRQ(wcGenReqRQ.reqOpCode);
@@ -383,9 +395,9 @@ endfunction
 //             flags   : wcFlags,
 //             status  : IBV_WC_WR_FLUSH_ERR,
 //             len     : wcGenReqRQ.len,
-//             pkey    : cntrl.cntrlStatus.getPKEY,
-//             dqpn    : cntrl.cntrlStatus.getSQPN,
-//             sqpn    : cntrl.cntrlStatus.getDQPN,
+//             pkey    : cntrlStatus.comm.getPKEY,
+//             dqpn    : cntrlStatus.comm.getSQPN,
+//             sqpn    : cntrlStatus.comm.getDQPN,
 //             immDt   : wcGenReqRQ.immDt,
 //             rkey2Inv: wcGenReqRQ.rkey2Inv
 //         };
@@ -397,7 +409,7 @@ endfunction
 // endfunction
 
 // function WorkComp genErrFlushWorkComp4RecvReq(
-//     Controller cntrl, RecvReq rr
+//     CntrlStatus cntrlStatus, RecvReq rr
 // );
 //     let workComp = WorkComp {
 //         id      : rr.id,
@@ -405,9 +417,9 @@ endfunction
 //         flags   : IBV_WC_NO_FLAGS,
 //         status  : IBV_WC_WR_FLUSH_ERR,
 //         len     : rr.len,
-//         pkey    : cntrl.cntrlStatus.getPKEY,
-//         dqpn    : cntrl.cntrlStatus.getSQPN,
-//         sqpn    : cntrl.cntrlStatus.getDQPN,
+//         pkey    : cntrlStatus.comm.getPKEY,
+//         dqpn    : cntrlStatus.comm.getSQPN,
+//         sqpn    : cntrlStatus.comm.getDQPN,
 //         immDt   : tagged Invalid,
 //         rkey2Inv: tagged Invalid
 //     };
@@ -426,16 +438,16 @@ typedef struct {
     Bool             needWaitDmaRespWhenNormal;
 } PendingWorkCompRQ deriving(Bits);
 
-interface WorkCompGenRQ;
-    interface PipeOut#(WorkComp) workCompPipeOut;
-    interface PipeOut#(WorkCompStatus) workCompStatusPipeOutRQ;
-endinterface
+// interface WorkCompGenRQ;
+//     interface PipeOut#(WorkComp) workCompPipeOut;
+//     interface PipeOut#(WorkCompStatus) workCompStatusPipeOutRQ;
+// endinterface
 
 module mkWorkCompGenRQ#(
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     PipeOut#(PayloadConResp) payloadConRespPipeIn,
     PipeOut#(WorkCompGenReqRQ) wcGenReqPipeInFromRQ
-)(WorkCompGenRQ);
+)(WorkCompGen);
     // Output FIFO for PipeOut
     FIFOF#(WorkComp)      workCompOutQ4RQ <- mkSizedFIFOF(valueOf(MAX_CQE));
     FIFOF#(WorkCompStatus)   wcStatusQ4SQ <- mkFIFOF;
@@ -446,21 +458,24 @@ module mkWorkCompGenRQ#(
 
     Reg#(WorkCompGenState) workCompGenStateReg <- mkReg(WC_GEN_ST_STOP);
 
-    let inNormalState = cntrl.cntrlStatus.isNonErr && workCompGenStateReg == WC_GEN_ST_NORMAL;
-    let inErrorState  = cntrl.cntrlStatus.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
+    let inNormalState = cntrlStatus.comm.isNonErr && workCompGenStateReg == WC_GEN_ST_NORMAL;
+    let inErrorState  = cntrlStatus.comm.isERR || workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (cntrl.cntrlStatus.isReset);
+    rule resetAndClear if (cntrlStatus.comm.isReset);
         workCompOutQ4RQ.clear;
         wcStatusQ4SQ.clear;
 
         dmaWaitingQ.clear;
+        genWorkCompQ.clear;
 
         workCompGenStateReg <= WC_GEN_ST_STOP;
+
+        // $display("time=%0t: reset and clear mkWorkCompGenRQ", $time);
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule start if (cntrl.cntrlStatus.isNonErr && workCompGenStateReg == WC_GEN_ST_STOP);
+    rule start if (cntrlStatus.comm.isNonErr && workCompGenStateReg == WC_GEN_ST_STOP);
         workCompGenStateReg <= WC_GEN_ST_NORMAL;
     endrule
 
@@ -481,7 +496,7 @@ module mkWorkCompGenRQ#(
         let isFirstOrOnlyReq = isFirstOrOnlyRdmaOpCode(reqOpCode);
         let isLastOrOnlyReq  = isLastOrOnlyRdmaOpCode(reqOpCode);
 
-        let maybeWorkComp             = genWorkComp4RecvReq(cntrl, wcGenReqRQ);
+        let maybeWorkComp             = genWorkComp4RecvReq(cntrlStatus, wcGenReqRQ);
         let isWorkCompSuccess         = wcGenReqRQ.wcStatus == IBV_WC_SUCCESS;
         let needWaitDmaRespWhenNormal = !wcGenReqRQ.isZeroDmaLen && (isSendReq || isWriteReq);
 
@@ -672,6 +687,7 @@ module mkWorkCompGenRQ#(
         payloadConRespPipeIn.deq;
     endrule
 
-    interface workCompPipeOut         = convertFifo2PipeOut(workCompOutQ4RQ);
-    interface workCompStatusPipeOutRQ = convertFifo2PipeOut(wcStatusQ4SQ);
+    interface workCompPipeOut = toPipeOut(workCompOutQ4RQ);
+    method Bool hasErr() = workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;
+    // interface workCompStatusPipeOutRQ = toPipeOut(wcStatusQ4SQ);
 endmodule

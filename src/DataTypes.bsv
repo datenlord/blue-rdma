@@ -21,6 +21,7 @@ typedef TMul#(655360, 1000)    MAX_RNR_WAIT_NS; // 2^30
 
 typedef 16'hFFFF     DEFAULT_PKEY;
 typedef 32'hFFFFFFFF DEFAULT_QKEY;
+typedef 3            DEFAULT_RETRY_NUM;
 
 typedef 64 ATOMIC_ADDR_BIT_ALIGNMENT;
 
@@ -237,7 +238,7 @@ typedef struct {
 } PermCheckReq deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     QPN sqpn;
     ADDR startAddr;
     Length len;
@@ -245,7 +246,7 @@ typedef struct {
 } DmaReadReq deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     QPN sqpn;
     WorkReqID wrID;
     Bool isRespErr;
@@ -253,7 +254,7 @@ typedef struct {
 } DmaReadResp deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     QPN sqpn;
     ADDR startAddr;
     PktLen len;
@@ -266,23 +267,25 @@ typedef struct {
 } DmaWriteReq deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     QPN sqpn;
     PSN psn;
     Bool isRespErr;
 } DmaWriteResp deriving(Bits, FShow);
 
 typedef enum {
-    DMA_INIT_RQ_RD,
-    DMA_INIT_RQ_WR,
-    DMA_INIT_RQ_DUP_RD,
-    DMA_INIT_RQ_ATOMIC,
-    DMA_INIT_RQ_DISCARD,
-    DMA_INIT_SQ_RD,
-    DMA_INIT_SQ_WR,
-    DMA_INIT_SQ_ATOMIC,
-    DMA_INIT_SQ_DISCARD
-} DmaReqInitiator deriving(Bits, Eq, FShow);
+    DMA_SRC_RQ_RD,
+    DMA_SRC_RQ_WR,
+    DMA_SRC_RQ_DUP_RD,
+    DMA_SRC_RQ_ATOMIC,
+    DMA_SRC_RQ_DISCARD,
+    DMA_SRC_RQ_CANCEL,
+    DMA_SRC_SQ_RD,
+    DMA_SRC_SQ_WR,
+    DMA_SRC_SQ_ATOMIC,
+    DMA_SRC_SQ_DISCARD,
+    DMA_SRC_SQ_CANCEL
+} DmaReqSrcType deriving(Bits, Eq, FShow);
 
 typedef struct {
     Bool addPadding;
@@ -317,7 +320,7 @@ typedef struct {
 } PayloadConResp deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     Bool casOrFetchAdd;
     ADDR startAddr;
     Long compData;
@@ -327,7 +330,7 @@ typedef struct {
 } AtomicOpReq deriving(Bits);
 
 typedef struct {
-    DmaReqInitiator initiator;
+    DmaReqSrcType initiator;
     Long original;
     QPN sqpn;
     PSN psn;
@@ -343,14 +346,15 @@ typedef enum {
     IBV_QPS_SQD,
     IBV_QPS_SQE,
     IBV_QPS_ERR,
-    IBV_QPS_UNKNOWN
+    IBV_QPS_UNKNOWN,
+    IBV_QPS_CREATE // Not defined in rdma-core
 } StateQP deriving(Bits, Eq, FShow);
 
 typedef enum {
     IBV_QPT_RC = 2,
     IBV_QPT_UC = 3,
     IBV_QPT_UD = 4,
-    IBV_QPT_RAW_PACKET = 8,
+    // IBV_QPT_RAW_PACKET = 8,
     IBV_QPT_XRC_SEND = 9,
     IBV_QPT_XRC_RECV = 10
     // IBV_QPT_DRIVER = 0xff

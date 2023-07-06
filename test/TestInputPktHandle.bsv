@@ -12,6 +12,7 @@ import PrimUtils :: *;
 import QueuePair :: *;
 import Settings :: *;
 import SimGenRdmaReqResp :: *;
+import SimExtractRdmaHeaderPayload :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
@@ -24,7 +25,7 @@ module mkTestReceiveCNP(Empty);
     let qpIndex = getDefaultIndexQP;
     let qp = qpMetaData.getQueuePairByIndexQP(qpIndex);
 
-    let cnpDataStream = buildCNP(qp.cntrlStatus);
+    let cnpDataStream = buildCNP(qp.statusSQ);
     let cnpDataStreamPipeIn <- mkConstantPipeOut(cnpDataStream);
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         cnpDataStreamPipeIn
@@ -115,6 +116,42 @@ module mkTestReceiveCNP(Empty);
     endrule
 endmodule
 
+(* synthesize *)
+module mkTestCalculateRandomPktLen(Empty);
+    let qpType = IBV_QPT_RC;
+    let pmtu = IBV_MTU_4096;
+    Length minPayloadLen = 8192;
+    Length maxPayloadLen = 10241;
+
+    let ret <- mkTestCalculatePktLen(
+        qpType, pmtu, minPayloadLen, maxPayloadLen
+    );
+endmodule
+
+(* synthesize *)
+module mkTestCalculatePktLenEqPMTU(Empty);
+    let qpType = IBV_QPT_XRC_SEND;
+    let pmtu = IBV_MTU_4096;
+    Length minPayloadLen = zeroExtend(calcPmtuLen(pmtu));
+    Length maxPayloadLen = zeroExtend(calcPmtuLen(pmtu));
+
+    let ret <- mkTestCalculatePktLen(
+        qpType, pmtu, minPayloadLen, maxPayloadLen
+    );
+endmodule
+
+(* synthesize *)
+module mkTestCalculateZeroPktLen(Empty);
+    let qpType = IBV_QPT_XRC_SEND;
+    let pmtu = IBV_MTU_4096;
+    Length minPayloadLen = 0;
+    Length maxPayloadLen = 0;
+
+    let ret <- mkTestCalculatePktLen(
+        qpType, pmtu, minPayloadLen, maxPayloadLen
+    );
+endmodule
+
 module mkTestCalculatePktLen#(
     TypeQP qpType,
     PMTU   pmtu,
@@ -140,9 +177,10 @@ module mkTestCalculatePktLen#(
     // DUT
     let isRespPktPipeIn = False;
     let dut <- mkSimInputPktBuf4SingleQP(isRespPktPipeIn, rdmaReqPipeOut, qpMetaData);
+    // let dut <- mkSimExtractNormalHeaderPayload(rdmaReqPipeOut);
     let pktMetaDataPipeOut = dut.pktMetaData;
 
-    // Payload sink
+    // // Payload sink
     let payloadSink <- mkSink(dut.payload);
     Reg#(Length) pktLenSumReg <- mkRegU;
 
@@ -150,6 +188,7 @@ module mkTestCalculatePktLen#(
 
     // mkSink(pendingWorkReqPipeOut4Ref);
     // mkSink(pktMetaDataPipeOut);
+
     rule compareWorkReqLen;
         let pendingWR   = pendingWorkReqPipeOut4Ref.first;
         let pktMetaData = pktMetaDataPipeOut.first;
@@ -209,40 +248,4 @@ module mkTestCalculatePktLen#(
         //     bth.psn, bth.padCnt, pktLenSum
         // );
     endrule
-endmodule
-
-(* synthesize *)
-module mkTestCalculateRandomPktLen(Empty);
-    let qpType = IBV_QPT_RC;
-    let pmtu = IBV_MTU_256;
-    Length minPayloadLen = 1;
-    Length maxPayloadLen = 10241;
-
-    let ret <- mkTestCalculatePktLen(
-        qpType, pmtu, minPayloadLen, maxPayloadLen
-    );
-endmodule
-
-(* synthesize *)
-module mkTestCalculatePktLenEqPMTU(Empty);
-    let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
-    Length minPayloadLen = fromInteger(getPmtuLogValue(pmtu));
-    Length maxPayloadLen = fromInteger(getPmtuLogValue(pmtu));
-
-    let ret <- mkTestCalculatePktLen(
-        qpType, pmtu, minPayloadLen, maxPayloadLen
-    );
-endmodule
-
-(* synthesize *)
-module mkTestCalculateZeroPktLen(Empty);
-    let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
-    Length minPayloadLen = 0;
-    Length maxPayloadLen = 0;
-
-    let ret <- mkTestCalculatePktLen(
-        qpType, pmtu, minPayloadLen, maxPayloadLen
-    );
 endmodule

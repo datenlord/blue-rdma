@@ -16,9 +16,9 @@ import Utils :: *;
 import Utils4Test :: *;
 
 typedef enum {
-    TEST_ST_FILL,
-    TEST_ST_ACT,
-    TEST_ST_POP
+    TEST_META_DATA_FILL,
+    TEST_META_DATA_ACT,
+    TEST_META_DATA_POP
 } SeqTestState deriving(Bits, Eq);
 
 (* synthesize *)
@@ -35,11 +35,11 @@ module mkTestMetaDataPDs(Empty);
     FIFOF#(HandlerPD) pdHandlerQ4Search <- mkSizedFIFOF(valueOf(MAX_PD));
     FIFOF#(HandlerPD) pdHandlerQ4Pop <- mkSizedFIFOF(valueOf(MAX_PD));
 
-    Reg#(SeqTestState) pdTestStateReg <- mkReg(TEST_ST_FILL);
+    Reg#(SeqTestState) pdTestStateReg <- mkReg(TEST_META_DATA_FILL);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule allocPDs if (pdTestStateReg == TEST_ST_FILL);
+    rule allocPDs if (pdTestStateReg == TEST_META_DATA_FILL);
         if (pdReqCnt < fromInteger(valueOf(MAX_PD))) begin
             let pdKey = pdKeyPipeOut4InsertReq.first;
             pdKeyPipeOut4InsertReq.deq;
@@ -55,11 +55,11 @@ module mkTestMetaDataPDs(Empty);
         end
     endrule
 
-    rule allocResp if (pdTestStateReg == TEST_ST_FILL);
+    rule allocResp if (pdTestStateReg == TEST_META_DATA_FILL);
         if (pdRespCnt == fromInteger(valueOf(MAX_PD) - 1)) begin
             pdReqCnt  <= 0;
             pdRespCnt <= 0;
-            pdTestStateReg <= TEST_ST_ACT;
+            pdTestStateReg <= TEST_META_DATA_ACT;
         end
         else begin
             pdRespCnt.incr(1);
@@ -97,11 +97,11 @@ module mkTestMetaDataPDs(Empty);
         // );
     endrule
 
-    rule compareSearch if (pdTestStateReg == TEST_ST_ACT);
+    rule compareSearch if (pdTestStateReg == TEST_META_DATA_ACT);
         if (pdRespCnt == fromInteger(valueOf(MAX_PD) - 1)) begin
             pdReqCnt  <= 0;
             pdRespCnt <= 0;
-            pdTestStateReg <= TEST_ST_POP;
+            pdTestStateReg <= TEST_META_DATA_POP;
         end
         else begin
             pdRespCnt.incr(1);
@@ -138,7 +138,7 @@ module mkTestMetaDataPDs(Empty);
         // );
     endrule
 
-    rule deAllocPDs if (pdTestStateReg == TEST_ST_POP);
+    rule deAllocPDs if (pdTestStateReg == TEST_META_DATA_POP);
         if (pdReqCnt < fromInteger(valueOf(MAX_PD))) begin
             let pdHandler2Remove = pdHandlerQ4Pop.first;
             pdHandlerQ4Pop.deq;
@@ -154,13 +154,13 @@ module mkTestMetaDataPDs(Empty);
         end
     endrule
 
-    rule deAllocResp if (pdTestStateReg == TEST_ST_POP);
+    rule deAllocResp if (pdTestStateReg == TEST_META_DATA_POP);
         countDown.decr;
 
         if (pdRespCnt == fromInteger(valueOf(MAX_PD) - 1)) begin
             pdReqCnt  <= 0;
             pdRespCnt <= 0;
-            pdTestStateReg <= TEST_ST_FILL;
+            pdTestStateReg <= TEST_META_DATA_FILL;
         end
         else begin
             pdRespCnt.incr(1);
@@ -208,11 +208,11 @@ module mkTestMetaDataMRs(Empty);
     FIFOF#(RKEY) rkeyQ4Pop <- mkSizedFIFOF(valueOf(MAX_MR_PER_PD));
     FIFOF#(RKEY) rkeyQ4Comp <- mkFIFOF;
 
-    Reg#(SeqTestState) mrTestStateReg <- mkReg(TEST_ST_FILL);
+    Reg#(SeqTestState) mrTestStateReg <- mkReg(TEST_META_DATA_FILL);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule allocMRs if (mrTestStateReg == TEST_ST_FILL);
+    rule allocMRs if (mrTestStateReg == TEST_META_DATA_FILL);
         if (mrReqCnt < fromInteger(valueOf(MAX_MR_PER_PD))) begin
             let curMrKey = mrKeyPipeOut4InsertReq.first;
             mrKeyPipeOut4InsertReq.deq;
@@ -238,11 +238,11 @@ module mkTestMetaDataMRs(Empty);
         end
     endrule
 
-    rule allocResp if (mrTestStateReg == TEST_ST_FILL);
+    rule allocResp if (mrTestStateReg == TEST_META_DATA_FILL);
         if (mrRespCnt == fromInteger(valueOf(MAX_MR_PER_PD) - 1)) begin
             mrReqCnt  <= 0;
             mrRespCnt <= 0;
-            mrTestStateReg <= TEST_ST_ACT;
+            mrTestStateReg <= TEST_META_DATA_ACT;
         end
         else begin
             mrRespCnt.incr(1);
@@ -289,11 +289,11 @@ module mkTestMetaDataMRs(Empty);
         // );
     endrule
 
-    rule compareSearch if (mrTestStateReg == TEST_ST_ACT);
+    rule compareSearch if (mrTestStateReg == TEST_META_DATA_ACT);
         if (mrRespCnt == fromInteger(valueOf(MAX_MR_PER_PD) - 1)) begin
             mrReqCnt  <= 0;
             mrRespCnt <= 0;
-            mrTestStateReg <= TEST_ST_POP;
+            mrTestStateReg <= TEST_META_DATA_POP;
         end
         else begin
             mrRespCnt.incr(1);
@@ -319,7 +319,7 @@ module mkTestMetaDataMRs(Empty);
         // );
     endrule
 
-    rule deAllocMRs if (mrTestStateReg == TEST_ST_POP);
+    rule deAllocMRs if (mrTestStateReg == TEST_META_DATA_POP);
         if (mrReqCnt < fromInteger(valueOf(MAX_MR_PER_PD))) begin
             let rkey2Remove = rkeyQ4Pop.first;
             rkeyQ4Pop.deq;
@@ -345,13 +345,13 @@ module mkTestMetaDataMRs(Empty);
         end
     endrule
 
-    rule deAllocResp if (mrTestStateReg == TEST_ST_POP);
+    rule deAllocResp if (mrTestStateReg == TEST_META_DATA_POP);
         countDown.decr;
 
         if (mrRespCnt == fromInteger(valueOf(MAX_MR_PER_PD) - 1)) begin
             mrReqCnt  <= 0;
             mrRespCnt <= 0;
-            mrTestStateReg <= TEST_ST_FILL;
+            mrTestStateReg <= TEST_META_DATA_FILL;
         end
         else begin
             mrRespCnt.incr(1);
@@ -401,7 +401,7 @@ module mkTestMetaDataQPs(Empty);
     FIFOF#(QPN) qpnQ4Search <- mkSizedFIFOF(valueOf(MAX_QP));
     FIFOF#(QPN) qpnQ4Destroy <- mkSizedFIFOF(valueOf(MAX_QP));
 
-    Reg#(SeqTestState) qpTestStateReg <- mkReg(TEST_ST_FILL);
+    Reg#(SeqTestState) qpTestStateReg <- mkReg(TEST_META_DATA_FILL);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -412,7 +412,7 @@ module mkTestMetaDataQPs(Empty);
         return tuple2(truncate(pdHandler), truncate(qpn));
     endfunction
 
-    rule createQPs if (qpTestStateReg == TEST_ST_FILL);
+    rule createQPs if (qpTestStateReg == TEST_META_DATA_FILL);
         if (qpReqCnt < fromInteger(valueOf(MAX_QP))) begin
             qpReqCnt.incr(1);
             let curPdHandler = pdHandlerPipeOut4InsertReq.first;
@@ -433,11 +433,11 @@ module mkTestMetaDataQPs(Empty);
         end
     endrule
 
-    rule createResp if (qpTestStateReg == TEST_ST_FILL);
+    rule createResp if (qpTestStateReg == TEST_META_DATA_FILL);
         if (qpRespCnt == fromInteger(valueOf(MAX_QP) - 1)) begin
             qpReqCnt  <= 0;
             qpRespCnt <= 0;
-            qpTestStateReg <= TEST_ST_ACT;
+            qpTestStateReg <= TEST_META_DATA_ACT;
         end
         else begin
             qpRespCnt.incr(1);
@@ -470,11 +470,11 @@ module mkTestMetaDataQPs(Empty);
         // );
     endrule
 
-    rule compareSearch if (qpTestStateReg == TEST_ST_ACT);
+    rule compareSearch if (qpTestStateReg == TEST_META_DATA_ACT);
         if (qpRespCnt == fromInteger(valueOf(MAX_QP) - 1)) begin
             qpReqCnt  <= 0;
             qpRespCnt <= 0;
-            qpTestStateReg <= TEST_ST_POP;
+            qpTestStateReg <= TEST_META_DATA_POP;
         end
         else begin
             qpRespCnt.incr(1);
@@ -519,10 +519,10 @@ module mkTestMetaDataQPs(Empty);
 
         let qp = qpMetaDataDUT.getQueuePairByQPN(qpn2Search);
         immAssert(
-            qp.cntrlStatus.isReset,
+            qp.statusSQ.comm.isCreate,
             "QP CntrlStatus assertion @ mkTestMetaDataQPs",
             $format(
-                "qp.cntrlStatus.isReset=", fshow(qp.cntrlStatus.isReset),
+                "qp.statusSQ.comm.isCreate=", fshow(qp.statusSQ.comm.isCreate),
                 " should be true"
             )
         );
@@ -544,7 +544,7 @@ module mkTestMetaDataQPs(Empty);
         // );
     endrule
 
-    rule destroyQPs if (qpTestStateReg == TEST_ST_POP);
+    rule destroyQPs if (qpTestStateReg == TEST_META_DATA_POP);
         if (qpReqCnt < fromInteger(valueOf(MAX_QP))) begin
             qpReqCnt.incr(1);
             let qpn2Destroy = qpnQ4Destroy.first;
@@ -562,13 +562,13 @@ module mkTestMetaDataQPs(Empty);
         end
     endrule
 
-    rule destroyResp if (qpTestStateReg == TEST_ST_POP);
+    rule destroyResp if (qpTestStateReg == TEST_META_DATA_POP);
         countDown.decr;
 
         if (qpRespCnt == fromInteger(valueOf(MAX_QP) - 1)) begin
             qpReqCnt  <= 0;
             qpRespCnt <= 0;
-            qpTestStateReg <= TEST_ST_FILL;
+            qpTestStateReg <= TEST_META_DATA_FILL;
         end
         else begin
             qpRespCnt.incr(1);
@@ -632,7 +632,7 @@ module mkTestPermCheckSrv(Empty);
     FIFOF#(Tuple2#(HandlerPD, LKEY)) lKeyQ4Search <- mkSizedFIFOF(valueOf(TMul#(MAX_PD, MAX_MR_PER_PD)));
     FIFOF#(Tuple2#(HandlerPD, RKEY)) rKeyQ4Search <- mkSizedFIFOF(valueOf(TMul#(MAX_PD, MAX_MR_PER_PD)));
 
-    Reg#(SeqTestState) mrCheckStateReg <- mkReg(TEST_ST_FILL);
+    Reg#(SeqTestState) mrCheckStateReg <- mkReg(TEST_META_DATA_FILL);
     Reg#(Bool) rkeySearchReg <- mkReg(False);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
@@ -641,7 +641,7 @@ module mkTestPermCheckSrv(Empty);
     Length defaultLen  = fromInteger(valueOf(RDMA_MAX_LEN));
     let defaultAccPerm = enum2Flag(IBV_ACCESS_REMOTE_WRITE);
 
-    rule allocPDs if (pdReqCnt < fromInteger(pdNum) && mrCheckStateReg == TEST_ST_FILL);
+    rule allocPDs if (pdReqCnt < fromInteger(pdNum) && mrCheckStateReg == TEST_META_DATA_FILL);
         pdReqCnt.incr(1);
         let pdKey = pdKeyPipeOut.first;
         pdKeyPipeOut.deq;
@@ -657,7 +657,7 @@ module mkTestPermCheckSrv(Empty);
         // $display("time=%0t: pdKey=%h", $time, pdKey);
     endrule
 
-    rule allocRespPDs if (pdRespCnt < fromInteger(pdNum) && mrCheckStateReg == TEST_ST_FILL);
+    rule allocRespPDs if (pdRespCnt < fromInteger(pdNum) && mrCheckStateReg == TEST_META_DATA_FILL);
         pdRespCnt.incr(1);
         let allocRespPD <- pdMetaData.srvPort.response.get;
         immAssert(
@@ -674,7 +674,7 @@ module mkTestPermCheckSrv(Empty);
         // $display("time=%0t: pdHandler=%h", $time, pdHandler);
     endrule
 
-    rule allocMRs if (mrTotalReqCnt < fromInteger(mrTotalNum) && mrCheckStateReg == TEST_ST_FILL);
+    rule allocMRs if (mrTotalReqCnt < fromInteger(mrTotalNum) && mrCheckStateReg == TEST_META_DATA_FILL);
         let pdHandler = pdHandlerQ4FillMR.first;
 
         if (mrReqCnt == fromInteger(valueOf(MAX_MR_PER_PD) - 1)) begin
@@ -722,10 +722,10 @@ module mkTestPermCheckSrv(Empty);
         end
     endrule
 
-    rule allocRespMRs if (mrCheckStateReg == TEST_ST_FILL);
+    rule allocRespMRs if (mrCheckStateReg == TEST_META_DATA_FILL);
         if (mrTotalRespCnt == fromInteger(mrTotalNum - 1)) begin
             mrTotalRespCnt <= 0;
-            mrCheckStateReg <= TEST_ST_ACT;
+            mrCheckStateReg <= TEST_META_DATA_ACT;
         end
         else begin
             mrTotalRespCnt.incr(1);
@@ -781,7 +781,7 @@ module mkTestPermCheckSrv(Empty);
         // );
     endrule
 
-    rule checkReqByLKey if (!rkeySearchReg && mrCheckStateReg == TEST_ST_ACT);
+    rule checkReqByLKey if (!rkeySearchReg && mrCheckStateReg == TEST_META_DATA_ACT);
         if (searchReqCnt == fromInteger(mrTotalNum - 1)) begin
             rkeySearchReg <= True;
             searchReqCnt <= 0;
@@ -811,7 +811,7 @@ module mkTestPermCheckSrv(Empty);
         // );
     endrule
 
-    rule checkReqByRKey if (rkeySearchReg && mrCheckStateReg == TEST_ST_ACT);
+    rule checkReqByRKey if (rkeySearchReg && mrCheckStateReg == TEST_META_DATA_ACT);
         if (searchReqCnt == fromInteger(mrTotalNum - 1)) begin
             rkeySearchReg <= False;
             searchReqCnt <= 0;
@@ -841,10 +841,10 @@ module mkTestPermCheckSrv(Empty);
         // );
     endrule
 
-    rule checkResp if (mrCheckStateReg == TEST_ST_ACT);
+    rule checkResp if (mrCheckStateReg == TEST_META_DATA_ACT);
         if (searchRespCnt == fromInteger(totalSearchNum - 1)) begin
             searchRespCnt <= 0;
-            mrCheckStateReg <= TEST_ST_POP;
+            mrCheckStateReg <= TEST_META_DATA_POP;
         end
         else begin
             searchRespCnt.incr(1);
@@ -900,7 +900,7 @@ module mkTestPermCheckSrv(Empty);
         // );
     endrule
 
-    rule clear if (mrCheckStateReg == TEST_ST_POP);
+    rule clear if (mrCheckStateReg == TEST_META_DATA_POP);
         pdReqCnt  <= 0;
         pdRespCnt <= 0;
         mrReqCnt  <= 0;
@@ -917,7 +917,7 @@ module mkTestPermCheckSrv(Empty);
 
         pdMetaData.clear;
 
-        mrCheckStateReg <= TEST_ST_FILL;
+        mrCheckStateReg <= TEST_META_DATA_FILL;
 
         // $display("time=%0t: clear", $time);
     endrule
@@ -946,10 +946,10 @@ module mkTestMetaDataSrv(Empty);
     Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) qpRespCnt <- mkCount(0);
     Count#(Bit#(TLog#(TDiv#(MAX_QP, MAX_PD)))) qpPerPdCnt <- mkCount(0);
 
-    Reg#(SeqTestState) srvCheckStateReg <- mkReg(TEST_ST_FILL);
+    Reg#(SeqTestState) srvCheckStateReg <- mkReg(TEST_META_DATA_FILL);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule allocPDs if (pdReqCnt < fromInteger(pdNum) && srvCheckStateReg == TEST_ST_FILL);
+    rule allocPDs if (pdReqCnt < fromInteger(pdNum) && srvCheckStateReg == TEST_META_DATA_FILL);
         pdReqCnt.incr(1);
         let pdKey = pdKeyPipeOut.first;
         pdKeyPipeOut.deq;
@@ -963,7 +963,7 @@ module mkTestMetaDataSrv(Empty);
         // $display("time=%0t: pdKey=%h", $time, pdKey);
     endrule
 
-    rule allocRespPDs if (pdRespCnt < fromInteger(pdNum) && srvCheckStateReg == TEST_ST_FILL);
+    rule allocRespPDs if (pdRespCnt < fromInteger(pdNum) && srvCheckStateReg == TEST_META_DATA_FILL);
         pdRespCnt.incr(1);
         let maybeAllocRespPD <- metaDataSrv.response.get;
         if (maybeAllocRespPD matches tagged Resp4PD .allocRespPD) begin
@@ -993,7 +993,7 @@ module mkTestMetaDataSrv(Empty);
         pdReqCnt  == fromInteger(pdNum) &&
         pdRespCnt == fromInteger(pdNum) &&
         qpReqCnt   < fromInteger(qpNum) &&
-        srvCheckStateReg == TEST_ST_FILL
+        srvCheckStateReg == TEST_META_DATA_FILL
     );
         if (qpPerPdCnt == fromInteger(qpPerPD - 1)) begin
             qpPerPdCnt <= 0;
@@ -1023,12 +1023,12 @@ module mkTestMetaDataSrv(Empty);
     rule createResp if (
         pdReqCnt  == fromInteger(pdNum) &&
         pdRespCnt == fromInteger(pdNum) &&
-        srvCheckStateReg == TEST_ST_FILL
+        srvCheckStateReg == TEST_META_DATA_FILL
     );
         if (qpRespCnt == fromInteger(qpNum - 1)) begin
             qpReqCnt  <= 0;
             qpRespCnt <= 0;
-            srvCheckStateReg <= TEST_ST_ACT;
+            srvCheckStateReg <= TEST_META_DATA_ACT;
         end
         else begin
             qpRespCnt.incr(1);
@@ -1064,7 +1064,7 @@ module mkTestMetaDataSrv(Empty);
         end
     endrule
 
-    rule modifyQPs if (qpReqCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_ST_ACT);
+    rule modifyQPs if (qpReqCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_META_DATA_ACT);
         qpReqCnt.incr(1);
 
         let qpn = qpnQ4Modify.first;
@@ -1083,13 +1083,13 @@ module mkTestMetaDataSrv(Empty);
         metaDataSrv.request.put(tagged Req4QP modifyReqQP);
     endrule
 
-    rule modifyResp if (srvCheckStateReg == TEST_ST_ACT);
+    rule modifyResp if (srvCheckStateReg == TEST_META_DATA_ACT);
         if (qpRespCnt == fromInteger(qpNum - 1)) begin
             pdReqCnt  <= 0;
             pdRespCnt <= 0;
             qpReqCnt  <= 0;
             qpRespCnt <= 0;
-            srvCheckStateReg <= TEST_ST_POP;
+            srvCheckStateReg <= TEST_META_DATA_POP;
         end
         else begin
             qpRespCnt.incr(1);
@@ -1125,7 +1125,7 @@ module mkTestMetaDataSrv(Empty);
         end
     endrule
 
-    rule destroyQPs if (qpReqCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_ST_POP);
+    rule destroyQPs if (qpReqCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_META_DATA_POP);
         qpReqCnt.incr(1);
         let qpn2Destroy = qpnQ4Destroy.first;
         qpnQ4Destroy.deq;
@@ -1142,7 +1142,7 @@ module mkTestMetaDataSrv(Empty);
         // $display("time=%0t: qpn2Destroy=%h", $time, qpn2Destroy);
     endrule
 
-    rule destroyResp if (qpRespCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_ST_POP);
+    rule destroyResp if (qpRespCnt < fromInteger(qpNum) && srvCheckStateReg == TEST_META_DATA_POP);
         countDown.decr;
         qpRespCnt.incr(1);
 
@@ -1176,7 +1176,7 @@ module mkTestMetaDataSrv(Empty);
         qpReqCnt  == fromInteger(qpNum) &&
         qpRespCnt == fromInteger(qpNum) &&
         pdReqCnt   < fromInteger(pdNum) &&
-        srvCheckStateReg == TEST_ST_POP
+        srvCheckStateReg == TEST_META_DATA_POP
     );
         pdReqCnt.incr(1);
         let pdHandler2Remove = pdHandlerQ4Pop.first;
@@ -1193,7 +1193,7 @@ module mkTestMetaDataSrv(Empty);
     rule deAllocResp if (
         qpReqCnt  == fromInteger(qpNum) &&
         qpRespCnt == fromInteger(qpNum) &&
-        srvCheckStateReg == TEST_ST_POP
+        srvCheckStateReg == TEST_META_DATA_POP
     );
         if (pdRespCnt == fromInteger(pdNum - 1)) begin
             pdReqCnt   <= 0;
@@ -1201,7 +1201,7 @@ module mkTestMetaDataSrv(Empty);
             qpReqCnt   <= 0;
             qpRespCnt  <= 0;
             qpPerPdCnt <= 0;
-            srvCheckStateReg <= TEST_ST_FILL;
+            srvCheckStateReg <= TEST_META_DATA_FILL;
         end
         else begin
             pdRespCnt.incr(1);

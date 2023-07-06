@@ -72,7 +72,59 @@ typedef struct {
 
 typedef Server#(ReqQP, RespQP) SrvPortQP;
 
+interface CntrlCommStatus;
+    // method StateQP getQPS();
+
+    method Bool isCreate();
+    method Bool isERR();
+    method Bool isInit();
+    method Bool isReset();
+    method Bool isRTR();
+    method Bool isRTS();
+    method Bool isSQD();
+    method Bool isNonErr();
+    method Bool isUnknown();
+
+    method Bool isRTR2RTS();
+    method Bool isStableRTS();
+
+    // method TypeQP getTypeQP();
+    method FlagsType#(MemAccessTypeFlag) getAccessFlags();
+
+    method RetryCnt     getMaxRnrCnt();
+    method RetryCnt     getMaxRetryCnt();
+    method RnrTimer     getMinRnrTimer();
+    method TimeOutTimer getMaxTimeOut();
+
+    method PendingReqCnt getPendingWorkReqNum();
+    method PendingReqCnt getPendingRecvReqNum();
+    method PendingReqCnt getPendingReadAtomicReqNum();
+    method PendingReqCnt getPendingDestReadAtomicReqNum();
+    method Bool getSigAll();
+
+    method QPN  getSQPN();
+    method QPN  getDQPN();
+    method PKEY getPKEY();
+    method QKEY getQKEY();
+    method PMTU getPMTU();
+endinterface
+
+interface CntrlStatus;
+    interface CntrlCommStatus comm;
+    method TypeQP getTypeQP();
+    method Bool isSQ();
+    // method Bool isRQ();
+endinterface
+
+interface ContextSQ;
+    interface CntrlStatus statusSQ;
+    method PSN    getNPSN();
+    method Action setNPSN(PSN psn);
+endinterface
+
 interface ContextRQ;
+    interface CntrlStatus statusRQ;
+
     method PermCheckReq getPermCheckReq();
     method Action       setPermCheckReq(PermCheckReq permCheckReq);
     method Length       getTotalDmaWriteLen();
@@ -103,50 +155,16 @@ interface ContextRQ;
     method Action       restorePreReqOpCodeAndEPSN(RdmaOpCode preOpCode, PSN psn);
 endinterface
 
-interface CntrlStatus;
-    // method StateQP getQPS();
-    method Bool isERR();
-    method Bool isInit();
-    method Bool isReset();
-    method Bool isRTR();
-    method Bool isRTS();
-    method Bool isNonErr();
-    method Bool isSQD();
-
-    method Bool isRTR2RTS();
-    method Bool isStableRTS();
-
-    method TypeQP getTypeQP();
-    method FlagsType#(MemAccessTypeFlag) getAccessFlags();
-
-    method RetryCnt     getMaxRnrCnt();
-    method RetryCnt     getMaxRetryCnt();
-    method RnrTimer     getMinRnrTimer();
-    method TimeOutTimer getMaxTimeOut();
-
-    method PendingReqCnt getPendingWorkReqNum();
-    method PendingReqCnt getPendingRecvReqNum();
-    method PendingReqCnt getPendingReadAtomicReqNum();
-    method PendingReqCnt getPendingDestReadAtomicReqNum();
-    method Bool getSigAll();
-
-    method QPN  getSQPN();
-    method QPN  getDQPN();
-    method PKEY getPKEY();
-    method QKEY getQKEY();
-    method PMTU getPMTU();
-    method PSN  getNPSN();
-endinterface
-
-interface Controller;
+interface CntrlQP;
     interface SrvPortQP srvPort;
+    interface ContextSQ contextSQ;
     interface ContextRQ contextRQ;
 
     method Action setStateErr();
     method Action errFlushDone();
+    method Action setStateReset();
 
-    interface CntrlStatus cntrlStatus;
-    // // method StateQP getQPS();
+    // method StateQP getQPS();
     // method Bool isERR();
     // method Bool isInit();
     // method Bool isReset();
@@ -178,37 +196,42 @@ interface Controller;
     // method QKEY getQKEY();
     // method PMTU getPMTU();
     // method PSN  getNPSN();
-    method Action setNPSN(PSN psn);
+
+    // method Action setNPSN(PSN psn);
 endinterface
 
 // Support required attributes only when modifying QP.
 // TODO: support optional attributes when modifying QP.
-module mkController(Controller);
+module mkCntrlQP(CntrlQP);
     FIFOF#(ReqQP)   reqQ <- mkFIFOF;
     FIFOF#(RespQP) respQ <- mkFIFOF;
 
     // QP Attributes related
-    Reg#(StateQP)    stateReg <- mkReg(IBV_QPS_UNKNOWN);
     Reg#(StateQP) preStateReg <- mkReg(IBV_QPS_UNKNOWN);
+    // IBV_QPS_UNKNOWN means QP is deleted, whereas
+    // IBV_QPS_RESET means QP is not deleted but in reset state.
+    Reg#(StateQP)    stateReg <- mkReg(IBV_QPS_RESET);
 
-    Reg#(TypeQP) qpTypeReg <- mkRegU;
+    Reg#(TypeQP) sqTypeReg <- mkRegU;
+    Reg#(TypeQP) rqTypeReg <- mkRegU;
 
     Reg#(RetryCnt)      maxRnrCntReg <- mkRegU;
     Reg#(RetryCnt)    maxRetryCntReg <- mkRegU;
     Reg#(TimeOutTimer) maxTimeOutReg <- mkRegU;
     Reg#(RnrTimer)    minRnrTimerReg <- mkRegU;
 
-    Reg#(Bool)   errFlushDoneReg <- mkRegU;
-    Reg#(Bool) setStateErrReg[2] <- mkCReg(2, False);
-    Reg#(Bool)   qpDestroyReg[2] <- mkCReg(2, False);
+    Reg#(Bool)     errFlushDoneReg <- mkRegU;
+    Reg#(Bool)   setStateErrReg[2] <- mkCReg(2, False);
+    Reg#(Bool) setStateResetReg[2] <- mkCReg(2, False);
+    Reg#(Bool)     qpDestroyReg[2] <- mkCReg(2, False);
 
     Reg#(Maybe#(StateQP)) nextStateReg[2] <- mkCReg(2, tagged Invalid);
 
     // TODO: support QP access check
     Reg#(FlagsType#(MemAccessTypeFlag)) qpAccessFlagsReg <- mkRegU;
     // TODO: support max WR/RR pending number check
-    Reg#(PendingReqCnt) pendingWorkReqNumReg <- mkRegU;
-    Reg#(PendingReqCnt) pendingRecvReqNumReg <- mkRegU;
+    Reg#(PendingReqCnt) pendingWorkReqNumReg <- mkReg(fromInteger(valueOf(MAX_QP_WR)));
+    Reg#(PendingReqCnt) pendingRecvReqNumReg <- mkReg(fromInteger(valueOf(MAX_QP_WR)));
     // TODO: support max read/atomic pending requests check
     Reg#(PendingReqCnt)     pendingReadAtomicReqNumReg <- mkRegU;
     Reg#(PendingReqCnt) pendingDestReadAtomicReqNumReg <- mkRegU;
@@ -231,7 +254,7 @@ module mkController(Controller);
     Bool inited = stateReg != IBV_QPS_RESET && stateReg != IBV_QPS_UNKNOWN;
 
     // ContextRQ related
-    Reg#(PermCheckReq) permCheckReqReg <- mkRegU;
+    Reg#(PermCheckReq)   permCheckReqReg <- mkRegU;
     Reg#(Length)     totalDmaWriteLenReg <- mkRegU;
     Reg#(Length) remainingDmaWriteLenReg <- mkRegU;
     Reg#(ADDR)       nextDmaWriteAddrReg <- mkRegU;
@@ -253,18 +276,70 @@ module mkController(Controller);
     // End ContextRQ related
 
     (* no_implicit_conditions, fire_when_enabled *)
-    rule resetAndClear if (stateReg == IBV_QPS_UNKNOWN);
+    rule resetAndClear if (stateReg == IBV_QPS_RESET);
+        pendingWorkReqNumReg <= fromInteger(valueOf(MAX_QP_WR));
+        pendingRecvReqNumReg <= fromInteger(valueOf(MAX_QP_WR));
         preReqOpCodeReg[0] <= SEND_ONLY;
         epochReg <= 0;
         msnReg   <= 0;
         restoreQ.clear;
-        // $display("time=%0t: resetAndClear", $time);
+        // respQ.clear; // Do not clear respQ because of create and destroy QP responses
+
+        // $display("time=%0t: reset and clear mkCntrlQP", $time);
     endrule
+/*
+    function Action debugShowRegs();
+        action
+            $display(
+                "time=%0t: mkCntrlQP internal registers", $time,
+                ", preStateReg=", fshow(preStateReg),
+                ", stateReg=", fshow(stateReg),
+                ", sqTypeReg=", fshow(sqTypeReg),
+                ", rqTypeReg=", fshow(rqTypeReg),
+                ", maxRnrCntReg=", fshow(maxRnrCntReg),
+                ", maxRetryCntReg=", fshow(maxRetryCntReg),
+                ", maxTimeOutReg=", fshow(maxTimeOutReg),
+                ", minRnrTimerReg=", fshow(minRnrTimerReg),
+                ", errFlushDoneReg=", fshow(errFlushDoneReg),
+                ", setStateErrReg[1]=", fshow(setStateErrReg[1]),
+                ", qpDestroyReg[1]=", fshow(qpDestroyReg[1]),
+                ", nextStateReg[1]=", fshow(nextStateReg[1]),
+                ", qpAccessFlagsReg=", fshow(qpAccessFlagsReg),
+                ", pendingWorkReqNumReg=", fshow(pendingWorkReqNumReg),
+                ", pendingRecvReqNumReg=", fshow(pendingRecvReqNumReg),
+                ", pendingReadAtomicReqNumReg=", fshow(pendingReadAtomicReqNumReg),
+                ", pendingDestReadAtomicReqNumReg=", fshow(pendingDestReadAtomicReqNumReg),
+                ", sendScatterGatherElemCntReg=", fshow(sendScatterGatherElemCntReg),
+                ", recvScatterGatherElemCntReg=", fshow(recvScatterGatherElemCntReg),
+                ", inlineDataSizeReg=", fshow(inlineDataSizeReg),
+                ", sqSigAllReg=", fshow(sqSigAllReg),
+                ", sqpnReg=", fshow(sqpnReg),
+                ", dqpnReg=", fshow(dqpnReg),
+                ", pkeyReg=", fshow(pkeyReg),
+                ", qkeyReg=", fshow(qkeyReg),
+                ", pmtuReg=", fshow(pmtuReg),
+                ", npsnReg=", fshow(npsnReg),
+                ", permCheckReqReg=", fshow(permCheckReqReg),
+                ", totalDmaWriteLenReg=", fshow(totalDmaWriteLenReg),
+                ", remainingDmaWriteLenReg=", fshow(remainingDmaWriteLenReg),
+                ", nextDmaWriteAddrReg=", fshow(nextDmaWriteAddrReg),
+                ", sendWriteReqPktNumReg=", fshow(sendWriteReqPktNumReg),
+                ", preReqOpCodeReg[1]=", fshow(preReqOpCodeReg[1]),
+                ", epochReg=", fshow(epochReg),
+                ", msnReg=", fshow(msnReg),
+                ", isRespPktNumZeroReg=", fshow(isRespPktNumZeroReg),
+                ", respPktNumReg=", fshow(respPktNumReg),
+                ", curRespPsnReg=", fshow(curRespPsnReg),
+                ", epsnReg[1]=", fshow(epsnReg[1])
+            );
+        endaction
+    endfunction
 
-    // rule showState if (stateReg != IBV_QPS_RTS);
-    //     $display("time=%0t:", $time, " cntrl.stateReg=", fshow(stateReg));
-    // endrule
-
+    rule debug if (preStateReg == IBV_QPS_RTR && stateReg == IBV_QPS_RTS);
+        debugShowRegs;
+        // $display("time=%0t:", $time, " cntrl.stateReg=", fshow(stateReg));
+    endrule
+*/
     // qpAttr set when Reset 2 INIT
     function AttrQP queryReset2InitAttr(AttrQP qpAttr);
         qpAttr.curQpState    = stateReg;
@@ -313,7 +388,8 @@ module mkController(Controller);
         epsnReg[1] <= epsn;
     endrule
 
-    rule onCreate if (stateReg == IBV_QPS_UNKNOWN);
+    // rule onCreate if (stateReg == IBV_QPS_UNKNOWN);
+    rule onReset if (stateReg == IBV_QPS_RESET);
         let qpReq = reqQ.first;
         reqQ.deq;
 
@@ -327,21 +403,25 @@ module mkController(Controller);
         };
 
         if (successOrNot) begin
-            nextStateReg[0] <= tagged Valid IBV_QPS_RESET;
+            nextStateReg[0] <= tagged Valid IBV_QPS_CREATE;
+            // nextStateReg[0] <= tagged Valid IBV_QPS_RESET;
         end
+
         sqpnReg     <= qpReq.qpn;
-        qpTypeReg   <= qpReq.qpInitAttr.qpType;
+        sqTypeReg   <= qpReq.qpInitAttr.qpType == IBV_QPT_XRC_RECV ? IBV_QPT_XRC_SEND : qpReq.qpInitAttr.qpType;
+        rqTypeReg   <= qpReq.qpInitAttr.qpType == IBV_QPT_XRC_SEND ? IBV_QPT_XRC_RECV : qpReq.qpInitAttr.qpType;
         sqSigAllReg <= qpReq.qpInitAttr.sqSigAll;
 
         respQ.enq(qpResp);
         // $display(
         //     "time=%0t:", $time,
-        //     " onCreate qpReq.qpn=%h", qpReq.qpn,
+        //     " onReset qpReq.qpn=%h", qpReq.qpn,
         //     ", successOrNot=", fshow(qpResp.successOrNot)
         // );
     endrule
 
-    rule onReset if (stateReg == IBV_QPS_RESET);
+    // rule onReset if (stateReg == IBV_QPS_RESET);
+    rule onCreate if (stateReg == IBV_QPS_CREATE);
         let qpReq = reqQ.first;
         reqQ.deq;
 
@@ -361,7 +441,7 @@ module mkController(Controller);
             //         nextStateReg[0] <= tagged Valid IBV_QPS_RESET;
             //     end
             //     sqpnReg     <= qpReq.qpn;
-            //     qpTypeReg   <= qpReq.qpInitAttr.qpType;
+            //     sqTypeReg   <= qpReq.qpInitAttr.qpType;
             //     sqSigAllReg <= qpReq.qpInitAttr.sqSigAll;
             // end
             REQ_QP_DESTROY: begin
@@ -384,7 +464,7 @@ module mkController(Controller);
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -396,7 +476,7 @@ module mkController(Controller);
         respQ.enq(qpResp);
         // $display(
         //     "time=%0t:", $time,
-        //     " onReset qpReq.qpn=%h", qpReq.qpn,
+        //     " onCreate qpReq.qpn=%h", qpReq.qpn,
         //     ", qpReq.qpAttr.qpState=", fshow(qpReq.qpAttr.qpState),
         //     ", qpReq.qpAttrMask=", fshow(qpReq.qpAttrMask),
         //     ", getReset2InitRequiredAttr=", fshow(getReset2InitRequiredAttr),
@@ -441,7 +521,7 @@ module mkController(Controller);
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -505,7 +585,7 @@ module mkController(Controller);
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -568,7 +648,7 @@ module mkController(Controller);
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -628,7 +708,7 @@ module mkController(Controller);
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -661,19 +741,19 @@ module mkController(Controller);
             REQ_QP_DESTROY: begin
                 nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
             end
-            REQ_QP_MODIFY: begin
-                qpResp.successOrNot = qpReq.qpAttr.qpState == IBV_QPS_RESET;
+            // REQ_QP_MODIFY: begin
+            //     qpResp.successOrNot = qpReq.qpAttr.qpState == IBV_QPS_RESET;
 
-                if (qpResp.successOrNot) begin
-                    nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
-                end
-            end
+            //     if (qpResp.successOrNot) begin
+            //         nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
+            //     end
+            // end
             REQ_QP_QUERY : begin
                 qpResp.qpAttr.curQpState = stateReg;
             end
             default: begin
                 immFail(
-                    "unreachible case @ mkController",
+                    "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
                         "qpReqType=", fshow(qpReq.qpReqType)
@@ -686,6 +766,8 @@ module mkController(Controller);
         // $display(
         //     "time=%0t:", $time,
         //     " onERR qpReq.qpn=%h", qpReq.qpn,
+        //     // ", qpReq=", fshow(qpReq),
+        //     // ", qpResp=", fshow(qpResp),
         //     ", successOrNot=", fshow(qpResp.successOrNot)
         // );
     endrule
@@ -694,7 +776,7 @@ module mkController(Controller);
     rule canonicalize;
         // immAssert(
         //     stateReg != IBV_QPS_UNKNOWN,
-        //     "unknown state assertion @ mkController",
+        //     "unknown state assertion @ mkCntrlQP",
         //     $format("stateReg=", fshow(stateReg), " should not be IBV_QPS_UNKNOWN")
         // );
 
@@ -702,30 +784,85 @@ module mkController(Controller);
         if (nextStateReg[1] matches tagged Valid .setState) begin
             nextState = setState;
             // $display(
-            //     "time=%0t:", $time,
-            //     // " sqpnReg=%h", sqpnReg,
-            //     " stateReg=", fshow(stateReg),
+            //     "time=%0t: Controller set next state", $time,
+            //     // ", sqpnReg=%h", sqpnReg,
+            //     ", stateReg=", fshow(stateReg),
+            //     ", nextState=", fshow(nextState)
+            // );
+        end
+
+        // IBV_QPS_UNKNOWN and IBV_QPS_RESET has higher priority than IBV_QPS_ERR,
+        // IBV_QPS_ERR has higher priority than other states.
+        if (stateReg == IBV_QPS_UNKNOWN && setStateResetReg[1]) begin
+            nextState = IBV_QPS_RESET;
+            // $display(
+            //     "time=%0t: Controller reset", $time,
+            //     // ", sqpnReg=%h", sqpnReg,
+            //     ", stateReg=", fshow(stateReg),
             //     ", nextState=", fshow(nextState)
             // );
 
-            // If destroy QP, clear reqQ but not respQ
-            if (setState == IBV_QPS_UNKNOWN) begin
-                reqQ.clear;
-                // ibv_destroy_qp needs responses
-                // respQ.clear;
-            end
+            // After destroy QP, clear reqQ and respQ
+            reqQ.clear;
+            // TODO: check destroy QP response is consumed before clear
+            respQ.clear;
         end
-
-        if (nextState != IBV_QPS_UNKNOWN && nextState != IBV_QPS_RESET && setStateErrReg[1]) begin
-            // IBV_QPS_RESET has higher priority than IBV_QPS_ERR,
-            // IBV_QPS_ERR has higher priority than other states.
+        // if (nextState != IBV_QPS_UNKNOWN && nextState != IBV_QPS_RESET && setStateErrReg[1]) begin
+        else if (nextState != IBV_QPS_UNKNOWN && setStateErrReg[1]) begin
             nextState = IBV_QPS_ERR;
+            // $display(
+            //     "time=%0t: Controller set error state", $time,
+            //     // ", sqpnReg=%h", sqpnReg,
+            //     ", stateReg=", fshow(stateReg),
+            //     ", nextState=", fshow(nextState)
+            // );
         end
 
-        stateReg <= nextState;
-        nextStateReg[1]   <= tagged Invalid;
-        setStateErrReg[1] <= False;
+        stateReg            <= nextState;
+        nextStateReg[1]     <= tagged Invalid;
+        setStateErrReg[1]   <= False;
+        setStateResetReg[1] <= False;
     endrule
+
+    function getCntrlCommStatus();
+        // interface cntrlCommStatus = interface CntrlCommStatus;
+        // method StateQP getQPS() = stateReg;
+        let ret = interface CntrlCommStatus;
+            method Bool isCreate()  = stateReg == IBV_QPS_CREATE;
+            method Bool isERR()     = stateReg == IBV_QPS_ERR;
+            method Bool isInit()    = stateReg == IBV_QPS_INIT;
+            method Bool isNonErr()  = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD;
+            method Bool isReset()   = stateReg == IBV_QPS_RESET; // stateReg == IBV_QPS_UNKNOWN ||
+            method Bool isRTR()     = stateReg == IBV_QPS_RTR;
+            method Bool isRTS()     = stateReg == IBV_QPS_RTS;
+            method Bool isSQD()     = stateReg == IBV_QPS_SQD;
+            method Bool isUnknown() = stateReg == IBV_QPS_UNKNOWN;
+
+            method Bool   isRTR2RTS() = preStateReg == IBV_QPS_RTR && stateReg == IBV_QPS_RTS;
+            method Bool isStableRTS() = preStateReg == IBV_QPS_RTS && stateReg == IBV_QPS_RTS;
+
+            // method TypeQP getTypeQP() if (inited) = sqTypeReg;
+            method FlagsType#(MemAccessTypeFlag) getAccessFlags() if (inited) = qpAccessFlagsReg;
+
+            method RetryCnt      getMaxRnrCnt() if (inited) = maxRnrCntReg;
+            method RetryCnt    getMaxRetryCnt() if (inited) = maxRetryCntReg;
+            method TimeOutTimer getMaxTimeOut() if (inited) = maxTimeOutReg;
+            method RnrTimer    getMinRnrTimer() if (inited) = minRnrTimerReg;
+
+            method PendingReqCnt getPendingWorkReqNum() if (inited) = pendingWorkReqNumReg;
+            method PendingReqCnt getPendingRecvReqNum() if (inited) = pendingRecvReqNumReg;
+            method PendingReqCnt     getPendingReadAtomicReqNum() if (inited) = pendingReadAtomicReqNumReg;
+            method PendingReqCnt getPendingDestReadAtomicReqNum() if (inited) = pendingDestReadAtomicReqNumReg;
+
+            method Bool getSigAll() if (inited) = sqSigAllReg;
+            method PSN  getSQPN()   if (inited) = sqpnReg;
+            method PSN  getDQPN()   if (inited) = dqpnReg;
+            method PKEY getPKEY()   if (inited) = pkeyReg;
+            method QKEY getQKEY()   if (inited) = qkeyReg;
+            method PMTU getPMTU()   if (inited) = pmtuReg;
+        endinterface;
+        return ret;
+    endfunction
 
     // method Action setStateReset() if (inited && stateReg == IBV_QPS_ERR && errFlushDoneReg);
     //     stateReg <= IBV_QPS_RESET;
@@ -748,49 +885,35 @@ module mkController(Controller);
     method Action errFlushDone if (inited && stateReg == IBV_QPS_ERR && !errFlushDoneReg);
         errFlushDoneReg <= True;
     endmethod
-
-    interface cntrlStatus = interface CntrlStatus;
-        // method StateQP getQPS() = stateReg;
-        method Bool isERR()    = stateReg == IBV_QPS_ERR;
-        method Bool isInit()   = stateReg == IBV_QPS_INIT;
-        method Bool isNonErr() = stateReg == IBV_QPS_RTR || stateReg == IBV_QPS_RTS || stateReg == IBV_QPS_SQD;
-        method Bool isReset()  = stateReg == IBV_QPS_UNKNOWN || stateReg == IBV_QPS_RESET;
-        method Bool isRTR()    = stateReg == IBV_QPS_RTR;
-        method Bool isRTS()    = stateReg == IBV_QPS_RTS;
-        method Bool isSQD()    = stateReg == IBV_QPS_SQD;
-
-        method Bool   isRTR2RTS() = preStateReg == IBV_QPS_RTR && stateReg == IBV_QPS_RTS;
-        method Bool isStableRTS() = preStateReg == IBV_QPS_RTS && stateReg == IBV_QPS_RTS;
-
-        method TypeQP getTypeQP() if (inited) = qpTypeReg;
-        method FlagsType#(MemAccessTypeFlag) getAccessFlags() if (inited) = qpAccessFlagsReg;
-
-        method RetryCnt      getMaxRnrCnt() if (inited) = maxRnrCntReg;
-        method RetryCnt    getMaxRetryCnt() if (inited) = maxRetryCntReg;
-        method TimeOutTimer getMaxTimeOut() if (inited) = maxTimeOutReg;
-        method RnrTimer    getMinRnrTimer() if (inited) = minRnrTimerReg;
-
-        method PendingReqCnt getPendingWorkReqNum() if (inited) = pendingWorkReqNumReg;
-        method PendingReqCnt getPendingRecvReqNum() if (inited) = pendingRecvReqNumReg;
-        method PendingReqCnt     getPendingReadAtomicReqNum() if (inited) = pendingReadAtomicReqNumReg;
-        method PendingReqCnt getPendingDestReadAtomicReqNum() if (inited) = pendingDestReadAtomicReqNumReg;
-
-        method Bool getSigAll() if (inited) = sqSigAllReg;
-        method PSN  getSQPN()   if (inited) = sqpnReg;
-        method PSN  getDQPN()   if (inited) = dqpnReg;
-        method PKEY getPKEY()   if (inited) = pkeyReg;
-        method QKEY getQKEY()   if (inited) = qkeyReg;
-        method PMTU getPMTU()   if (inited) = pmtuReg;
-        method PSN  getNPSN()   if (inited) = npsnReg;
-    endinterface;
-
-    method Action setNPSN(PSN psn);
-        npsnReg <= psn;
+    method Action setStateReset() if (stateReg == IBV_QPS_UNKNOWN);
+        setStateResetReg[0] <= True;
     endmethod
 
     interface srvPort = toGPServer(reqQ, respQ);
 
+    interface contextSQ = interface ContextSQ;
+        interface statusSQ = interface CntrlStatus;
+            interface comm = getCntrlCommStatus;
+            method TypeQP getTypeQP() = sqTypeReg;
+            method Bool isSQ() = True;
+            // method Bool isRQ() = False;
+        endinterface;
+
+        method PSN    getNPSN() if (inited) = npsnReg;
+
+        method Action setNPSN(PSN psn) if (inited);
+            npsnReg <= psn;
+        endmethod
+    endinterface;
+
     interface contextRQ = interface ContextRQ;
+        interface statusRQ = interface CntrlStatus;
+            interface comm = getCntrlCommStatus;
+            method TypeQP getTypeQP() = rqTypeReg;
+            method Bool isSQ() = False;
+            // method Bool isRQ() = True;
+        endinterface;
+
         method PermCheckReq getPermCheckReq() if (inited) = permCheckReqReg;
         method Action        setPermCheckReq(PermCheckReq permCheckReq) if (inited);
             permCheckReqReg <= permCheckReq;

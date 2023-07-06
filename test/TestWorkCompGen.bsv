@@ -37,15 +37,17 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     // WorkReq generation
     Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <-
         mkRandomWorkReq(minDmaLength, maxDmaLength);
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // It needs extra controller to generate pending WR,
     // since WC might change controller to error state,
     // which prevent generating pending WR.
-    let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
+    // let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
     Vector#(2, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
-        mkExistingPendingWorkReqPipeOut(cntrl4PendingWorkReqGen, workReqPipeOutVec[0]);
+        mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
     let pendingWorkReqPipeOut4WorkCompReq = existingPendingWorkReqPipeOutVec[0];
     let pendingWorkReqPipeOut4DmaResp = existingPendingWorkReqPipeOutVec[1];
     FIFOF#(PendingWorkReq) pendingWorkReqPipeOut4Ref <- mkFIFOF;
@@ -57,23 +59,41 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4RespHandleInSQ <- mkFIFOF;
     // WC status from RQ
-    FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
+    // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
 
-    // Controller for DUT that will be triggered into error state
-    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // CntrlQP for DUT that will be triggered into error state
     // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // DUT
-    let workCompPipeOut <- mkWorkCompGenSQ(
-        cntrl,
-        convertFifo2PipeOut(payloadConRespQ),
-        convertFifo2PipeOut(wcGenReqQ4ReqGenInSQ),
-        convertFifo2PipeOut(wcGenReqQ4RespHandleInSQ),
-        convertFifo2PipeOut(workCompStatusQFromRQ)
+    let dut <- mkWorkCompGenSQ(
+        cntrlStatus,
+        toPipeOut(payloadConRespQ),
+        toPipeOut(wcGenReqQ4ReqGenInSQ),
+        toPipeOut(wcGenReqQ4RespHandleInSQ)
+        // toPipeOut(workCompStatusQFromRQ)
     );
+    // let workCompPipeOut = dut.workCompPipeOut;
 
+    Reg#(Bool) hasWorkCompGenReg <- mkReg(False);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule checkHasErr;
+        if (isNormalCase) begin
+            immAssert(
+                !dut.hasErr,
+                "hasErr assertion @ mkTestWorkCompGenRQ",
+                $format("dut.hasErr=", fshow(dut.hasErr), " should be false")
+            );
+        end
+        else if (hasWorkCompGenReg) begin
+            immAssert(
+                dut.hasErr,
+                "hasErr assertion @ mkTestWorkCompGenRQ",
+                $format("dut.hasErr=", fshow(dut.hasErr), " should be true")
+            );
+        end
+    endrule
 
     rule genPayloadConResp;
         let pendingWR = pendingWorkReqPipeOut4DmaResp.first;
@@ -84,7 +104,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
             let payloadConResp = PayloadConResp {
                 dmaWriteResp: DmaWriteResp {
                     initiator: dontCareValue,
-                    sqpn     : cntrl.cntrlStatus.getSQPN,
+                    sqpn     : cntrlStatus.comm.getSQPN,
                     psn      : endPSN,
                     isRespErr: False
                 }
@@ -99,7 +119,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
         end
     endrule
 
-    rule filterWorkReqNeedWorkComp if (cntrl.cntrlStatus.isRTS || cntrl.cntrlStatus.isERR);
+    rule filterWorkReqNeedWorkComp if (cntrlStatus.comm.isRTS || cntrlStatus.comm.isERR);
         let pendingWR = pendingWorkReqPipeOut4WorkCompReq.first;
         pendingWorkReqPipeOut4WorkCompReq.deq;
 
@@ -131,8 +151,8 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
         let pendingWR = pendingWorkReqPipeOut4Ref.first;
         pendingWorkReqPipeOut4Ref.deq;
 
-        let workCompSQ = workCompPipeOut.first;
-        workCompPipeOut.deq;
+        let workCompSQ = dut.workCompPipeOut.first;
+        dut.workCompPipeOut.deq;
 
         immAssert(
             workCompMatchWorkReqInSQ(workCompSQ, pendingWR.wr),
@@ -152,6 +172,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
         // $display(
         //     "time=%0t: WC=", $time, fshow(workCompSQ), " not match WR=", fshow(pendingWR.wr)
         // );
+        hasWorkCompGenReg <= True;
         countDown.decr;
     endrule
 endmodule
@@ -178,15 +199,17 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
     Vector#(1, PipeOut#(WorkReq)) workReqPipeOutVec <- mkRandomSendOrWriteImmWorkReq(
         minPayloadLen, maxPayloadLen
     );
+    let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextRQ.statusRQ;
     // It needs extra controller to generate pending WR,
     // since WC might change controller to error state,
     // which prevent generating pending WR.
-    let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
+    // let cntrl4PendingWorkReqGen <- mkSimCntrl(qpType, pmtu);
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl4PendingWorkReqGen = qpMetaData.getCntrlByIndexQP(qpIndex);
     Vector#(1, PipeOut#(PendingWorkReq)) pendingWorkReqPipeOutVec <-
-        mkExistingPendingWorkReqPipeOut(cntrl4PendingWorkReqGen, workReqPipeOutVec[0]);
+        mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
 
     let pendingWorkReqPipeOut = pendingWorkReqPipeOutVec[0];
 
@@ -199,17 +222,17 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
     // WC requests
     FIFOF#(WorkCompGenReqRQ) workCompGenReqQ4RQ <- mkFIFOF;
 
-    // Controller for DUT that will be triggered into error state
-    let cntrl <- mkSimCntrl(qpType, pmtu);
+    // CntrlQP for DUT that will be triggered into error state
     // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
+    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // DUT
     let dut <- mkWorkCompGenRQ(
-        cntrl,
-        convertFifo2PipeOut(payloadConRespQ),
-        convertFifo2PipeOut(workCompGenReqQ4RQ)
+        cntrlStatus,
+        toPipeOut(payloadConRespQ),
+        toPipeOut(workCompGenReqQ4RQ)
     );
+    // let workCompPipeOut = dut.workCompPipeOut;
 
     // RecvReq ID
     PipeOut#(WorkReqID) recvReqIdPipeOut <- mkGenericRandomPipeOut;
@@ -219,22 +242,40 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
         WorkReqID, WorkCompOpCode, WorkCompFlags, Maybe#(IMM), Maybe#(RKEY)
     )) expectedWorkCompQ <- mkFIFOF;
 
+    Reg#(Bool) hasWorkCompGenReg <- mkReg(False);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+/*
+    rule setCntrlErrState if (cntrlStatus.comm.isRTS && dut.hasErr);
+        // let wcStatus = dut.workCompStatusPipeOutRQ.first;
+        // dut.workCompStatusPipeOutRQ.deq;
 
-    rule setCntrlErrState if (cntrl.cntrlStatus.isRTS);
-        let wcStatus = dut.workCompStatusPipeOutRQ.first;
-        dut.workCompStatusPipeOutRQ.deq;
-
-        immAssert(
-            wcStatus != IBV_WC_SUCCESS,
-            "wcStatus assertion @ mkTestWorkCompGenRQ",
-            $format("wcStatus=", fshow(wcStatus), " should not be success")
-        );
+        // immAssert(
+        //     wcStatus != IBV_WC_SUCCESS,
+        //     "wcStatus assertion @ mkTestWorkCompGenRQ",
+        //     $format("wcStatus=", fshow(wcStatus), " should not be success")
+        // );
         cntrl.setStateErr;
         // $display(
         //     "time=%0t:", $time,
-        //     " set Controller to error state, wcStatus=", fshow(wcStatus)
+        //     " set CntrlQP to error state, wcStatus=", fshow(wcStatus)
         // );
+    endrule
+*/
+    rule checkHasErr;
+        if (isNormalCase) begin
+            immAssert(
+                !dut.hasErr,
+                "hasErr assertion @ mkTestWorkCompGenRQ",
+                $format("dut.hasErr=", fshow(dut.hasErr), " should be false")
+            );
+        end
+        else if (hasWorkCompGenReg) begin
+            immAssert(
+                dut.hasErr,
+                "hasErr assertion @ mkTestWorkCompGenRQ",
+                $format("dut.hasErr=", fshow(dut.hasErr), " should be true")
+            );
+        end
     endrule
 
     rule genWorkCompReq4RQ;
@@ -254,7 +295,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
                 let payloadConResp = PayloadConResp {
                     dmaWriteResp: DmaWriteResp {
                         initiator: dontCareValue,
-                        sqpn     : cntrl.cntrlStatus.getSQPN,
+                        sqpn     : cntrlStatus.comm.getSQPN,
                         psn      : endPSN,
                         isRespErr: False
                     }
@@ -290,7 +331,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
             let workCompReq = WorkCompGenReqRQ {
                 rrID        : maybeRecvReqID,
                 len         : pendingWR.wr.len,
-                sqpn        : cntrl.cntrlStatus.getSQPN,
+                sqpn        : cntrlStatus.comm.getSQPN,
                 reqPSN      : endPSN,
                 isZeroDmaLen: isZeroLen,
                 wcStatus    : isNormalCase ? IBV_WC_SUCCESS : IBV_WC_WR_FLUSH_ERR,
@@ -365,6 +406,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
         );
 
         // $display("time=%0t: WC=", $time, fshow(workCompRQ));
+        hasWorkCompGenReg <= True;
         countDown.decr;
     endrule
 endmodule

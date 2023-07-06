@@ -723,13 +723,16 @@ function Maybe#(TransType) qpType2TransType(TypeQP qpt);
     endcase;
 endfunction
 
-function Bool transTypeMatchQpType(TransType tt, TypeQP qpt);
+function Bool transTypeMatchQpType(TransType tt, TypeQP qpt, Bool isRespPkt);
     return case (tt)
         TRANS_TYPE_CNP: True;
         TRANS_TYPE_RC : (qpt == IBV_QPT_RC);
         TRANS_TYPE_UC : (qpt == IBV_QPT_UC);
         TRANS_TYPE_UD : (qpt == IBV_QPT_UD);
-        TRANS_TYPE_XRC: (qpt == IBV_QPT_XRC_RECV || qpt == IBV_QPT_XRC_SEND);
+        TRANS_TYPE_XRC: (
+            (!isRespPkt && qpt == IBV_QPT_XRC_RECV) ||
+            (isRespPkt && qpt == IBV_QPT_XRC_SEND)
+        );
         default: False;
     endcase;
 endfunction
@@ -767,8 +770,8 @@ function Bool isSupportedReqOpCodeRQ(TypeQP qpt, RdmaOpCode opcode);
             SEND_ONLY_WITH_IMMEDIATE      : True;
             default                       : False;
         endcase;
-        IBV_QPT_XRC_RECV, // TODO: XRC RQ should have its own controller
-        IBV_QPT_XRC_SEND,
+        // IBV_QPT_XRC_SEND,
+        IBV_QPT_XRC_RECV,
         IBV_QPT_RC      : return case (opcode)
             SEND_FIRST                    ,
             SEND_MIDDLE                   ,
@@ -1409,7 +1412,7 @@ function PipeOut#(PendingWorkReq) genNewPendingWorkReqPipeOut(
         method Bool notEmpty() = workReqPipeIn.notEmpty;
     endinterface;
 endfunction
-
+/*
 module mkConnectPendingWorkReqPipeOut2PendingWorkReqQ#(
     PipeOut#(PendingWorkReq) pipeIn, FIFOF#(PendingWorkReq) pendingWorkReqBufQ
 )(Empty);
@@ -1424,7 +1427,7 @@ module mkConnectPendingWorkReqPipeOut2PendingWorkReqQ#(
         // );
     endrule
 endmodule
-
+*/
 // WorkComp related
 
 // TODO: support multiple WC flags
@@ -1519,14 +1522,18 @@ endfunction
 
 // PipeOut related
 
-function PipeOut#(anytype) convertFifo2PipeOut(FIFOF#(anytype) queue);
-    return f_FIFOF_to_PipeOut(queue);
-endfunction
-
 module mkPipeOutMux#(
     Bool sel, PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) pipeMuxOutQ <- mkFIFOF;
+
+    // rule debug if (pipeIn1.notEmpty);
+    //     $display(
+    //         "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
+    //         ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
+    //         ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
+    //     );
+    // endrule
 
     rule outputPipeIn1 if (sel);
         pipeMuxOutQ.enq(pipeIn1.first);
@@ -1540,14 +1547,14 @@ module mkPipeOutMux#(
         // $display("time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel));
     endrule
 
-    return convertFifo2PipeOut(pipeMuxOutQ);
+    return toPipeOut(pipeMuxOutQ);
 endmodule
 /*
 module mkPipeOutBuffer#(PipeOut#(anytype) pipeIn
 )(PipeOut#(anytype)) provisos(Bits #(anytype, anysize));
     FIFOF#(anytype) bufferQ <- mkFIFOF;
     mkConnection(toPut(bufferQ), toGet(pipeIn));
-    return convertFifo2PipeOut(bufferQ);
+    return toPipeOut(bufferQ);
 endmodule
 
 function PipeOut#(anytype) muxPipeOut(
@@ -1656,14 +1663,14 @@ module mkQpAttrPipeOut(PipeOut#(AttrQP));
             maxDestReadAtomic: fromInteger(valueOf(MAX_QP_DST_RD_ATOM)),
             minRnrTimer      : 1, // minRnrTimer 1 - 0.01 milliseconds delay
             timeout          : 1, // maxTimeOut 0 - infinite, 1 - 8.192 usec (0.000008 sec)
-            retryCnt         : 3,
-            rnrRetry         : 3
+            retryCnt         : fromInteger(valueOf(DEFAULT_RETRY_NUM)),
+            rnrRetry         : fromInteger(valueOf(DEFAULT_RETRY_NUM))
         };
 
         qpAttrQ.enq(qpAttr);
     endrule
 
-    return convertFifo2PipeOut(qpAttrQ);
+    return toPipeOut(qpAttrQ);
 endmodule
 
 // PayloadConsumer related
@@ -1672,7 +1679,7 @@ endmodule
 // no response from PayloadConsumer will not incur bugs.
 function Action genDiscardPayloadReq(
     PmtuFragNum fragNum,
-    DmaReqInitiator initiator,
+    DmaReqSrcType initiator,
     QPN sqpn,
     ADDR startAddr,
     PktLen len,

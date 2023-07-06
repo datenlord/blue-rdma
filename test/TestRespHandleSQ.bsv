@@ -1,3 +1,4 @@
+import Connectable :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
@@ -35,7 +36,7 @@ typedef enum {
 
 module mkSimGenNormalOrErrOrRetryRdmaResp#(
     TestRespHandleRespType respType,
-    Controller cntrl,
+    CntrlStatus cntrlStatus,
     DmaReadSrv dmaReadSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
 )(DataStreamPipeOut);
@@ -86,7 +87,7 @@ module mkSimGenNormalOrErrOrRetryRdmaResp#(
         TEST_RESP_HANDLE_GHOST_RESP     ,
         TEST_RESP_HANDLE_PERM_CHECK_FAIL: begin
             let rdmaNormalRespPipeOut <- mkSimGenRdmaRespDataStream(
-                cntrl, dmaReadSrv, pendingWorkReqPipeIn
+                cntrlStatus, dmaReadSrv, pendingWorkReqPipeIn
             );
             return rdmaNormalRespPipeOut;
         end
@@ -102,7 +103,7 @@ module mkSimGenNormalOrErrOrRetryRdmaResp#(
             );
 
             let rdmaNormalRespPipeOut <- mkSimGenRdmaRespDataStream(
-                cntrl, dmaReadSrv, pendingWorkReqPipeOut4NormalRespGen
+                cntrlStatus, dmaReadSrv, pendingWorkReqPipeOut4NormalRespGen
             );
             let genAckType = case (respType)
                 TEST_RESP_HANDLE_ERROR_RESP     : GEN_RDMA_RESP_ACK_ERROR;
@@ -111,7 +112,7 @@ module mkSimGenNormalOrErrOrRetryRdmaResp#(
                 default                         : GEN_RDMA_RESP_ACK_ERROR;
             endcase;
             let rdmaAbnormalRespAckPipeOut <- mkGenNormalOrErrOrRetryRdmaRespAck(
-                cntrl, genAckType, pendingWorkReqPipeOut4ErrRespGen
+                cntrlStatus, genAckType, pendingWorkReqPipeOut4ErrRespGen
             );
             // muxPipeOutFunc cannot used here since EOP handle needed
             let rdmaRespDataStreamPipeOut = muxDataStreamPipeOut(
@@ -152,6 +153,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -169,8 +171,8 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     end
     else begin
         // Only put normal WR in pending WR buffer
-        let pendingWorkReq2Q <- mkConnectPendingWorkReqPipeOut2PendingWorkReqQ(
-            pendingWorkReqPipeOut4PendingQ, pendingWorkReqBuf.fifof
+        let pendingWorkReq2Q <- mkConnection(
+            toGet(pendingWorkReqPipeOut4PendingQ), toPut(pendingWorkReqBuf.fifof)
         );
     end
     // Generate normal WR when TEST_RESP_HANDLE_NORMAL_RESP and TEST_RESP_HANDLE_GHOST_RESP
@@ -187,13 +189,13 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // Only select read response payload for normal WR
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let readRespPayloadPipeOutBuf <- mkBufferN(32, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(cntrl.cntrlStatus.getPMTU);
+    let pmtuPipeOut <- mkConstantPipeOut(cntrlStatus.comm.getPMTU);
     let readRespPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
         readRespPayloadPipeOutBuf, pmtuPipeOut
     );
     // Generate RDMA responses
     let rdmaRespDataStreamPipeOut <- mkSimGenNormalOrErrOrRetryRdmaResp(
-        respType, cntrl, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
+        respType, cntrlStatus, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
     // Build RdmaPktMetaData and payload DataStream
     let pktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(
@@ -210,7 +212,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     let pktMetaDataPipeOut4ReadResp <- mkBufferN(8, pktMetaDataPipeOutVec[1]);
     // Retry handler
     let retryHandler <- mkRetryHandleSQ(
-        cntrl, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
+        cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
     );
 
     // MR permission check
@@ -219,33 +221,35 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
 
     // DUT
     let dut <- mkRespHandleSQ(
-        cntrl,
+        cntrl.contextSQ,
         retryHandler,
         permCheckSrv,
-        convertFifo2PipeOut(pendingWorkReqBuf.fifof),
+        toPipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataPipeOut4RespHandle
     );
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
     let readAtomicRespPayloadPipeOut = simDmaWriteSrv.dataStream;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv.dmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenSQ
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
-    FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
-    let workCompPipeOut <- mkWorkCompGenSQ(
-        cntrl,
+    // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
+    let workCompGenSQ <- mkWorkCompGenSQ(
+        cntrlStatus,
         payloadConsumer.respPipeOut,
-        convertFifo2PipeOut(wcGenReqQ4ReqGenInSQ),
-        dut.workCompGenReqPipeOut,
-        convertFifo2PipeOut(workCompStatusQFromRQ)
+        toPipeOut(wcGenReqQ4ReqGenInSQ),
+        dut.workCompGenReqPipeOut
+        // toPipeOut(workCompStatusQFromRQ)
     );
+    let workCompPipeOut = workCompGenSQ.workCompPipeOut;
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -253,7 +257,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // - pendingWorkReqPipeOut4WorkComp
     // - pendingWorkReqPipeOut4RespGen
     // - pendingWorkReqPipeOut4PendingQ
-    // - convertFifo2PipeOut(pendingWorkReqBuf.fifof)
+    // - toPipeOut(pendingWorkReqBuf.fifof)
     // - readRespPayloadPipeOut4Ref
     // - rdmaRespDataStreamPipeOut
     // - normalOrDupReqSelPipeOut4ReadResp
@@ -403,8 +407,8 @@ module mkPipeConnector#(Bool passOrDiscard, PipeOut#(anytype) pipeIn)(
     let resultPipeOut <- mkPipeFilter(filterFunc, pipeIn);
     return resultPipeOut;
     // FIFOF#(anytype) emptyQ <- mkFIFOF;
-    // let sink <- mkSink(passOrDiscard ? convertFifo2PipeOut(emptyQ) : pipeIn);
-    // return passOrDiscard ? pipeIn : convertFifo2PipeOut(emptyQ);
+    // let sink <- mkSink(passOrDiscard ? toPipeOut(emptyQ) : pipeIn);
+    // return passOrDiscard ? pipeIn : toPipeOut(emptyQ);
 endmodule
 
 module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
@@ -414,6 +418,7 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -428,14 +433,14 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     let pendingWorkReqPipeOut4RespGen = existingPendingWorkReqPipeOutVec[0];
     let pendingWorkReqPipeOut4WorkComp <- mkBufferN(32, existingPendingWorkReqPipeOutVec[1]);
     let pendingWorkReqPipeOut4PendingQ = existingPendingWorkReqPipeOutVec[2];
-    let pendingWorkReq2Q <- mkConnectPendingWorkReqPipeOut2PendingWorkReqQ(
-        pendingWorkReqPipeOut4PendingQ, pendingWorkReqBuf.fifof
+    let pendingWorkReq2Q <- mkConnection(
+        toGet(pendingWorkReqPipeOut4PendingQ), toPut(pendingWorkReqBuf.fifof)
     );
     // Payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrv;
     // Generate RDMA responses
     let rdmaRespDataStreamPipeOut <- mkSimGenNormalOrErrOrRetryRdmaResp(
-        respType, cntrl, simDmaReadSrv, pendingWorkReqPipeOut4RespGen
+        respType, cntrlStatus, simDmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
 
     // Build RdmaPktMetaData and payload DataStream
@@ -465,45 +470,47 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
 
     // DUT
     let dut <- mkRespHandleSQ(
-        cntrl,
+        cntrl.contextSQ,
         retryHandler,
         permCheckSrv,
-        convertFifo2PipeOut(pendingWorkReqBuf.fifof),
+        toPipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataOrEmptyPipeOut
     );
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         payloadOrEmptyPipeOut,
-        simDmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenSQ
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
-    FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
+    // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
     // This controller will be set to error state,
     // since it cannot generate WR when error state,
     // so use a dedicated controller for WC.
-    let cntrl4WorkComp <- mkSimCntrl(qpType, pmtu);
+    // let cntrl4WorkComp <- mkSimCntrl(qpType, pmtu);
     // let setExpectedPsnAsNextPSN = False;
-    // let cntrl4WorkComp <- mkSimController(qpType, pmtu, setExpectedPsnAsNextPSN);
-    let workCompPipeOut <- mkWorkCompGenSQ(
-        cntrl4WorkComp,
+    // let cntrl4WorkComp <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
+    let workCompGenSQ <- mkWorkCompGenSQ(
+        cntrlStatus,
         payloadConsumer.respPipeOut,
-        convertFifo2PipeOut(wcGenReqQ4ReqGenInSQ),
-        dut.workCompGenReqPipeOut,
-        convertFifo2PipeOut(workCompStatusQFromRQ)
+        toPipeOut(wcGenReqQ4ReqGenInSQ),
+        dut.workCompGenReqPipeOut
+        // toPipeOut(workCompStatusQFromRQ)
     );
+    let workCompPipeOut = workCompGenSQ.workCompPipeOut;
 
     Reg#(Bool) firstErrWorkCompGenReg <- mkReg(False);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     // let sinkPendingWR4PendingQ <- mkSink(pendingWorkReqPipeOut4PendingQ);
-    // let sinkPendingWorkReqBuf <- mkSink(convertFifo2PipeOut(pendingWorkReqBuf.fifof));
+    // let sinkPendingWorkReqBuf <- mkSink(toPipeOut(pendingWorkReqBuf.fifof));
     // let sinkRdmaResp <- mkSink(rdmaRespDataStreamPipeOut);
     // let sinkPktMetaData <- mkSink(pktMetaDataOrEmptyPipeOut);
     // let sinkPayload <- mkSink(payloadOrEmptyPipeOut);
@@ -598,6 +605,7 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
     // let qpMetaData <- mkSimMetaData4SinigleQP(qpType, pmtu);
     // let qpIndex = getDefaultIndexQP;
     // let cntrl = qpMetaData.getCntrlByIndexQP(qpIndex);
@@ -620,12 +628,12 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     FIFOF#(PendingWorkReq) pendingWorkReqQ4NormalResp <- mkFIFOF;
     let normalAckType = GEN_RDMA_RESP_ACK_NORMAL;
     let rdmaRespNormalAckPipeOut <- mkGenNormalOrErrOrRetryRdmaRespAck(
-        cntrl, normalAckType, convertFifo2PipeOut(pendingWorkReqQ4NormalResp)
+        cntrlStatus, normalAckType, toPipeOut(pendingWorkReqQ4NormalResp)
     );
     FIFOF#(PendingWorkReq) pendingWorkReqQ4RetryResp <- mkFIFOF;
     let retryAckType = rnrOrSeqErr ? GEN_RDMA_RESP_ACK_RNR : GEN_RDMA_RESP_ACK_SEQ_ERR;
     let rdmaRespRetryAckPipeOut <- mkGenNormalOrErrOrRetryRdmaRespAck(
-        cntrl, retryAckType, convertFifo2PipeOut(pendingWorkReqQ4RetryResp)
+        cntrlStatus, retryAckType, toPipeOut(pendingWorkReqQ4RetryResp)
     );
 
     // Response ACK generation pattern:
@@ -633,7 +641,7 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     // - True to generate normal ACK
     FIFOF#(Bool) retryRespAckPatternQ <- mkFIFOF;
     let rdmaRespDataStreamPipeOut = muxPipeOutFunc(
-        convertFifo2PipeOut(retryRespAckPatternQ),
+        toPipeOut(retryRespAckPatternQ),
         rdmaRespNormalAckPipeOut,
         rdmaRespRetryAckPipeOut
     );
@@ -648,7 +656,7 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     // );
     // Retry handler
     let retryHandler <- mkRetryHandleSQ(
-        cntrl, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
+        cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
     );
 
     // MR permission check
@@ -657,32 +665,34 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
 
     // DUT
     let dut <- mkRespHandleSQ(
-        cntrl,
+        cntrl.contextSQ,
         retryHandler,
         permCheckSrv,
-        convertFifo2PipeOut(pendingWorkReqBuf.fifof),
+        toPipeOut(pendingWorkReqBuf.fifof),
         pktMetaDataAndPayloadPipeOut.pktMetaData
     );
 
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
-        cntrl,
+        cntrlStatus,
         pktMetaDataAndPayloadPipeOut.payload,
-        simDmaWriteSrv,
+        dmaWriteCntrl,
         dut.payloadConReqPipeOut
     );
 
     // WorkCompGenSQ
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
-    FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
-    let workCompPipeOut <- mkWorkCompGenSQ(
-        cntrl,
+    // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
+    let workCompGenSQ <- mkWorkCompGenSQ(
+        cntrlStatus,
         payloadConsumer.respPipeOut,
-        convertFifo2PipeOut(wcGenReqQ4ReqGenInSQ),
-        dut.workCompGenReqPipeOut,
-        convertFifo2PipeOut(workCompStatusQFromRQ)
+        toPipeOut(wcGenReqQ4ReqGenInSQ),
+        dut.workCompGenReqPipeOut
+        // toPipeOut(workCompStatusQFromRQ)
     );
+    let workCompPipeOut = workCompGenSQ.workCompPipeOut;
 
     Count#(Bit#(TLog#(FollowingAckNum))) followingAckCnt <- mkCount(0);
     FIFOF#(PendingWorkReq) pendingWorkReqQ4Retry <- mkSizedFIFOF(valueOf(FollowingAckNum));
@@ -693,7 +703,7 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     // let sinkPendingWR4PendingQ <- mkSink(pendingWorkReqPipeOut4PendingQ);
-    // let sinkPendingWorkReqBuf <- mkSink(convertFifo2PipeOut(pendingWorkReqBuf.fifof));
+    // let sinkPendingWorkReqBuf <- mkSink(toPipeOut(pendingWorkReqBuf.fifof));
     // let sinkRdmaResp <- mkSink(rdmaRespDataStreamPipeOut);
     // let sinkPktMetaData <- mkSink(pktMetaDataAndPayloadPipeOut.pktMetaData);
     // let sinkPayload <- mkSink(pktMetaDataAndPayloadPipeOut.payload);

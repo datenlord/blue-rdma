@@ -47,15 +47,18 @@ interface DmaReadSrvAndReqRespPipeOut;
     interface PipeOut#(DmaReadResp) dmaReadResp;
 endinterface
 
+// TODO: proper handle DMA cancel requests if QP reset
 module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
-    FIFOF#(DmaReadReq) dmaReadReqQ <- mkFIFOF;
-    FIFOF#(DmaReadResp) dmaReadRespQ <- mkFIFOF;
-    FIFOF#(DmaReadReq) dmaReadReqOutQ <- mkFIFOF;
+    FIFOF#(DmaReadReq)      dmaReadReqQ <- mkFIFOF;
+    FIFOF#(DmaReadResp)    dmaReadRespQ <- mkFIFOF;
+    FIFOF#(DmaReadReq)   dmaReadReqOutQ <- mkFIFOF;
     FIFOF#(DmaReadResp) dmaReadRespOutQ <- mkFIFOF;
 
-    Reg#(TotalFragNum) totalFragCntReg <- mkRegU;
+    // Reg#(Bool) isFirstReg <- mkReg(True);
+    // Reg#(TotalFragNum) remainingFragCntReg <- mkRegU;
     Randomize#(DataStream) randomDataStream <- mkGenericRandomizer;
-    Reg#(Bool) initializedReg <- mkReg(False);
+    Reg#(Bool) dmaReadSrvInitReg <- mkReg(False);
+    Reg#(TotalFragNum) totalFragCntReg <- mkRegU;
     Reg#(Bool) busyReg <- mkReg(False);
     Reg#(Bool) isFirstReg <- mkRegU;
     Reg#(ByteEn) lastFragByteEnReg <- mkRegU;
@@ -64,52 +67,75 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
 
     Bool isFragCntZero = isZero(totalFragCntReg);
 
-    rule init if (!initializedReg);
+    rule init if (!dmaReadSrvInitReg);
         randomDataStream.cntrl.init;
-        initializedReg <= True;
+
+        dmaReadReqQ.clear;
+        dmaReadRespQ.clear;
+        dmaReadReqOutQ.clear;
+        dmaReadRespOutQ.clear;
+
+        // isFirstReg <= True;
+        busyReg <= False;
+        dmaReadSrvInitReg <= True;
+        // $display("time=%0t: SimDmaReadSrv inited", $time);
     endrule
 
-    rule acceptReq if (!busyReg && initializedReg);
-        let curReq = dmaReadReqQ.first;
+    rule acceptReq if (!busyReg && dmaReadSrvInitReg);
+        let dmaReadReq = dmaReadReqQ.first;
         dmaReadReqQ.deq;
-        dmaReadReqOutQ.enq(curReq);
+        dmaReadReqOutQ.enq(dmaReadReq);
 
-        let isZeroLen = isZero(curReq.len);
-        immAssert(
-            !isZeroLen,
-            "dmaReadReq.len non-zero assrtion",
-            $format("curReq.len=%h should not be zero", curReq.len)
-        );
+        if (
+            dmaReadReq.initiator == DMA_SRC_SQ_CANCEL ||
+            dmaReadReq.initiator == DMA_SRC_RQ_CANCEL
+        ) begin
+            dmaReadSrvInitReg <= False;
 
-        let { totalFragCnt, lastFragByteEn, lastFragValidByteNum } =
-            calcTotalFragNumByLength(curReq.len);
-        let { lastFragValidBitNum, lastFragInvalidByteNum, lastFragInvalidBitNum } =
-            calcFragBitNumAndByteNum(lastFragValidByteNum);
+            // $display(
+            //     "time=%0t: cancel DMA read", $time,
+            //     ", initiator=", fshow(dmaReadReq.initiator)
+            // );
+        end
+        else begin
+            let isZeroLen = isZero(dmaReadReq.len);
+            immAssert(
+                !isZeroLen,
+                "dmaReadReq.len non-zero assrtion",
+                $format("dmaReadReq.len=%h should not be zero", dmaReadReq.len)
+            );
 
-        totalFragCntReg <= isZeroLen ? 0 : totalFragCnt - 1;
-        lastFragByteEnReg <= lastFragByteEn;
-        lastFragInvalidBitNumReg <= lastFragInvalidBitNum;
+            let { totalFragCnt, lastFragByteEn, lastFragValidByteNum } =
+                calcTotalFragNumByLength(dmaReadReq.len);
+            let { lastFragValidBitNum, lastFragInvalidByteNum, lastFragInvalidBitNum } =
+                calcFragBitNumAndByteNum(lastFragValidByteNum);
 
-        immAssert(
-            !isZero(lastFragByteEn),
-            "lastFragByteEn non-zero assertion",
-            $format(
-                "lastFragByteEn=%h should not have zero ByteEn, curReq.len=%h",
-                lastFragByteEn, curReq.len
-            )
-        );
+            totalFragCntReg <= isZeroLen ? 0 : totalFragCnt - 1;
+            lastFragByteEnReg <= lastFragByteEn;
+            lastFragInvalidBitNumReg <= lastFragInvalidBitNum;
 
-        curReqReg <= curReq;
-        busyReg <= True;
-        isFirstReg <= True;
+            immAssert(
+                !isZero(lastFragByteEn),
+                "lastFragByteEn non-zero assertion",
+                $format(
+                    "lastFragByteEn=%h should not have zero ByteEn, dmaReadReq.len=%h",
+                    lastFragByteEn, dmaReadReq.len
+                )
+            );
 
-        // $display(
-        //     "time=%0t: curReq.len=%0d, totalFragCnt=%0d",
-        //     $time, curReq.len, totalFragCnt
-        // );
+            curReqReg <= dmaReadReq;
+            busyReg <= True;
+            isFirstReg <= True;
+
+            // $display(
+            //     "time=%0t:", $time,
+            //     " DMA read request, WR ID=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
+            //     dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
+            // );
+        end
     endrule
 
-    rule genResp if (busyReg && initializedReg);
+    rule genResp if (busyReg && dmaReadSrvInitReg);
         totalFragCntReg <= totalFragCntReg - 1;
         let dataStream <- randomDataStream.next;
         dataStream.isFirst = isFirstReg;
@@ -139,15 +165,21 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             "dmaReadResp.data.byteEn non-zero assertion",
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
-        // $display(
-        //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut response, totalFragNum=%h, dataStream=",
-        //     $time, totalFragCntReg, fshow(dataStream)
-        // );
+        // if (dataStream.isLast) begin
+        //     $display(
+        //         "time=%0t:", $time,
+        //         " DMA read response, WR ID=%h, totalFragNum=%0d",
+        //         curReqReg.wrID, totalFragCntReg
+        //         // ", dataStream.isFirst=", fshow(dataStream.isFirst),
+        //         // ", dataStream.isLast=", fshow(dataStream.isLast)
+        //         // ", dataStream=", fshow(dataStream)
+        //     );
+        // end
     endrule
 
     interface dmaReadSrv  = toGPServer(dmaReadReqQ, dmaReadRespQ);
-    interface dmaReadReq  = convertFifo2PipeOut(dmaReadReqOutQ);
-    interface dmaReadResp = convertFifo2PipeOut(dmaReadRespOutQ);
+    interface dmaReadReq  = toPipeOut(dmaReadReqOutQ);
+    interface dmaReadResp = toPipeOut(dmaReadRespOutQ);
 endmodule
 
 interface DmaReadSrvAndDataStreamPipeOut;
@@ -221,11 +253,14 @@ interface DmaWriteSrvAndReqRespPipeOut;
     interface PipeOut#(DmaWriteResp) dmaWriteResp;
 endinterface
 
+// TODO: proper handle DMA cancel requests if QP reset
 module mkSimDmaWriteSrvAndReqRespPipeOut(DmaWriteSrvAndReqRespPipeOut);
-    FIFOF#(DmaWriteReq) dmaWriteReqQ <- mkFIFOF;
-    FIFOF#(DmaWriteResp) dmaWriteRespQ <- mkFIFOF;
-    FIFOF#(DmaWriteReq) dmaWriteReqOutQ <- mkFIFOF;
+    FIFOF#(DmaWriteReq)      dmaWriteReqQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp)    dmaWriteRespQ <- mkFIFOF;
+    FIFOF#(DmaWriteReq)   dmaWriteReqOutQ <- mkFIFOF;
     FIFOF#(DmaWriteResp) dmaWriteRespOutQ <- mkFIFOF;
+
+    Reg#(Bool) dmaWriteSrvInitReg <- mkReg(False);
 
     function Action genDmaWriteResp(DmaWriteMetaData metaData);
         action
@@ -242,21 +277,45 @@ module mkSimDmaWriteSrvAndReqRespPipeOut(DmaWriteSrvAndReqRespPipeOut);
         endaction
     endfunction
 
-    rule write;
+    rule init if (!dmaWriteSrvInitReg);
+        dmaWriteReqQ.clear;
+        dmaWriteRespQ.clear;
+        dmaWriteReqOutQ.clear;
+        dmaWriteRespOutQ.clear;
+
+        dmaWriteSrvInitReg <= True;
+        // $display("time=%0t: SimDmaWriteSrv inited", $time);
+    endrule
+
+    rule write if (dmaWriteSrvInitReg);
         let dmaWriteReq = dmaWriteReqQ.first;
         dmaWriteReqQ.deq;
         dmaWriteReqOutQ.enq(dmaWriteReq);
 
-        // $display("time=%0t: dmaWriteReq=", $time, fshow(dmaWriteReq));
-
-        if (dmaWriteReq.dataStream.isLast) begin
+        if (
+            dmaWriteReq.metaData.initiator == DMA_SRC_SQ_CANCEL ||
+            dmaWriteReq.metaData.initiator == DMA_SRC_RQ_CANCEL
+        ) begin
+            dmaWriteSrvInitReg <= False;
             genDmaWriteResp(dmaWriteReq.metaData);
+
+            // $display(
+            //     "time=%0t: cancel DMA write", $time,
+            //     ", initiator=", fshow(dmaWriteReq.metaData.initiator)
+            // );
+        end
+        else begin
+            if (dmaWriteReq.dataStream.isLast) begin
+                genDmaWriteResp(dmaWriteReq.metaData);
+            end
+
+            // $display("time=%0t: dmaWriteReq=", $time, fshow(dmaWriteReq));
         end
     endrule
 
     interface dmaWriteSrv  = toGPServer(dmaWriteReqQ, dmaWriteRespQ);
-    interface dmaWriteReq  = convertFifo2PipeOut(dmaWriteReqOutQ);
-    interface dmaWriteResp = convertFifo2PipeOut(dmaWriteRespOutQ);
+    interface dmaWriteReq  = toPipeOut(dmaWriteReqOutQ);
+    interface dmaWriteResp = toPipeOut(dmaWriteRespOutQ);
 endmodule
 
 interface DmaWriteSrvAndDataStreamPipeOut;
@@ -294,7 +353,7 @@ module mkFixedLenSimDataStreamPipeOut#(
         dmaLenPipeOut.deq;
 
         let dmaReq = DmaReadReq {
-            initiator: dontCareValue,
+            initiator: DMA_SRC_RQ_RD,
             sqpn     : getDefaultQPN,
             startAddr: dontCareValue,
             len      : dmaLength,

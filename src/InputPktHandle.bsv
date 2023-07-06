@@ -76,12 +76,12 @@ endfunction
 
 // TODO: check XRC domain match
 function Bool validateHeader(TransType transType, QKEY qkey, CntrlStatus cntrlStatus, Bool isRespPkt);
-    let transTypeMatch = transTypeMatchQpType(transType, cntrlStatus.getTypeQP);
-    let qpStateMatch = isRespPkt ? cntrlStatus.isRTS : cntrlStatus.isNonErr;
+    let transTypeMatch = transTypeMatchQpType(transType, cntrlStatus.getTypeQP, isRespPkt);
+    let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
     // UD has no responses
-    let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrlStatus.getQKEY : True;
+    let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrlStatus.comm.getQKEY : True;
     // TODO: verify RoCEv2 only use default PKEY
-    // let pKeyMatch = isDefaultPKEY(cntrlStatus.getPKEY);
+    // let pKeyMatch = isDefaultPKEY(cntrlStatus.comm.getPKEY);
     return transTypeMatch && qpStateMatch && qKeyMatch;
 endfunction
 
@@ -102,10 +102,10 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
     FIFOF#(DataStream) dataInQ <- mkFIFOF;
 
     Vector#(2, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
-        mkForkVector(convertFifo2PipeOut(headerMetaDataInQ));
+        mkForkVector(toPipeOut(headerMetaDataInQ));
     let headerMetaDataPipeIn = headerMetaDataPipeOutVec[0];
     let headerMetaDataPipeOut = headerMetaDataPipeOutVec[1];
-    let dataPipeIn = convertFifo2PipeOut(dataInQ);
+    let dataPipeIn = toPipeOut(dataInQ);
     let headerAndPayloadPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataPipeIn, headerMetaDataPipeIn
     );
@@ -251,7 +251,64 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         pipeIn.headerAndMetaData.headerDataStream,
         pipeIn.headerAndMetaData.headerMetaData
     );
-
+/*
+    rule debug if (!(
+        payloadPipeIn.notEmpty            &&
+        rdmaHeaderPipeOut.notEmpty        &&
+        cnpOutVec[0].notFull              &&
+        reqPayloadOutVec[0].notFull       &&
+        reqPktMetaDataOutVec[0].notFull   &&
+        respPayloadOutVec[0].notFull      &&
+        respPktMetaDataOutVec[0].notFull  &&
+        rdmaHeaderRecvQ.notFull           &&
+        payloadRecvQ.notFull              &&
+        rdmaHeaderPreCheckQ.notFull       &&
+        payloadPreCheckQ.notFull          &&
+        rdmaHeaderValidationQ.notFull     &&
+        payloadValidationQ.notFull        &&
+        rdmaHeaderFilterQ.notFull         &&
+        payloadFilterQ.notFull            &&
+        rdmaHeaderFragLenCalcQ.notFull    &&
+        payloadFragLenCalcQ.notFull       &&
+        rdmaHeaderPktLenCalcQ.notFull     &&
+        payloadPktLenCalcQ.notFull        &&
+        rdmaHeaderPktLenPreCheckQ.notFull &&
+        payloadPktLenPreCheckQ.notFull    &&
+        rdmaHeaderPktLenCheckQ.notFull    &&
+        payloadPktLenCheckQ.notFull       &&
+        rdmaHeaderOutputQ.notFull         &&
+        payloadOutputQ.notFull
+    ));
+        $display(
+            "time=%0t: mkInputRdmaPktBufAndHeaderValidation", $time,
+            ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
+            ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
+            ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
+            ", reqPayloadOutVec[0].notFull=", fshow(reqPayloadOutVec[0].notFull),
+            ", reqPktMetaDataOutVec[0].notFull=", fshow(reqPktMetaDataOutVec[0].notFull),
+            ", respPayloadOutVec[0].notFull=", fshow(respPayloadOutVec[0].notFull),
+            ", respPktMetaDataOutVec[0].notFull=", fshow(respPktMetaDataOutVec[0].notFull),
+            ", rdmaHeaderRecvQ.notFull=", fshow(rdmaHeaderRecvQ.notFull),
+            ", payloadRecvQ.notFull=", fshow(payloadRecvQ.notFull),
+            ", rdmaHeaderPreCheckQ.notFull=", fshow(rdmaHeaderPreCheckQ.notFull),
+            ", payloadPreCheckQ.notFull=", fshow(payloadPreCheckQ.notFull),
+            ", rdmaHeaderValidationQ.notFull=", fshow(rdmaHeaderValidationQ.notFull),
+            ", payloadValidationQ.notFull=", fshow(payloadValidationQ.notFull),
+            ", rdmaHeaderFilterQ.notFull=", fshow(rdmaHeaderFilterQ.notFull),
+            ", payloadFilterQ.notFull=", fshow(payloadFilterQ.notFull),
+            ", rdmaHeaderFragLenCalcQ.notFull=", fshow(rdmaHeaderFragLenCalcQ.notFull),
+            ", payloadFragLenCalcQ.notFull=", fshow(payloadFragLenCalcQ.notFull),
+            ", rdmaHeaderPktLenCalcQ.notFull=", fshow(rdmaHeaderPktLenCalcQ.notFull),
+            ", payloadPktLenCalcQ.notFull=", fshow(payloadPktLenCalcQ.notFull),
+            ", rdmaHeaderPktLenPreCheckQ.notFull=", fshow(rdmaHeaderPktLenPreCheckQ.notFull),
+            ", payloadPktLenPreCheckQ.notFull=", fshow(payloadPktLenPreCheckQ.notFull),
+            ", rdmaHeaderPktLenCheckQ.notFull=", fshow(rdmaHeaderPktLenCheckQ.notFull),
+            ", payloadPktLenCheckQ.notFull=", fshow(payloadPktLenCheckQ.notFull),
+            ", rdmaHeaderOutputQ.notFull=", fshow(rdmaHeaderOutputQ.notFull),
+            ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
+        );
+    endrule
+*/
     (* conflict_free = "recvPktFrag, \
                         preCheckHeader, \
                         discardInvalidFrag, \
@@ -270,36 +327,37 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         let payloadHasSingleFrag = payloadFrag.isFirst && payloadFrag.isLast;
         let fragHasNoData = isZero(payloadFrag.byteEn);
 
-        let rdmaHeader = rdmaHeaderPipeOut.first;
-        let bth        = extractBTH(rdmaHeader.headerData);
-        let aeth       = extractAETH(rdmaHeader.headerData);
-
-        let bthCheckResult = checkZeroFields4BTH(bth);
-        let headerCheckResult =
-            padCntCheckReqHeader(bth) || padCntCheckRespHeader(bth, aeth);
-        // Discard packet that should not have payload
-        let nonPayloadHeaderShouldHaveNoPayload =
-            rdmaHeader.headerMetaData.hasPayload ?
-                True : (payloadHasSingleFrag && fragHasNoData);
         if (payloadFrag.isFirst) begin
+            let rdmaHeader = rdmaHeaderPipeOut.first;
+            let bth        = extractBTH(rdmaHeader.headerData);
+            let aeth       = extractAETH(rdmaHeader.headerData);
+
+            let bthCheckResult = checkZeroFields4BTH(bth);
+            let headerCheckResult =
+                padCntCheckReqHeader(bth) || padCntCheckRespHeader(bth, aeth);
+            // Discard packet that should not have payload
+            let nonPayloadHeaderShouldHaveNoPayload =
+                rdmaHeader.headerMetaData.hasPayload ?
+                    True : (payloadHasSingleFrag && fragHasNoData);
+
             rdmaHeaderPipeOut.deq;
             rdmaHeaderRecvQ.enq(tuple5(
                 rdmaHeader, bth, bthCheckResult, headerCheckResult, nonPayloadHeaderShouldHaveNoPayload
             ));
+            // $display(
+            //     "time=%0t: recvPktFrag", $time,
+            //     ", bthCheckResult=", fshow(bthCheckResult),
+            //     ", headerCheckResult=", fshow(headerCheckResult),
+            //     ", nonPayloadHeaderShouldHaveNoPayload=",
+            //     fshow(nonPayloadHeaderShouldHaveNoPayload),
+            //     ", bth=", fshow(bth), ", aeth=", fshow(aeth)
+            // );
         end
-        // TODO: find out why following display leads to deadlock?
-        // $display(
-        //     "time=%0t: recvPktFrag", $time,
-        //     ", bthCheckResult=", fshow(bthCheckResult),
-        //     ", headerCheckResult=", fshow(headerCheckResult),
-        //     ", nonPayloadHeaderShouldHaveNoPayload=",
-        //     fshow(nonPayloadHeaderShouldHaveNoPayload),
-        //     ", bth=", fshow(bth), ", aeth=", fshow(aeth)
-        // );
+
         payloadRecvQ.enq(payloadFrag);
         // $display(
-        //     "time=%0t: 1st stage recvPktFrag", $time,
-        //     ", bth=", fshow(bth), ", aeth=", fshow(aeth)
+        //     "time=%0t: 1st stage recvPktFrag", $time
+        //     // ", bth=", fshow(bth), ", aeth=", fshow(aeth)
         // );
     endrule
 
@@ -307,11 +365,10 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         let payloadFrag = payloadRecvQ.first;
         payloadRecvQ.deq;
 
-        let {
-            rdmaHeader, bth, bthCheckResult, headerCheckResult, nonPayloadHeaderShouldHaveNoPayload
-        } = rdmaHeaderRecvQ.first;
-
         if (payloadFrag.isFirst) begin
+            let {
+                rdmaHeader, bth, bthCheckResult, headerCheckResult, nonPayloadHeaderShouldHaveNoPayload
+            } = rdmaHeaderRecvQ.first;
             rdmaHeaderRecvQ.deq;
 
             if (bthCheckResult && headerCheckResult && nonPayloadHeaderShouldHaveNoPayload) begin
@@ -328,13 +385,15 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             else begin
                 if (!payloadFrag.isLast) begin
                     $warning(
-                        "time=%0t: discard invalid RDMA packet of multi-fragment payload", $time
+                        "time=%0t:", $time,
+                        " InputRdmaPktBuf preCheckHeader, discard invalid RDMA packet of multi-fragment payload"
                     );
                     pktBufStateReg <= RDMA_PKT_BUF_ST_DISCARD_FRAG;
                 end
                 else begin
                     $warning(
-                        "time=%0t: discard invalid RDMA packet of single-fragment payload", $time
+                        "time=%0t:", $time,
+                        " InputRdmaPktBuf preCheckHeader, discard invalid RDMA packet of single-fragment payload"
                     );
                 end
             end
@@ -344,12 +403,12 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             // $display("time=%0t: payloadFrag=", $time, fshow(payloadFrag));
         end
         // $display(
-        //     "time=%0t: 2nd-1 stage preCheckHeader", $time,
-        //     ", bthCheckResult=", fshow(bthCheckResult),
-        //     ", headerCheckResult=", fshow(headerCheckResult),
-        //     ", nonPayloadHeaderShouldHaveNoPayload=",
-        //     fshow(nonPayloadHeaderShouldHaveNoPayload),
-        //     ", bth=", fshow(bth)
+        //     "time=%0t: 2nd-1 stage preCheckHeader", $time
+        //     // ", bthCheckResult=", fshow(bthCheckResult),
+        //     // ", headerCheckResult=", fshow(headerCheckResult),
+        //     // ", nonPayloadHeaderShouldHaveNoPayload=",
+        //     // fshow(nonPayloadHeaderShouldHaveNoPayload),
+        //     // ", bth=", fshow(bth)
         // );
     endrule
 
@@ -416,32 +475,42 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             let isLastOrOnlyPkt = headerValidateInfo.isLastOrOnlyPkt;
 
             let qp = qpMetaData.getQueuePairByQPN(headerValidateInfo.dqpn);
+            let isResp = isRespPkt || isCNP;
+            let cntrlStatus = isResp ? qp.statusSQ : qp.statusRQ;
+
             let isValidHeader = False;
             let pdHandler = dontCareValue;
             if (headerValidateInfo.maybePdHandler matches tagged Valid .pdh) begin
                 pdHandler = pdh;
-
                 isValidHeader = validateHeader(
                     bth.trans,
                     headerValidateInfo.qkeyDETH,
-                    qp.cntrlStatus,
-                    isRespPkt || isCNP
+                    cntrlStatus,
+                    isResp
                 );
             end
 
+            // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
+            // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
             // immAssert(
-            //     cntrl.cntrlStatus.isStableRTS && isValidHeader,
+            //     cntrlStatus.comm.isStableRTS && isValidHeader,
             //     "isStableRTS and isValidHeader assertion @ mkInputRdmaPktBufAndHeaderValidation",
             //     $format(
-            //         "cntrl.cntrlStatus.isStableRTS=", fshow(cntrl.cntrlStatus.isStableRTS),
-            //         " isValidHeader=", fshow(isValidHeader),
-            //         " should both be true"
+            //         "cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
+            //         " and isValidHeader=", fshow(isValidHeader),
+            //         " should both be true, when bth.trans=", fshow(bth.trans),
+            //         ", pdHandle=", fshow(pdHandler),
+            //         ", bth.trans=", fshow(bth.trans),
+            //         ", cntrlStatus.getTypeQP=", fshow(cntrlStatus.getTypeQP),
+            //         // ", transTypeMatch=", fshow(transTypeMatch),
+            //         // ", qpStateMatch=", fshow(qpStateMatch),
+            //         ", qkey=%h, isResp=", headerValidateInfo.qkeyDETH, fshow(isResp)
             //     )
             // );
 
             let validHeaderInfo = ValidHeaderInfo {
                 pdHandler      : pdHandler,
-                pmtu           : qp.cntrlStatus.getPMTU,
+                pmtu           : qp.statusSQ.comm.getPMTU,
                 isValidHeader  : isValidHeader,
                 isCNP          : isCNP,
                 isRespPkt      : isRespPkt,
@@ -684,7 +753,10 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             end
             else begin
                 // Discard zero length payload no matter packet has payload or not
-                $info("time=%0t: discard zero-length payload for RDMA packet", $time);
+                $info(
+                    "time=%0t:", $time,
+                    " InputRdmaPktBuf checkPktLen, discard zero-length payload for RDMA packet"
+                );
             end
 
             if (pktValid) begin
@@ -713,7 +785,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
             rdmaHeaderOutputQ.enq(tuple3(pktMetaData, qpIndex, isRespPkt));
             // $display(
-            //     "time=%0t: bth=", $time, fshow(bth), ", pktMetaData=", fshow(pktMetaData)
+            //     "time=%0t:", $time, " pktMetaData=", fshow(pktMetaData)
+            //     // "time=%0t: bth=", $time, fshow(bth), ", pktMetaData=", fshow(pktMetaData)
             // );
         end
         else begin
@@ -733,7 +806,10 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPayloadOutVec[qpIndex].enq(payloadFrag);
         end
-        // $display("time=%0t: 10th stage outputHeaderMetaData", $time);
+        // $display(
+        //     "time=%0t: 10th stage outputPayload", $time,
+        //     ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
+        // );
     endrule
 
     rule outputHeaderMetaData;
@@ -746,22 +822,22 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
         end
-        // $display("time=%0t: final stage outputPayload", $time);
+        // $display("time=%0t: final stage outputHeaderMetaData", $time);
     endrule
 
     function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);
         return interface InputRdmaPktBuf;
             interface reqPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
-                interface pktMetaData = convertFifo2PipeOut(reqPktMetaDataOutVec[idx]);
-                interface payload     = convertFifo2PipeOut(reqPayloadOutVec[idx]);
+                interface pktMetaData = toPipeOut(reqPktMetaDataOutVec[idx]);
+                interface payload     = toPipeOut(reqPayloadOutVec[idx]);
             endinterface;
 
             interface respPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
-                interface pktMetaData = convertFifo2PipeOut(respPktMetaDataOutVec[idx]);
-                interface payload     = convertFifo2PipeOut(respPayloadOutVec[idx]);
+                interface pktMetaData = toPipeOut(respPktMetaDataOutVec[idx]);
+                interface payload     = toPipeOut(respPayloadOutVec[idx]);
             endinterface;
 
-            interface cnpPipeOut  = convertFifo2PipeOut(cnpOutVec[idx]);
+            interface cnpPipeOut  = toPipeOut(cnpOutVec[idx]);
         endinterface;
     endfunction
 

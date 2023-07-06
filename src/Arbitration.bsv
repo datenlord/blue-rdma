@@ -68,7 +68,7 @@ module mkServerArbiter#(
     Reg#(Bool) shouldSaveGrantIdxReg <- mkReg(True);
 
     let leafArbiterVec <- mkLeafBinaryPipeOutArbiterVec(
-        map(convertFifo2PipeOut, inputReqWithIdxVec),
+        map(toPipeOut, inputReqWithIdxVec),
         isPipePayloadFinished
     );
     let finalReqWithIdxPipeOut <- mkBinaryPipeOutArbiterTree(
@@ -147,7 +147,7 @@ module mkClientArbiter#(
     Reg#(Bool) shouldSaveGrantIdxReg <- mkReg(True);
 
     let leafArbiterVec <- mkLeafBinaryPipeOutArbiterVec(
-        map(convertFifo2PipeOut, inputReqWithIdxVec),
+        map(toPipeOut, inputReqWithIdxVec),
         isPipePayloadFinished
     );
     let finalReqWithIdxPipeOut <- mkBinaryPipeOutArbiterTree(
@@ -258,7 +258,7 @@ module mkBinaryPipeOutArbiter#(
         // );
     endrule
 
-    return convertFifo2PipeOut(pipeOutQ);
+    return toPipeOut(pipeOutQ);
 endmodule
 
 module mkBinaryPipeOutArbiterTree#(
