@@ -1394,24 +1394,6 @@ function PendingWorkReq genNewPendingWorkReq(WorkReq wr) = PendingWorkReq {
     isOnlyReqPkt: tagged Invalid
 };
 
-function PipeOut#(PendingWorkReq) genNewPendingWorkReqPipeOut(
-    PipeOut#(WorkReq) workReqPipeIn
-);
-    return interface PipeOut#(PendingWorkReq);
-        method PendingWorkReq first();
-            let wr = workReqPipeIn.first;
-            return PendingWorkReq {
-                wr          : wr,
-                startPSN    : tagged Invalid,
-                endPSN      : tagged Invalid,
-                pktNum      : tagged Invalid,
-                isOnlyReqPkt: tagged Invalid
-            };
-        endmethod
-        method Action deq() = workReqPipeIn.deq;
-        method Bool notEmpty() = workReqPipeIn.notEmpty;
-    endinterface;
-endfunction
 /*
 module mkConnectPendingWorkReqPipeOut2PendingWorkReqQ#(
     PipeOut#(PendingWorkReq) pipeIn, FIFOF#(PendingWorkReq) pendingWorkReqBufQ

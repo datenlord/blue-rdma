@@ -578,6 +578,44 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
     return headerDataStreamAndMetaDataPipeOut.headerDataStream;
 endmodule
 
+module mkGenFixedPsnRdmaRespAck#(
+    CntrlStatus cntrlStatus,
+    RdmaRespAckGenType genAckType
+)(DataStreamPipeOut);
+
+    let pendingWR = PendingWorkReq {
+        wr: WorkReq {
+            id       : dontCareValue,
+            opcode   : IBV_WR_ATOMIC_CMP_AND_SWP,
+            flags    : enum2Flag(IBV_SEND_NO_FLAGS),
+            raddr    : dontCareValue,
+            rkey     : dontCareValue,
+            len      : fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)),
+            laddr    : dontCareValue,
+            lkey     : dontCareValue,
+            sqpn     : getDefaultQPN,
+            solicited: dontCareValue,
+            comp     : tagged Valid dontCareValue,
+            swap     : tagged Valid dontCareValue,
+            immDt    : tagged Invalid,
+            rkey2Inv : tagged Invalid,
+            srqn     : tagged Invalid,
+            dqpn     : tagged Valid getDefaultQPN,
+            qkey     : tagged Invalid
+        },
+        startPSN: tagged Valid 0,
+        endPSN: tagged Valid 0,
+        pktNum: tagged Valid 1,
+        isOnlyReqPkt: tagged Valid True
+    };
+    let fixedPendingWorkReqPipeOut <- mkConstantPipeOut(pendingWR);
+    let resultPipeOut <- mkGenNormalOrErrOrRetryRdmaRespAck(
+        cntrlStatus, genAckType, fixedPendingWorkReqPipeOut
+    );
+
+    return resultPipeOut;
+endmodule
+
 (* synthesize *)
 module mkTestSimGenRdmaResp(Empty);
     let minDmaLength = 128;

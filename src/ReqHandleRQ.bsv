@@ -700,7 +700,7 @@ module mkReqHandleRQ#(
 
         // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         let totalRespPktNum = preStageIsZeroPmtuResidueReg ? reqPktInfo.respPktNum : reqPktInfo.respPktNum + 1;
-        let isOnlyRespPkt = isLessOrEqOne(totalRespPktNum);
+        let isOnlyRespPkt = isLessOrEqOneR(totalRespPktNum);
         reqPktInfo.isOnlyRespPkt = reqPktInfo.isReadReq ? isOnlyRespPkt : True;
         reqPktInfo.respPktNum = reqPktInfo.isReadReq ? totalRespPktNum : 1;
 
@@ -809,7 +809,7 @@ module mkReqHandleRQ#(
                         // retryDone, \
                         // retryFlush" *)
     rule checkEPSN if (
-        cntrlStatus.comm.isNonErr   && !hasErrHappened   &&
+        cntrlStatus.comm.isNonErr && !hasErrHappened &&
         preStageStateReg == RQ_PRE_STAGE_DONE &&
         retryStateReg    == RQ_NOT_RETRY
     );

@@ -871,6 +871,44 @@ module mkExistingPendingWorkReqPipeOut#(
     return resultPipeOutVec;
 endmodule
 
+function PipeOut#(PendingWorkReq) genNewPendingWorkReqPipeOut(
+    PipeOut#(WorkReq) workReqPipeIn
+);
+    return interface PipeOut#(PendingWorkReq);
+        method PendingWorkReq first();
+            let wr = workReqPipeIn.first;
+            return PendingWorkReq {
+                wr          : wr,
+                startPSN    : tagged Invalid,
+                endPSN      : tagged Invalid,
+                pktNum      : tagged Invalid,
+                isOnlyReqPkt: tagged Invalid
+            };
+        endmethod
+        method Action deq() = workReqPipeIn.deq;
+        method Bool notEmpty() = workReqPipeIn.notEmpty;
+    endinterface;
+endfunction
+
+function PipeOut#(PendingWorkReq) genFixedPsnPendingWorkReqPipeOut(
+    PipeOut#(WorkReq) workReqPipeIn
+);
+    return interface PipeOut#(PendingWorkReq);
+        method PendingWorkReq first();
+            let wr = workReqPipeIn.first;
+            return PendingWorkReq {
+                wr          : wr,
+                startPSN    : tagged Valid 0,
+                endPSN      : tagged Valid 0,
+                pktNum      : tagged Valid 1,
+                isOnlyReqPkt: tagged Valid True
+            };
+        endmethod
+        method Action deq() = workReqPipeIn.deq;
+        method Bool notEmpty() = workReqPipeIn.notEmpty;
+    endinterface;
+endfunction
+
 // Misc simulation modules
 
 module mkSimQpAttrPipeOut#(

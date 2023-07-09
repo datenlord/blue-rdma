@@ -211,26 +211,25 @@ module mkRecursiveSearch#(
     Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
 );
     if (valueOf(qSz) == 1) begin
-        return inputVec[0];
+        FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
 
-        // rule discardInput if (clearAll);
-        //     inputVec[0].deq;
-        // endrule
+        rule discardInput if (clearAll);
+            inputVec[0].deq;
+        endrule
 
-        // FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
+        rule resetAndClear if (clearAll);
+            resultQ.clear;
+        endrule
 
-        // rule resetAndClear if (clearAll);
-        //     resultQ.clear;
-        // endrule
+        rule popOut if (!clearAll);
+            let result = inputVec[0].first;
+            inputVec[0].deq;
 
-        // rule popOut if (!clearAll);
-        //     let result = inputVec[0].first;
-        //     inputVec[0].deq;
+            resultQ.enq(result);
+        endrule
 
-        //     resultQ.enq(result);
-        // endrule
-
-        // return toPipeOut(resultQ);
+        return toPipeOut(resultQ);
+        // return inputVec[0];
     end
     else begin
         Vector#(TDiv#(qSz, 2), FIFOF#(Maybe#(anytype))) nextLayerVec <- replicateM(mkFIFOF);
@@ -487,10 +486,12 @@ typedef struct {
 typedef struct {
     Bool addrHighPartMatch;
     Bool addrLowPartMatch;
+    // Bool payloadMatch;
+    Bool compMatch;
     Bool keyMatch;
-    Bool payloadMatch;
     Bool opCodeMatch;
     Bool psnMatch;
+    Bool swapMatch;
 } DupAtomicCmpParts deriving(Bits);
 
 // No need to consider concurrent search and insert,
@@ -590,43 +591,53 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
             (tagged Valid origReadCacheItem) : (tagged Invalid);
     endfunction
 
-    function Tuple3#(Bool, AtomicCacheItem, AtomicCacheItem) buildAtomicSearchData(
+    function Tuple5#(Bool, Bool, Bool, AtomicCacheItem, AtomicCacheItem) buildAtomicSearchData(
         AtomicCacheItem dupAtomicCacheItem, AtomicCacheItem origAtomicCacheItem
     );
-        let psnMatch = dupAtomicCacheItem.atomicPSN == origAtomicCacheItem.atomicPSN;
+        let dupAtomicOpCode  = dupAtomicCacheItem.atomicOpCode;
+        let origAtomicOpCode = origAtomicCacheItem.atomicOpCode;
+        let dupAtomicEth     = dupAtomicCacheItem.atomicEth;
+        let origAtomicEth    = origAtomicCacheItem.atomicEth;
 
-        return tuple3(psnMatch, dupAtomicCacheItem, origAtomicCacheItem);
+
+        let keyMatch    = dupAtomicEth.rkey == origAtomicEth.rkey;
+        let opCodeMatch = dupAtomicOpCode == origAtomicOpCode;
+        let psnMatch    = dupAtomicCacheItem.atomicPSN == origAtomicCacheItem.atomicPSN;
+
+        return tuple5(keyMatch, opCodeMatch, psnMatch, dupAtomicCacheItem, origAtomicCacheItem);
     endfunction
 
     function Tuple2#(DupAtomicCmpParts, AtomicCacheItem) compareAtomicCacheItem(
-        Tuple3#(Bool, AtomicCacheItem, AtomicCacheItem) searchData
+        Tuple5#(Bool, Bool, Bool, AtomicCacheItem, AtomicCacheItem) searchData
     );
-        let { psnMatch, dupAtomicCacheItem, origAtomicCacheItem } = searchData;
+        let {
+            keyMatch, opCodeMatch, psnMatch, dupAtomicCacheItem, origAtomicCacheItem
+        } = searchData;
 
-        let dupAtomicOpCode = dupAtomicCacheItem.atomicOpCode;
-        let dupAtomicEth    = dupAtomicCacheItem.atomicEth;
-        let origAtomicEth   = origAtomicCacheItem.atomicEth;
+        let dupAtomicEth  = dupAtomicCacheItem.atomicEth;
+        let origAtomicEth = origAtomicCacheItem.atomicEth;
 
         let { addrHighPartMatch, addrLowPartMatch } = cmpHalfAddr(
             dupAtomicEth.va, origAtomicEth.va
         );
 
-        let keyMatch     = dupAtomicEth.rkey == origAtomicEth.rkey;
-        let swapMatch    = dupAtomicEth.swap == origAtomicEth.swap;
-        let payloadMatch = case (dupAtomicOpCode)
-            COMPARE_SWAP: (dupAtomicEth.comp == origAtomicEth.comp && swapMatch);
-            FETCH_ADD   : swapMatch;
-            default     : False;
-        endcase;
-        let opCodeMatch = dupAtomicOpCode == origAtomicCacheItem.atomicOpCode;
+        let swapMatch = dupAtomicEth.swap == origAtomicEth.swap;
+        let compMatch = dupAtomicEth.comp == origAtomicEth.comp;
+        // let payloadMatch = case (dupAtomicOpCode)
+        //     COMPARE_SWAP: (dupAtomicEth.comp == origAtomicEth.comp && swapMatch);
+        //     FETCH_ADD   : swapMatch;
+        //     default     : False;
+        // endcase;
 
         let dupAtomicCmpParts = DupAtomicCmpParts {
             addrHighPartMatch: addrHighPartMatch,
             addrLowPartMatch : addrLowPartMatch,
+            compMatch        : compMatch,
             keyMatch         : keyMatch,
-            payloadMatch     : payloadMatch,
             opCodeMatch      : opCodeMatch,
-            psnMatch         : psnMatch
+            // payloadMatch     : payloadMatch,
+            psnMatch         : psnMatch,
+            swapMatch        : swapMatch
         };
         return tuple2(dupAtomicCmpParts, origAtomicCacheItem);
     endfunction
@@ -635,14 +646,18 @@ module mkDupReadAtomicCache#(PMTU pmtu)(DupReadAtomicCache);
         Tuple2#(DupAtomicCmpParts, AtomicCacheItem) cmpResult
     );
         let { dupAtomicCmpParts, origAtomicCacheItem } = cmpResult;
+        let origAtomicOpCode = origAtomicCacheItem.atomicOpCode;
 
         let addrHighPartMatch = dupAtomicCmpParts.addrHighPartMatch;
         let addrLowPartMatch  = dupAtomicCmpParts.addrLowPartMatch;
         let keyMatch          = dupAtomicCmpParts.keyMatch;
         let opCodeMatch       = dupAtomicCmpParts.opCodeMatch;
-        let payloadMatch      = dupAtomicCmpParts.payloadMatch;
+        let swapMatch         = dupAtomicCmpParts.swapMatch;
+        let compMatch         = dupAtomicCmpParts.compMatch;
+        // let payloadMatch      = dupAtomicCmpParts.payloadMatch;
         let psnMatch          = dupAtomicCmpParts.psnMatch;
 
+        let payloadMatch = origAtomicOpCode == COMPARE_SWAP ? (swapMatch && compMatch) : swapMatch;
         let allMatch = addrHighPartMatch && addrLowPartMatch && keyMatch &&
             payloadMatch && opCodeMatch && psnMatch;
         return allMatch ?

@@ -1479,6 +1479,8 @@ module mkTestReqHandleRetryCase#(Bool rnrOrSeqErr)(Empty);
                 "aeth.code assertion @ mkTestReqHandleRetryCase",
                 $format(
                     "aeth.code=", fshow(aeth.code),
+                    " should be AETH_CODE_NAK",
+                    ", and aeth.value=", fshow(aeth.value),
                     " should be AETH_NAK_SEQ_ERR"
                 )
             );
