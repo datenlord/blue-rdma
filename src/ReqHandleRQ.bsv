@@ -412,6 +412,13 @@ typedef struct {
     Length totalDmaWriteLen;
 } ReqLenCheckResult deriving(Bits);
 
+typedef struct {
+    Bool onlyPktCase;
+    Bool firstPktCase;
+    Bool midPktCase;
+    Bool lastPktCase;
+} EnoughDmaSpaceCheck deriving(Bits);
+
 interface ReqHandleRQ;
     interface PipeOut#(PayloadConReq) payloadConReqPipeOut;
     interface DataStreamPipeOut rdmaRespDataStreamPipeOut;
@@ -450,7 +457,7 @@ module mkReqHandleRQ#(
     FIFOF#(Tuple5#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState)) reqAddrCalcQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState, ADDR)) reqRemainingLenCalcQ <- mkFIFOF;
     FIFOF#(Tuple8#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState, ADDR, Length, Length)) reqEnoughDmaSpaceQ <- mkFIFOF;
-    FIFOF#(Tuple8#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState, ADDR, Length, Bool)) reqTotalLenCalcQ <- mkFIFOF;
+    FIFOF#(Tuple8#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState, ADDR, Length, EnoughDmaSpaceCheck)) reqTotalLenCalcQ <- mkFIFOF;
     // FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, DupReadReqStartState, ADDR)) reqLenCalcQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, ReqLenCheckResult, DupReadReqStartState)) reqLenCheckQ <- mkFIFOF;
     // FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, ADDR, DupReadReqStartState)) issueDmaReqQ <- mkFIFOF;
@@ -1699,7 +1706,7 @@ module mkReqHandleRQ#(
         //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
         // );
     endrule
-
+/*
     // This rule still runs at retry or error state
     rule calcNormalSendWriteReqEnoughDmaSpace if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
@@ -1757,12 +1764,66 @@ module mkReqHandleRQ#(
         //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
         // );
     endrule
+*/
+    // This rule still runs at retry or error state
+    rule calcNormalSendWriteReqEnoughDmaSpace if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
+        let {
+            pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
+            curDmaWriteAddr, remainingDmaWriteLen, preRemainingDmaWriteLen
+        } = reqEnoughDmaSpaceQ.first;
+        reqEnoughDmaSpaceQ.deq;
+
+        let bth        = reqPktInfo.bth;
+        let rdmaHeader = pktMetaData.pktHeader;
+        let isSendReq  = reqPktInfo.isSendReq;
+        let isWriteReq = reqPktInfo.isWriteReq;
+        let isOnlyPkt  = reqPktInfo.isOnlyPkt;
+        let isFirstPkt = reqPktInfo.isFirstPkt;
+        // let isMidPkt   = reqPktInfo.isMidPkt;
+        // let isLastPkt  = reqPktInfo.isLastPkt;
+        let pktPayloadLen = pktMetaData.pktPayloadLen;
+
+        let lastOrOnlyPktHasEnoughDmaSpace = lenGtEqPktLen(
+            isOnlyPkt ? permCheckReq.totalLen : preRemainingDmaWriteLen,
+            pktPayloadLen,
+            cntrlStatus.comm.getPMTU
+        );
+        let firstOrMidPktHasEnoughDmaSpace = lenGtEqPMTU(
+            isFirstPkt ? permCheckReq.totalLen : preRemainingDmaWriteLen,
+            cntrlStatus.comm.getPMTU
+        );
+        // midPktCase   = lenGtEqPMTU(preRemainingDmaWriteLen, cntrlStatus.comm.getPMTU),
+        // lastPktCase  = lenGtEqPktLen(preRemainingDmaWriteLen, pktPayloadLen, cntrlStatus.comm.getPMTU)
+
+        let enoughDmaSpaceCheck = EnoughDmaSpaceCheck {
+            onlyPktCase : False,
+            firstPktCase: False,
+            midPktCase  : False,
+            lastPktCase : False
+        };
+
+        if (isSendReq || isWriteReq) begin
+            enoughDmaSpaceCheck.onlyPktCase  = lastOrOnlyPktHasEnoughDmaSpace;
+            enoughDmaSpaceCheck.firstPktCase = firstOrMidPktHasEnoughDmaSpace;
+            enoughDmaSpaceCheck.midPktCase   = firstOrMidPktHasEnoughDmaSpace;
+            enoughDmaSpaceCheck.lastPktCase  = lastOrOnlyPktHasEnoughDmaSpace;
+        end
+
+        reqTotalLenCalcQ.enq(tuple8(
+            pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
+            curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpaceCheck
+        ));
+        // $display(
+        //     "time=%0t: 15th stage, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
+        // );
+    endrule
 
     // This rule still runs at retry or error state
     rule calcNormalSendWriteReqDmaTotalLen if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let {
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
-            curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpace // preRemainingDmaWriteLen
+            curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpaceCheck
         } = reqTotalLenCalcQ.first;
         reqTotalLenCalcQ.deq;
 
@@ -1777,7 +1838,7 @@ module mkReqHandleRQ#(
 
         Length totalDmaWriteLen  = contextRQ.getTotalDmaWriteLen;
         let pktPayloadLen        = pktMetaData.pktPayloadLen;
-        // let enoughDmaSpace       = False;
+        let enoughDmaSpace       = False;
         let isLastPayloadLenZero = False;
         let oneAsPSN             = 1;
 
@@ -1785,15 +1846,20 @@ module mkReqHandleRQ#(
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = zeroExtend(pktPayloadLen);
+                    enoughDmaSpace       = enoughDmaSpaceCheck.lastPktCase;
                 end
                 4'b0100: begin // isFirstRdmaOpCode(bth.opcode)
-                    totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrlStatus.comm.getPMTU);
+                    // totalDmaWriteLen     = lenAddPsnMultiplyPMTU(0, oneAsPSN, cntrlStatus.comm.getPMTU);
+                    totalDmaWriteLen     = zeroExtend(calcPmtuLen(cntrlStatus.comm.getPMTU));
+                    enoughDmaSpace       = enoughDmaSpaceCheck.midPktCase;
                 end
                 4'b0010: begin // isMiddleRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPsnMultiplyPMTU(contextRQ.getTotalDmaWriteLen, oneAsPSN, cntrlStatus.comm.getPMTU);
+                    enoughDmaSpace       = enoughDmaSpaceCheck.firstPktCase;
                 end
                 4'b0001: begin // isLastRdmaOpCode(bth.opcode)
                     totalDmaWriteLen     = lenAddPktLen(contextRQ.getTotalDmaWriteLen, pktPayloadLen, cntrlStatus.comm.getPMTU);
+                    enoughDmaSpace       = enoughDmaSpaceCheck.onlyPktCase;
                     isLastPayloadLenZero = pktMetaData.isZeroPayloadLen;
                 end
                 default: begin

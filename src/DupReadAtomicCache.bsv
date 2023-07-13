@@ -201,16 +201,65 @@ function Tuple2#(Bool, Bool) cmpHalfAddr(ADDR addrA, ADDR addrB);
     return tuple2(addrHighPartMatch, addrLowPartMatch);
 endfunction
 
-module mkRecursiveSearch#(
-    Bool clearAll,
-    Vector#(qSz, PipeOut#(Maybe#(anytype))) inputVec
-)(PipeOut#(Maybe#(anytype))) provisos(
+module mkBinaryTreeFork#(
+    Bool clearAll, PipeOut#(anytype) pipeIn
+)(Vector#(vSz, PipeOut#(anytype))) provisos(
     Bits#(anytype, tSz),
     // Add#(1, anysize, qSz),
-    NumAlias#(TLog#(qSz), cntSz),
-    Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
+    NumAlias#(TLog#(vSz), cntSz),
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // qSz must be power of 2
 );
-    if (valueOf(qSz) == 1) begin
+    Vector#(vSz, FIFOF#(anytype)) resultVec <- replicateM(mkFIFOF);
+
+    for (Integer idx = 0; idx < valueOf(vSz); idx = idx + 1) begin
+        rule resetAndClear if (clearAll);
+            resultVec[idx].clear;
+        endrule
+    end
+
+    if (valueOf(vSz) == valueOf(TWO)) begin
+        rule discardInput if (clearAll);
+            pipeIn.deq;
+        endrule
+
+        rule dupPipeIn if (!clearAll);
+            let inputVal = pipeIn.first;
+            pipeIn.deq;
+
+            resultVec[0].enq(inputVal);
+            resultVec[1].enq(inputVal);
+        endrule
+    end
+    else begin
+        Vector#(TDiv#(vSz, 2), PipeOut#(anytype)) halfSzPipeOutVec <-
+            mkBinaryTreeFork(clearAll, pipeIn);
+
+        for (Integer halfIdx = 0; halfIdx < valueOf(TDiv#(vSz, 2)); halfIdx = halfIdx + 1) begin
+            rule dupPipeOut if (!clearAll);
+                let pipeOutVal = halfSzPipeOutVec[halfIdx].first;
+                halfSzPipeOutVec[halfIdx].deq;
+
+                let leftIdx  = halfIdx * 2;
+                let rightIdx = halfIdx * 2 + 1;
+                resultVec[leftIdx].enq(pipeOutVal);
+                resultVec[rightIdx].enq(pipeOutVal);
+            endrule
+        end
+    end
+
+    return map(toPipeOut, resultVec);
+endmodule
+
+module mkRecursiveSearch#(
+    Bool clearAll,
+    Vector#(vSz, PipeOut#(Maybe#(anytype))) inputVec
+)(PipeOut#(Maybe#(anytype))) provisos(
+    Bits#(anytype, tSz),
+    // Add#(1, anysize, vSz),
+    NumAlias#(TLog#(vSz), cntSz),
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // vSz must be power of 2
+);
+    if (valueOf(vSz) == 1) begin
         FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
 
         rule discardInput if (clearAll);
@@ -232,11 +281,11 @@ module mkRecursiveSearch#(
         // return inputVec[0];
     end
     else begin
-        Vector#(TDiv#(qSz, 2), FIFOF#(Maybe#(anytype))) nextLayerVec <- replicateM(mkFIFOF);
+        Vector#(TDiv#(vSz, 2), FIFOF#(Maybe#(anytype))) nextLayerVec <- replicateM(mkFIFOF);
         let nextLayerPipeOut = map(toPipeOut, nextLayerVec);
         let resultPipeOut <- mkRecursiveSearch(clearAll, nextLayerPipeOut);
 
-        for (Integer idx = 0; idx < valueOf(qSz); idx = idx + valueOf(TWO)) begin
+        for (Integer idx = 0; idx < valueOf(vSz); idx = idx + valueOf(TWO)) begin
             rule pairCmp if (!clearAll);
                 let outIdx = idx / valueOf(TWO);
 
@@ -254,13 +303,13 @@ module mkRecursiveSearch#(
             endrule
         end
 
-        for (Integer idx = 0; idx < valueOf(qSz); idx = idx + 1) begin
+        for (Integer idx = 0; idx < valueOf(vSz); idx = idx + 1) begin
             rule discardInput if (clearAll);
                 inputVec[idx].deq;
             endrule
         end
 
-        for (Integer idx = 0; idx < valueOf(TDiv#(qSz, 2)); idx = idx + 1) begin
+        for (Integer idx = 0; idx < valueOf(TDiv#(vSz, 2)); idx = idx + 1) begin
             rule resetAndClear if (clearAll);
                 nextLayerVec[idx].clear;
             endrule
@@ -292,7 +341,10 @@ module mkCacheFIFO#(
 
     Reg#(Bit#(cntSz)) enqPtrReg <- mkReg(0);
 
-    Vector#(qSz, FIFOF#(anytype))                    searchReqVec <- replicateM(mkFIFOF);
+    Vector#(qSz, PipeOut#(anytype)) searchReqPipeOutVec <- mkBinaryTreeFork(
+        clearReg[1], toPipeOut(searchReqQ)
+    );
+    // Vector#(qSz, FIFOF#(anytype))                    searchReqVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Tuple2#(Bool, searchType))) searchDataVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Maybe#(cmpResultType)))      cmpResultVec <- replicateM(mkFIFOF);
     Vector#(qSz, FIFOF#(Maybe#(anytype)))         searchResultVec <- replicateM(mkFIFOF);
@@ -362,7 +414,7 @@ module mkCacheFIFO#(
 
         mapM_(firstMapFunc(firstStageFunc(item4Search)), firstSearchStageZipVec);
     endrule
-*/
+
     function Action duplicateSearchReq(anytype item4Cmp, FIFOF#(anytype) dupSearchReqQ);
         action
             dupSearchReqQ.enq(item4Cmp);
@@ -375,11 +427,11 @@ module mkCacheFIFO#(
 
         mapM_(duplicateSearchReq(item4Search), searchReqVec);
     endrule
-
+*/
     for (Integer idx = 0; idx < valueOf(qSz); idx = idx + 1) begin
         rule firstSearchStage if (!clearReg[1]);
-            let item4Search = searchReqVec[idx].first;
-            searchReqVec[idx].deq;
+            let item4Search = searchReqPipeOutVec[idx].first;
+            searchReqPipeOutVec[idx].deq;
 
             let { tag, itemInQ, searchDataQ } = firstSearchStageZipVec[idx];
             let searchData = firstStageFunc(item4Search, itemInQ);

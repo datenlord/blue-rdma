@@ -158,6 +158,11 @@ module mkClientArbiter#(
         rule extractReq;
             let req <- clientVec[idx].request.get;
             inputReqWithIdxVec[idx].enq(tuple2(fromInteger(idx), req));
+
+            // $display(
+            //     "time=%0t:", $time,
+            //     " extract request, client idx=%0d", idx
+            // );
         endrule
     end
 
@@ -169,7 +174,14 @@ module mkClientArbiter#(
         if (shouldSaveGrantIdxReg) begin
             preGrantIdxQ.enq(reqIdx);
         end
-        shouldSaveGrantIdxReg <= isReqFinished(inputReq);
+        let reqFinished = isReqFinished(inputReq);
+        shouldSaveGrantIdxReg <= reqFinished;
+
+        // $display(
+        //     "time=%0t:", $time,
+        //     " arbitrate request, reqIdx=%0d", reqIdx,
+        //     ", reqFinished=", fshow(reqFinished)
+        // );
     endrule
 
     rule dispatchResponse;
@@ -185,8 +197,7 @@ module mkClientArbiter#(
 
         // $display(
         //     "time=%0t:", $time,
-        //     " dispatch resp=", fshow(resp),
-        //     ", preGrantIdx=%0d", preGrantIdx,
+        //     " dispatch response, preGrantIdx=%0d", preGrantIdx,
         //     ", respFinished=", fshow(respFinished)
         // );
     endrule
@@ -226,17 +237,47 @@ module mkBinaryPipeOutArbiter#(
     PipeOut#(anytype) pipeIn2,
     function Bool isPipePayloadFinished(anytype pipePayload)
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
-    Vector#(TWO, PipeOut#(anytype)) inputPipeOutVec = vec(pipeIn2, pipeIn1);
+    Vector#(TWO, PipeOut#(anytype)) inputPipeOutVec = vec(pipeIn1, pipeIn2);
     FIFOF#(anytype) pipeOutQ <- mkFIFOF;
     Reg#(Bool) needArbitrationReg <- mkReg(True);
     // Initial grant to LSB
     Reg#(Bool) priorityReg <- mkReg(False);
     Reg#(Bool)    grantReg <- mkReg(False);
 
+    let shouldGrantPipeIn2 = (priorityReg && pipeIn2.notEmpty) || (!pipeIn1.notEmpty && pipeIn2.notEmpty);
+/*
+    rule debug;
+        Bit#(TLog#(TWO)) curGrantIdx = pack(grantReg);
+        if (needArbitrationReg) begin
+            curGrantIdx = pack(shouldGrantPipeIn2);
+        end
+
+        if (pipeIn1.notEmpty) begin
+            $display(
+                "time=%0t:", $time,
+                " pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
+                ", shouldGrantPipeIn2=", fshow(shouldGrantPipeIn2),
+                ", needArbitrationReg=", fshow(needArbitrationReg),
+                ", curGrantIdx=%0d, grantReg=%h, priorityReg=%h",
+                curGrantIdx, grantReg, priorityReg
+            );
+        end
+
+        if (pipeIn2.notEmpty) begin
+            $display(
+                "time=%0t:", $time,
+                " pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty),
+                ", shouldGrantPipeIn2=", fshow(shouldGrantPipeIn2),
+                ", needArbitrationReg=", fshow(needArbitrationReg),
+                ", curGrantIdx=%0d, grantReg=%h, priorityReg=%h",
+                curGrantIdx, grantReg, priorityReg
+            );
+        end
+    endrule
+*/
     (* fire_when_enabled *)
     rule binaryArbitrate;
         Bit#(TLog#(TWO)) curGrantIdx = pack(grantReg);
-        let shouldGrantPipeIn2 = (priorityReg && pipeIn2.notEmpty) || (!pipeIn2.notEmpty && pipeIn2.notEmpty);
 
         if (needArbitrationReg) begin
             curGrantIdx = pack(shouldGrantPipeIn2);
@@ -253,8 +294,9 @@ module mkBinaryPipeOutArbiter#(
         // $display(
         //     "time=%0t:", $time,
         //     " needArbitrationReg=", fshow(needArbitrationReg),
-        //     ", requestBits=%h, curGrantOneHotReg=%h, newGrantOneHot=%h, curGrantIdx=%h, priorityOneHotReg=%h",
-        //     requestBits, curGrantOneHotReg, newGrantOneHot, curGrantIdx, priorityOneHotReg
+        //     ", curGrantIdx=%0d, grantReg=%h, priorityReg=%h",
+        //     curGrantIdx, grantReg, priorityReg,
+        //     ", shouldGrantPipeIn2=", fshow(shouldGrantPipeIn2)
         // );
     endrule
 

@@ -4,7 +4,9 @@ TCLDIR ?= xdc
 CLK ?= rdma_clock
 VLOGDIR ?= verilog
 OUTPUTDIR ?= output
-ONLYSYNTH ?= 1
+LOGFILE ?= run.log
+# ONLYSYNTH ?= 1
+RUNTOPHASE ?= place
 PARTNAME = xcvu13p-fhgb2104-2-i
 TARGETFILE ?= ../src/QueuePair.bsv
 TOPMODULE ?= mkQP
@@ -17,7 +19,8 @@ export XDC = $(TCLDIR)
 export IPS = $(SRCDIR)/ip/$(PARTNAME)
 export CLOCKS = $(CLK)
 export OUTPUT = $(OUTPUTDIR)
-export SYNTHONLY = $(ONLYSYNTH)
+# export SYNTHONLY = $(ONLYSYNTH)
+export RUNTO = $(RUNTOPHASE)
 export PART = $(PARTNAME)
 
 compile:
@@ -30,7 +33,7 @@ verilog: compile
 	bluetcl listVlogFiles.tcl -bdir $(BUILDDIR) -vdir $(BUILDDIR) $(TOPMODULE) $(TOPMODULE) | grep -i '\.v' | xargs -I {} cp {} $(VLOGDIR)
 
 vivado: verilog
-	vivado -mode batch -source non_project_build.tcl 2>&1 | tee ./run.log
+	/tools/Xilinx/Vivado/2022.2/bin/vivado -mode tcl -nolog -nojournal -source ../../simple-tlb/non_project_build.tcl 2>&1 | tee $(LOGFILE)
 
 clean:
 	rm -rf $(BUILDDIR) $(OUTPUTDIR) $(VLOGDIR) .Xil *.jou *.log

@@ -50,7 +50,9 @@ TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
                                     mkTestPayloadGenSegmentAndPaddingCase \
                                     mkTestDmaReadCntrl \
                                     mkTestDmaWriteCntrl
-TestQueuePair.bsv                = mkTestQueuePairReqErrResetCase \
+TestQueuePair.bsv                = mkTestPermCheckCltArbiter \
+                                    mkTestDmaReadCltArbiter \
+                                    mkTestQueuePairReqErrResetCase \
                                     mkTestQueuePairRespErrResetCase \
                                     mkTestQueuePairTimeOutErrResetCase \
                                     mkTestQueuePairTimeOutErrCase \

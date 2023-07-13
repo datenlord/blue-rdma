@@ -43,10 +43,10 @@ module mkPermCheckCltArbiter#(PermCheckCltVec#(portSz) permCheckCltVec)(PermChec
     return arbitratedClient;
 endmodule
 
-typedef Vector#(portSz, DmaReadClt) DmaReadCltVec#(numeric type portSz);
+typedef Vector#(portSz, DmaReadClt)   DmaReadCltVec#(numeric type portSz);
 typedef Vector#(portSz, DmaWriteClt) DmaWriteCltVec#(numeric type portSz);
 
-module mkDmaReadCltAribter#(DmaReadCltVec#(portSz) dmaReadCltVec)(DmaReadClt) provisos(
+module mkDmaReadCltArbiter#(DmaReadCltVec#(portSz) dmaReadCltVec)(DmaReadClt) provisos(
     Add#(1, anysize, portSz),
     Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
 );
@@ -61,7 +61,7 @@ module mkDmaReadCltAribter#(DmaReadCltVec#(portSz) dmaReadCltVec)(DmaReadClt) pr
     return arbitratedClient;
 endmodule
 
-module mkDmaWriteCltAribter#(DmaWriteCltVec#(portSz) dmaWriteCltVec)(DmaWriteClt) provisos(
+module mkDmaWriteCltArbiter#(DmaWriteCltVec#(portSz) dmaWriteCltVec)(DmaWriteClt) provisos(
     Add#(1, anysize, portSz),
     Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
 );
@@ -412,19 +412,6 @@ instance Connectable#(
     )(Empty);
         mkConnection(toGet(pipeOut.pktMetaData), pipeIn.pktMetaData);
         mkConnection(toGet(pipeOut.payload), pipeIn.payload);
-        // rule pktMetaDataPipe;
-        //     let pktMetaData = pipeOut.pktMetaData.first;
-        //     pipeOut.pktMetaData.deq;
-        //     pipeIn.pktMetaData.put(pktMetaData);
-        //     // $display("time=%0t:", $time, " mkConnection, pktMetaData=", fshow(pktMetaData));
-        // endrule
-
-        // rule payloadPipe;
-        //     let payload = pipeOut.payload.first;
-        //     pipeOut.payload.deq;
-        //     pipeIn.payload.put(payload);
-        //     // $display("time=%0t:", $time, " mkConnection, payload=", fshow(payload));
-        // endrule
     endmodule
 endinstance
 

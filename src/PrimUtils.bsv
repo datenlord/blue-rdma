@@ -2,6 +2,7 @@ import FIFOF :: *;
 import PAClib :: *;
 
 typedef 2 TWO;
+typedef 4 FOUR;
 
 function Bool isZero(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
     // TODO: consider using fold

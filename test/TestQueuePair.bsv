@@ -1,5 +1,6 @@
 import BuildVector :: *;
 import ClientServer :: *;
+import Cntrs :: *;
 import Connectable :: *;
 import FIFOF :: *;
 import GetPut :: *;
@@ -18,6 +19,136 @@ import SimGenRdmaReqResp :: *;
 import SimExtractRdmaHeaderPayload :: *;
 import Utils :: *;
 import Utils4Test :: *;
+
+interface SimPermCheckClt;
+    interface PermCheckClt cltPort;
+    method Bool done();
+endinterface
+
+module mkSimPermCheckClt(SimPermCheckClt) provisos(
+    NumAlias#(TAdd#(1, TLog#(MAX_CMP_CNT)), cntSz)
+);
+    FIFOF#(PermCheckReq) reqQ <- mkFIFOF;
+    FIFOF#(Bool) respQ <- mkFIFOF;
+    Count#(Bit#(cntSz))  reqCnt <- mkCount(fromInteger(valueOf(MAX_CMP_CNT)));
+    Count#(Bit#(cntSz)) respCnt <- mkCount(fromInteger(valueOf(MAX_CMP_CNT)));
+
+    rule issueReq if (!isZero(reqCnt));
+        let permCheckReq = PermCheckReq {
+            wrID         : tagged Invalid,
+            lkey         : dontCareValue,
+            rkey         : dontCareValue,
+            localOrRmtKey: True,
+            reqAddr      : dontCareValue,
+            totalLen     : dontCareValue,
+            pdHandler    : dontCareValue,
+            isZeroDmaLen : False,
+            accFlags     : dontCareValue
+        };
+
+        reqQ.enq(permCheckReq);
+        reqCnt.decr(1);
+        // $display("time=%0t: issued one request, reqCnt=%0d", $time, reqCnt);
+    endrule
+
+    rule recvResp if (!isZero(respCnt));
+        respQ.deq;
+        respCnt.decr(1);
+        // $display("time=%0t: received one response, respCnt=%0d", $time, respCnt);
+    endrule
+
+    interface cltPort = toGPClient(reqQ, respQ);
+    method Bool done() = isZero(reqCnt) && isZero(respCnt);
+endmodule
+
+(* synthesize *)
+module mkTestPermCheckCltArbiter(Empty);
+    function Bool isCltDone(SimPermCheckClt simPermCheckClt) = simPermCheckClt.done;
+    function PermCheckClt getPermCheckClt(SimPermCheckClt simPermCheckClt) = simPermCheckClt.cltPort;
+
+    Vector#(TWO, SimPermCheckClt) simPermCheckCltVec <- replicateM(mkSimPermCheckClt);
+    let permCheckCltVec = map(getPermCheckClt, simPermCheckCltVec);
+    let permCheckClt <- mkPermCheckCltArbiter(permCheckCltVec);
+    let simPermCheckCltDoneVec = map(isCltDone, simPermCheckCltVec);
+    let allDone = fold(\&& , simPermCheckCltDoneVec);
+
+    let mrCheckPassOrFail = True;
+    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
+
+    mkConnection(permCheckClt, permCheckSrv);
+
+    rule checkDone if (allDone);
+        // for (Integer idx = 0; idx < valueOf(TWO); idx = idx + 1) begin
+        //     $display(
+        //         "time=%0t:", $time,
+        //         " simPermCheckClt idx=%0d", idx,
+        //         ", done=", fshow(simPermCheckCltDoneVec[idx])
+        //     );
+        // end
+        normalExit;
+    endrule
+endmodule
+
+interface SimDmaReadClt;
+    interface DmaReadClt cltPort;
+    method Bool done();
+endinterface
+
+module mkSimDmaReadClt(SimDmaReadClt) provisos(
+    NumAlias#(TAdd#(1, TLog#(MAX_CMP_CNT)), cntSz)
+);
+    FIFOF#(DmaReadReq)   reqQ <- mkFIFOF;
+    FIFOF#(DmaReadResp) respQ <- mkFIFOF;
+    Count#(Bit#(cntSz))  reqCnt <- mkCount(fromInteger(valueOf(MAX_CMP_CNT)));
+    Count#(Bit#(cntSz)) respCnt <- mkCount(fromInteger(valueOf(MAX_CMP_CNT)));
+
+    rule issueReq if (!isZero(reqCnt));
+        let dmaReadReq = DmaReadReq {
+            initiator: DMA_SRC_SQ_RD,
+            sqpn     : dontCareValue,
+            startAddr: dontCareValue,
+            len      : 1025,
+            wrID     : dontCareValue
+        };
+
+        reqQ.enq(dmaReadReq);
+        reqCnt.decr(1);
+        $display("time=%0t: issued one request, reqCnt=%0d", $time, reqCnt);
+    endrule
+
+    rule recvResp if (!isZero(respCnt));
+        let dmaReadResp = respQ.first;
+        respQ.deq;
+
+        if (dmaReadResp.dataStream.isLast) begin
+            respCnt.decr(1);
+            $display("time=%0t: received whole response, respCnt=%0d", $time, respCnt);
+        end
+    endrule
+
+    interface cltPort = toGPClient(reqQ, respQ);
+    method Bool done() = isZero(reqCnt) && isZero(respCnt);
+endmodule
+
+(* synthesize *)
+module mkTestDmaReadCltArbiter(Empty);
+    function Bool isCltDone(SimDmaReadClt simDmaReadClt) = simDmaReadClt.done;
+    function DmaReadClt getDmaReadClt(SimDmaReadClt simDmaReadClt) = simDmaReadClt.cltPort;
+
+    Vector#(FOUR, SimDmaReadClt) simDmaReadCltVec <- replicateM(mkSimDmaReadClt);
+    let dmaReadCltVec = map(getDmaReadClt, simDmaReadCltVec);
+    let dmaReadClt <- mkDmaReadCltArbiter(dmaReadCltVec);
+    let simDmaReadCltDoneVec = map(isCltDone, simDmaReadCltVec);
+    let allDone = fold(\&& , simDmaReadCltDoneVec);
+
+    let dmaReadSrv <- mkSimDmaReadSrv;
+
+    mkConnection(dmaReadClt, dmaReadSrv);
+
+    rule checkDone if (allDone);
+        normalExit;
+    endrule
+endmodule
 
 typedef enum {
     TEST_RESET_CREATE_QP,
@@ -62,8 +193,8 @@ module mkTestQueuePairReqErrResetCase(Empty);
     // mkConnection(toGet(emptyRecvReqQ), recvSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);
@@ -419,8 +550,8 @@ module mkTestQueuePairResetCase#(TestErrResetTypeQP errType)(Empty);
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);
@@ -757,8 +888,8 @@ module mkTestQueuePairRespErrResetCase(Empty);
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);
@@ -1100,8 +1231,8 @@ module mkTestQueuePairTimeOutErrResetCase(Empty);
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);
@@ -1433,8 +1564,8 @@ module mkTestQueuePairTimeOutErrCase(Empty);
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4RQ, sendSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4RQ, sendSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);
@@ -1587,10 +1718,10 @@ module mkTestQueuePairNormalCase(Empty);
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 
     // DMA
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt, recvSideQP.dmaReadClt));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt, recvSideQP.dmaWriteClt));
-    // let dmaReadClt  <- mkDmaReadCltAribter(vec(sendSideQP.dmaReadClt4SQ, sendSideQP.dmaReadClt4RQ, recvSideQP.dmaReadClt4RQ, recvSideQP.dmaReadClt4SQ));
-    // let dmaWriteClt <- mkDmaWriteCltAribter(vec(sendSideQP.dmaWriteClt4SQ, sendSideQP.dmaWriteClt4RQ, recvSideQP.dmaWriteClt4RQ, recvSideQP.dmaWriteClt4SQ));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt, recvSideQP.dmaReadClt));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt, recvSideQP.dmaWriteClt));
+    // let dmaReadClt  <- mkDmaReadCltArbiter(vec(sendSideQP.dmaReadClt4SQ, sendSideQP.dmaReadClt4RQ, recvSideQP.dmaReadClt4RQ, recvSideQP.dmaReadClt4SQ));
+    // let dmaWriteClt <- mkDmaWriteCltArbiter(vec(sendSideQP.dmaWriteClt4SQ, sendSideQP.dmaWriteClt4RQ, recvSideQP.dmaWriteClt4RQ, recvSideQP.dmaWriteClt4SQ));
     // let simDmaReadSrv  <- mkSimDmaReadSrv;
     // let simDmaWriteSrv <- mkSimDmaWriteSrv;
     // mkConnection(dmaReadClt, simDmaReadSrv);

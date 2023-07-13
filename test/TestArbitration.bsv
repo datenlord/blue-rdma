@@ -82,8 +82,8 @@ module mkEchoSrv(Server#(ReqType, RespType));
     FIFOF#(RespType) respQ <- mkFIFOF;
     FIFOF#(ReqType) pendingReqQ <- mkFIFOF;
 
-    Count#(ClientIndex) reqFragCnt <- mkCount(fromInteger(maxClientIdx));
-    Count#(ClientIndex) expectClientIdxCnt <- mkCount(fromInteger(maxClientIdx));
+    Count#(ClientIndex) reqFragCnt <- mkCount(0);
+    Count#(ClientIndex) expectClientIdxCnt <- mkCount(0);
 
     rule recvReq;
         let { clientIdx, isLast } = reqQ.first;
@@ -91,10 +91,8 @@ module mkEchoSrv(Server#(ReqType, RespType));
 
         let isLastRef = isZero(reqFragCnt);
         if (isLastRef) begin
-            reqFragCnt.update(clientIdx - 1);
-            expectClientIdxCnt.update(clientIdx - 1);
-            // respFragCnt.update(clientIdx);
-            // busyReg <= True;
+            reqFragCnt.update(clientIdx + 1);
+            expectClientIdxCnt.update(clientIdx + 1);
         end
         else begin
             reqFragCnt.decr(1);
@@ -127,15 +125,6 @@ module mkEchoSrv(Server#(ReqType, RespType));
     endrule
 
     rule issueResp;
-        // let isLast = isZero(respFragCnt);
-        // if (isLast) begin
-        //     busyReg <= False;
-        //     expectClientIdxCnt.update(expectClientIdxCnt + 1);
-        // end
-        // else begin
-        //     respFragCnt.decr(1);
-        // end
-
         let { clientIdx, isLast } = pendingReqQ.first;
         pendingReqQ.deq;
 
@@ -240,8 +229,8 @@ module mkTestClientArbiter(Empty);
 
     let maxClientIdx = valueOf(CLIENT_NUM) - 1;
 
-    Count#(ClientIndex) reqFragCnt <- mkCount(fromInteger(maxClientIdx));
-    Count#(ClientIndex) expectedClientIdxCnt <- mkCount(fromInteger(maxClientIdx));
+    Count#(ClientIndex) reqFragCnt <- mkCount(0);
+    Count#(ClientIndex) expectedClientIdxCnt <- mkCount(0);
 
     Vector#(CLIENT_NUM, Client#(ReqType, RespType)) clientVec <- genWithM(genClient);
 
@@ -256,8 +245,8 @@ module mkTestClientArbiter(Empty);
 
         let isLastRef = isZero(reqFragCnt);
         if (isLastRef) begin
-            reqFragCnt.update(clientIdx - 1);
-            expectedClientIdxCnt.update(clientIdx - 1);
+            reqFragCnt.update(clientIdx + 1);
+            expectedClientIdxCnt.update(clientIdx + 1);
             countDown.decr;
         end
         else begin
@@ -309,8 +298,8 @@ module mkTestPipeOutArbiter(Empty);
 
     let dut <- mkPipeOutArbiter(map(toPipeOut, pipeInPayloadVec), isPipePayloadFinished);
 
-    Count#(ClientIndex) expectedPipeOutValCnt <- mkCount(fromInteger(valueOf(CLIENT_NUM) - 1));
-    Count#(ClientIndex) expectedPipeFragLastCnt <- mkCount(fromInteger(valueOf(CLIENT_NUM) - 1));
+    Count#(ClientIndex) expectedPipeOutValCnt <- mkCount(0); // fromInteger(valueOf(CLIENT_NUM) - 1));
+    Count#(ClientIndex) expectedPipeFragLastCnt <- mkCount(0); // fromInteger(valueOf(CLIENT_NUM) - 1));
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -337,8 +326,8 @@ module mkTestPipeOutArbiter(Empty);
 
         let isLastRef = isZero(expectedPipeFragLastCnt);
         if (isLastRef) begin
-            expectedPipeFragLastCnt.update(expectedPipeOutValCnt - 1);
-            expectedPipeOutValCnt.decr(1);
+            expectedPipeFragLastCnt.update(expectedPipeOutValCnt + 1);
+            expectedPipeOutValCnt.incr(1);
         end
         else begin
             expectedPipeFragLastCnt.decr(1);
