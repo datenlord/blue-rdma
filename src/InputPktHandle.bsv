@@ -489,14 +489,19 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     isResp
                 );
             end
+            // $display(
+            //     "time=%0t: checkQpMetaData", $time,
+            //     ", dqpn=%h, pdHandler=%h",
+            //     headerValidateInfo.dqpn, pdHandler
+            // );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
             // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
             // immAssert(
-            //     cntrlStatus.comm.isStableRTS && isValidHeader,
-            //     "isStableRTS and isValidHeader assertion @ mkInputRdmaPktBufAndHeaderValidation",
+            //     cntrlStatus.comm.isNonErr && isValidHeader,
+            //     "isNonErr and isValidHeader assertion @ mkInputRdmaPktBufAndHeaderValidation",
             //     $format(
-            //         "cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
+            //         "cntrlStatus.comm.isNonErr=", fshow(cntrlStatus.comm.isNonErr),
             //         " and isValidHeader=", fshow(isValidHeader),
             //         " should both be true, when bth.trans=", fshow(bth.trans),
             //         ", pdHandle=", fshow(pdHandler),

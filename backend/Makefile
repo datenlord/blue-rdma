@@ -8,10 +8,10 @@ LOGFILE ?= run.log
 # ONLYSYNTH ?= 1
 RUNTOPHASE ?= place
 PARTNAME = xcvu13p-fhgb2104-2-i
-TARGETFILE ?= ../src/QueuePair.bsv
-TOPMODULE ?= mkQP
-# TARGETFILE ?= ../src/QP.bsv
-# TOPMODULE ?= mkTransportLayerRDMA
+# TARGETFILE ?= ../src/QueuePair.bsv
+# TOPMODULE ?= mkQP
+TARGETFILE ?= ../src/TransportLayer.bsv
+TOPMODULE ?= mkTransportLayer
 
 export TOP = $(TOPMODULE)
 export RTL = $(VLOGDIR)

@@ -28,8 +28,9 @@ function Maybe#(WorkComp) genWorkComp4WorkReq(
             status  : wcGenReqSQ.wcStatus,
             len     : wr.len,
             pkey    : cntrlStatus.comm.getPKEY,
-            dqpn    : cntrlStatus.comm.getSQPN,
-            sqpn    : cntrlStatus.comm.getDQPN,
+            qpn    : cntrlStatus.comm.getSQPN,
+            // dqpn    : cntrlStatus.comm.getSQPN,
+            // sqpn    : cntrlStatus.comm.getDQPN,
             immDt   : tagged Invalid,
             rkey2Inv: tagged Invalid
         };
@@ -368,8 +369,9 @@ function Maybe#(WorkComp) genWorkComp4RecvReq(
             status  : wcGenReqRQ.wcStatus,
             len     : wcGenReqRQ.len,
             pkey    : cntrlStatus.comm.getPKEY,
-            dqpn    : cntrlStatus.comm.getSQPN,
-            sqpn    : cntrlStatus.comm.getDQPN,
+            qpn     : cntrlStatus.comm.getSQPN,
+            // dqpn    : cntrlStatus.comm.getSQPN,
+            // sqpn    : cntrlStatus.comm.getDQPN,
             immDt   : wcGenReqRQ.immDt,
             rkey2Inv: wcGenReqRQ.rkey2Inv
         };

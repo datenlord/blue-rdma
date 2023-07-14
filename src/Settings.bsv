@@ -11,7 +11,7 @@ typedef 256 DATA_BUS_WIDTH;
 
 typedef TExp#(31)           MAX_MR_SIZE;   // 2GB
 typedef TExp#(21)           PAGE_SIZE_CAP; // 2MB
-typedef 8                   MAX_QP;
+typedef 16                  MAX_QP;
 typedef 32                  MAX_QP_WR;
 typedef 1                   MAX_SGE;
 typedef 8                   MAX_CQ;

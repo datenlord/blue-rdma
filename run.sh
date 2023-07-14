@@ -101,6 +101,8 @@ ALL_LOG=$TEST_DIR/run.log
 # make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestSearchFIFOF 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestSpecialFIFOF.bsv TOPMODULE=mkTestVectorSearch 2>&1 | tee -a $ALL_LOG
 
+# make -j8 TESTFILE=TestTransportLayer.bsv TOPMODULE=mkTestTransportLayer 2>&1 | tee -a $ALL_LOG
+
 # make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestSegmentDataStream 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestUtils.bsv TOPMODULE=mkTestPsnFunc 2>&1 | tee -a $ALL_LOG
 

@@ -18,6 +18,7 @@ TESTBENCHS = \
             TestRespHandleSQ.bsv \
             TestRetryHandleSQ.bsv \
             TestSpecialFIFOF.bsv \
+            TestTransportLayer.bsv \
             TestUtils.bsv \
             TestWorkCompGen.bsv
 
@@ -90,6 +91,7 @@ TestSpecialFIFOF.bsv             = mkTestCacheFIFO2 \
                                     mkTestScanFIFOF \
                                     mkTestSearchFIFOF \
                                     mkTestVectorSearch
+TestTransportLayer.bsv           = mkTestTransportLayer
 TestUtils.bsv                    = mkTestSegmentDataStream \
                                     mkTestPsnFunc
 TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \

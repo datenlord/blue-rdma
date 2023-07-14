@@ -628,8 +628,9 @@ typedef struct {
     WorkCompStatus status;
     Length len;
     PKEY pkey;
-    QPN dqpn;
-    QPN sqpn;
+    QPN qpn;
+    // QPN dqpn;
+    // QPN sqpn;
     Maybe#(IMM) immDt;
     Maybe#(RKEY) rkey2Inv;
 } WorkComp deriving(Bits, FShow);
@@ -644,7 +645,7 @@ typedef enum {
 typedef struct {
     Maybe#(WorkReqID) rrID;
     Length len;
-    QPN sqpn;
+    // QPN sqpn;
     PSN reqPSN;
     Bool isZeroDmaLen;
     WorkCompStatus wcStatus;

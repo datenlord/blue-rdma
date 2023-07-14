@@ -37,7 +37,7 @@ module mkTagVecSrv(TagVecSrv#(vSz, anytype)) provisos(
     Bits#(anytype, tSz),
     NumAlias#(TLog#(vSz), vLogSz),
     NumAlias#(TAdd#(1, vLogSz), cntSz),
-    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // vSz must be power of 2
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(1, vSz))) // vSz must be power of 2
 );
     Vector#(vSz, Reg#(anytype)) dataVec <- replicateM(mkRegU);
     Vector#(vSz, Reg#(Bool))     tagVec <- replicateM(mkReg(False));
@@ -518,21 +518,21 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
     // FIFOF#(Tuple3#(PermCheckReq, Bool, Maybe#(MemRegion))) checkReqQ <- mkFIFOF;
     FIFOF#(Tuple3#(PermCheckReq, Bool, Maybe#(MemRegion))) checkStepOneQ <- mkFIFOF;
     FIFOF#(Tuple3#(PermCheckReq, Maybe#(MemRegion), Bool)) checkStepTwoQ <- mkFIFOF;
-
+/*
     function Bool checkPermByMR(PermCheckReq permCheckReq, MemRegion mr);
         let keyMatch = case (permCheckReq.localOrRmtKey)
             True : (truncate(permCheckReq.lkey) == mr.lkeyPart);
             False: (truncate(permCheckReq.rkey) == mr.rkeyPart);
         endcase;
 
-        let accTypeMatch = compareAccessTypeFlags(permCheckReq.accFlags, mr.accFlags);
+        let accTypeMatch = compareAccessTypeFlags(mr.accFlags, permCheckReq.accFlags);
 
         let addrLenMatch = checkAddrAndLenWithinRange(
             permCheckReq.reqAddr, permCheckReq.totalLen, mr.laddr, mr.len
         );
         return keyMatch && accTypeMatch && addrLenMatch;
     endfunction
-
+*/
     function Maybe#(MemRegion) mrSearchByLKey(
         MetaDataPDs pdMetaData, HandlerPD pdHandler, LKEY lkey
     );
@@ -582,7 +582,11 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
         end
 
         checkStepOneQ.enq(tuple3(permCheckReq, isZeroDmaLen, maybeMR));
-        // checkReqQ.enq(tuple3(permCheckReq, isZeroDmaLen, maybeMR));
+        // $display(
+        //     "time=%0t:", $time,
+        //     " permCheckReq.pdHandler=%h", permCheckReq.pdHandler,
+        //     ", maybeMR=", fshow(maybeMR)
+        // );
     endrule
 
     rule checkReqStepOne;
@@ -597,14 +601,28 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
                     (truncate(permCheckReq.rkey) == mr.rkeyPart);
 
                 let accTypeMatch = compareAccessTypeFlags(
-                    permCheckReq.accFlags, mr.accFlags
+                    mr.accFlags, permCheckReq.accFlags
                 );
 
                 stepOneResult = keyMatch && accTypeMatch;
+                // $display(
+                //     "time=%0t:", $time,
+                //     " stepOneResult=", fshow(stepOneResult),
+                //     ", keyMatch=", fshow(keyMatch),
+                //     ", permCheckReq.localOrRmtKey=", fshow(permCheckReq.localOrRmtKey),
+                //     ", permCheckReq.lkey=", fshow(permCheckReq.lkey),
+                //     ", permCheckReq.rkey=", fshow(permCheckReq.rkey),
+                //     ", mr.lkeyPart=", fshow(mr.lkeyPart),
+                //     ", mr.rkeyPart=", fshow(mr.rkeyPart),
+                //     ", accTypeMatch=", fshow(accTypeMatch),
+                //     ", permCheckReq.accFlags=", fshow(permCheckReq.accFlags),
+                //     ", mr.accFlags=", fshow(mr.accFlags)
+                // );
             end
         end
 
         checkStepTwoQ.enq(tuple3(permCheckReq, maybeMR, stepOneResult));
+        $display("time=%0t:", $time, " stepOneResult=", fshow(stepOneResult));
     endrule
 
     rule checkReqStepTwo;
@@ -624,6 +642,7 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
         end
 
         respOutQ.enq(stepTwoResult);
+        $display("time=%0t:", $time, " stepTwoResult=", fshow(stepTwoResult));
     endrule
 
     return toGPServer(reqInQ, respOutQ);
@@ -832,7 +851,7 @@ endinterface
 
 module mkCascadeCache(CascadeCache#(addrWidth, payloadWidth)) provisos(
     NumAlias#(TLog#(BRAM_CACHE_SIZE), bramCacheIndexWidth),
-    Add#(bramCacheIndexWidth, TAdd#(anysize, 1), addrWidth), // addrWidth > bramCacheIndexWidth
+    Add#(bramCacheIndexWidth, TAdd#(1, anysize), addrWidth), // addrWidth > bramCacheIndexWidth
     NumAlias#(TDiv#(payloadWidth, BRAM_CACHE_DATA_WIDTH), colNum),
     Add#(TMul#(BRAM_CACHE_DATA_WIDTH, colNum), 0, payloadWidth), // payloadWidth must be multiplier of BYTE_WIDTH
     NumAlias#(TSub#(addrWidth, bramCacheIndexWidth), cascadeCacheIndexWidth),

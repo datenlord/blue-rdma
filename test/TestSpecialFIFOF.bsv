@@ -30,7 +30,7 @@ module mkTestScanFIFOF(Empty);
     let qElemPipeOut4ScanRef      <- mkSizedFIFOF(valueOf(MAX_QP_WR));
     let qElemPipeOut4ScanAgainRef <- mkBufferN(valueOf(MAX_QP_WR), qElemPipeOutVec[2]);
 
-    Count#(Bit#(TAdd#(1, TLog#(MAX_QP_WR)))) scanCnt <- mkCount(0);
+    Count#(Bit#(TLog#(TAdd#(1, MAX_QP_WR)))) scanCnt <- mkCount(0);
     Reg#(ScanFifoTestState) scanTestStateReg <- mkReg(TEST_SCAN_Q_FILL);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
