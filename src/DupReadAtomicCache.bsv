@@ -207,7 +207,7 @@ module mkBinaryTreeFork#(
     Bits#(anytype, tSz),
     // Add#(1, anysize, qSz),
     NumAlias#(TLog#(vSz), cntSz),
-    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // qSz must be power of 2
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(1, vSz))) // vSz must be power of 2
 );
     Vector#(vSz, FIFOF#(anytype)) resultVec <- replicateM(mkFIFOF);
 
@@ -257,7 +257,7 @@ module mkRecursiveSearch#(
     Bits#(anytype, tSz),
     // Add#(1, anysize, vSz),
     NumAlias#(TLog#(vSz), cntSz),
-    Add#(TLog#(vSz), 1, TLog#(TAdd#(vSz, 1))) // vSz must be power of 2
+    Add#(TLog#(vSz), 1, TLog#(TAdd#(1, vSz))) // vSz must be power of 2
 );
     if (valueOf(vSz) == 1) begin
         FIFOF#(Maybe#(anytype)) resultQ <- mkFIFOF;
@@ -327,7 +327,7 @@ module mkCacheFIFO#(
     Bits#(searchType, searchTypeSz),
     Bits#(cmpResultType, cmpResultTypeSz),
     NumAlias#(TLog#(qSz), cntSz),
-    Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
+    Add#(TLog#(qSz), 1, TLog#(TAdd#(1, qSz))) // qSz must be power of 2
 );
     Vector#(qSz, Reg#(anytype)) dataVec <- replicateM(mkRegU);
     Vector#(qSz, Reg#(Bool))     tagVec <- replicateM(mkReg(False));

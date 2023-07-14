@@ -34,7 +34,7 @@ function Bool isLessOrEqOneR(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz))
     return ret;
 endfunction
 
-function Bool isOne(Bit#(nSz) bits) provisos(Add#(1, anysize, nSz));
+function Bool isOne(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
     return isLessOrEqOne(bits) && unpack(lsb(bits));
 endfunction
 

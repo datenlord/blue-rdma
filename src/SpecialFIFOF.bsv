@@ -29,7 +29,7 @@ interface ScanFIFOF#(numeric type qSz, type anytype);
     interface FIFOF#(anytype) fifof;
     interface ScanCntrl#(anytype) scanCntrl;
     interface PipeOut#(anytype) scanPipeOut;
-    method UInt#(TLog#(TAdd#(qSz, 1))) size();
+    method UInt#(TLog#(TAdd#(1, qSz))) size();
 endinterface
 
 typedef enum {
@@ -43,8 +43,10 @@ typedef enum {
 module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
     Bits#(anytype, tSz),
     NumAlias#(TLog#(qSz), ptrSz),
-    NumAlias#(TAdd#(ptrSz, 1), cntSz),
-    Add#(1, anysize, TLog#(qSz)), // qSz must at least be 2
+    NumAlias#(TLog#(TAdd#(1, qSz)), cntSz),
+    Add#(1, anysizeJ, cntSz),
+    Add#(2, anysizeK, cntSz),
+    Add#(1, anysizeL, TLog#(qSz)), // qSz must at least be 2
     Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
 );
     Vector#(qSz, Reg#(anytype)) dataVec <- replicateM(mkRegU);
@@ -508,9 +510,8 @@ endinterface
 
 module mkSearchFIFOF(SearchFIFOF#(qSz, anytype)) provisos(
     Bits#(anytype, tSz),
-    NumAlias#(TLog#(qSz), qLogSz),
-    NumAlias#(TAdd#(qLogSz, 1), cntSz),
-    Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
+    NumAlias#(TLog#(TAdd#(1, qSz)), cntSz),
+    Add#(TLog#(qSz), 1, TLog#(TAdd#(1, qSz))) // qSz must be power of 2
 );
     Vector#(qSz, Reg#(anytype))     dataVec <- replicateM(mkRegU);
     Vector#(qSz, Array#(Reg#(Bool))) tagVec <- replicateM(mkCReg(3, False));
@@ -620,7 +621,7 @@ module mkCacheFIFO2#(
     Bits#(anytype, tSz),
     Bits#(cmpResultType, cmpResultTypeSz),
     NumAlias#(TLog#(qSz), cntSz),
-    Add#(TLog#(qSz), 1, TLog#(TAdd#(qSz, 1))) // qSz must be power of 2
+    Add#(TLog#(qSz), 1, TLog#(TAdd#(1, qSz))) // qSz must be power of 2
 );
     Vector#(qSz, Reg#(anytype)) dataVec <- replicateM(mkRegU);
     Vector#(qSz, Reg#(Bool))     tagVec <- replicateM(mkReg(False));

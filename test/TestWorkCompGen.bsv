@@ -331,7 +331,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
             let workCompReq = WorkCompGenReqRQ {
                 rrID        : maybeRecvReqID,
                 len         : pendingWR.wr.len,
-                sqpn        : cntrlStatus.comm.getSQPN,
+                // sqpn        : cntrlStatus.comm.getSQPN,
                 reqPSN      : endPSN,
                 isZeroDmaLen: isZeroLen,
                 wcStatus    : isNormalCase ? IBV_WC_SUCCESS : IBV_WC_WR_FLUSH_ERR,

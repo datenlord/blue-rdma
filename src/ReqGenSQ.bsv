@@ -484,7 +484,6 @@ module mkReqGenSQ#(
     FIFOF#(PendingWorkReq)   pendingWorkReqOutQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqSQ) workCompGenReqOutQ <- mkFIFOF;
 
-    // FIFOF#(PayloadGenReq) payloadGenReqOutQ <- mkFIFOF;
     // Pipeline FIFO
     FIFOF#(Tuple7#(
         PendingWorkReq, PktNum, PmtuResidue, Bool, Bool, Bool, Bool
@@ -541,10 +540,6 @@ module mkReqGenSQ#(
 
         // $display("time=%0t: reset and clear mkReqGenSQ", $time);
     endrule
-
-    // let payloadGenerator <- mkPayloadGenerator(
-    //     cntrlStatus, dmaReadSrv, toPipeOut(payloadGenReqOutQ)
-    // );
 
     // Generate header DataStream
     let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(

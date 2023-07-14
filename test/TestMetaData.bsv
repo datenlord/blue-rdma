@@ -24,7 +24,7 @@ typedef enum {
 (* synthesize *)
 module mkTestMetaDataPDs(Empty);
     let pdMetaDataDUT <- mkMetaDataPDs;
-    Count#(Bit#(TAdd#(1, TLog#(MAX_PD)))) pdReqCnt <- mkCount(0);
+    Count#(Bit#(TLog#(TAdd#(1, MAX_PD)))) pdReqCnt <- mkCount(0);
     Count#(Bit#(TLog#(MAX_PD)))          pdRespCnt <- mkCount(0);
 
     PipeOut#(KeyPD) pdKeyPipeOut <- mkGenericRandomPipeOut;
@@ -196,7 +196,7 @@ endmodule
 module mkTestMetaDataMRs(Empty);
     let mrMetaDataDUT <- mkMetaDataMRs;
 
-    Count#(Bit#(TAdd#(1, TLog#(MAX_MR_PER_PD)))) mrReqCnt <- mkCount(0);
+    Count#(Bit#(TLog#(TAdd#(1, MAX_MR_PER_PD)))) mrReqCnt <- mkCount(0);
     Count#(Bit#(TLog#(MAX_MR_PER_PD))) mrRespCnt <- mkCount(0);
 
     PipeOut#(KeyPartMR) mrKeyPipeOut <- mkGenericRandomPipeOut;
@@ -389,7 +389,7 @@ endmodule
 (* synthesize *)
 module mkTestMetaDataQPs(Empty);
     let qpMetaDataDUT <- mkMetaDataQPs;
-    Count#(Bit#(TAdd#(1, TLog#(MAX_QP)))) qpReqCnt <- mkCount(0);
+    Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) qpReqCnt <- mkCount(0);
     Count#(Bit#(TLog#(MAX_QP)))          qpRespCnt <- mkCount(0);
 
     PipeOut#(HandlerPD) pdHandlerPipeOut <- mkGenericRandomPipeOut;

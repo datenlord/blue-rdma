@@ -163,7 +163,7 @@ function ByteEn genByteEn(ByteEnBitNum fragValidByteNum);
 endfunction
 
 function ByteEnBitNum calcLastFragValidByteNum(Bit#(nSz) len) provisos(
-    Add#(TAdd#(DATA_BUS_BYTE_NUM_WIDTH, 1), anysizeK, nSz),
+    Add#(TAdd#(1, DATA_BUS_BYTE_NUM_WIDTH), anysizeK, nSz),
     Add#(DATA_BUS_BYTE_NUM_WIDTH, anysizeJ, nSz)
 );
     BusByteWidthMask lastFragByteNumResidue = truncate(len);
@@ -1613,47 +1613,6 @@ function Rules genEmptyPipeOutRule(
         endrules
     );
 endfunction
-
-// TODO: move this module to Utils4Test
-module mkQpAttrPipeOut(PipeOut#(AttrQP));
-    FIFOF#(AttrQP) qpAttrQ <- mkFIFOF;
-    Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) dqpnCnt <- mkCount(0);
-
-    rule genQpAttr if (dqpnCnt < fromInteger(valueOf(MAX_QP)));
-        QPN dqpn = zeroExtendLSB(dqpnCnt);
-        dqpnCnt.incr(1);
-
-        let qpAttr = AttrQP {
-            qpState          : dontCareValue,
-            curQpState       : dontCareValue,
-            pmtu             : IBV_MTU_1024,
-            qkey             : fromInteger(valueOf(DEFAULT_QKEY)),
-            rqPSN            : 0,
-            sqPSN            : 0,
-            dqpn             : dqpn,
-            qpAccessFlags    : enum2Flag(IBV_ACCESS_REMOTE_WRITE) | enum2Flag(IBV_ACCESS_REMOTE_READ) | enum2Flag(IBV_ACCESS_REMOTE_ATOMIC),
-            cap              : QpCapacity {
-                maxSendWR    : fromInteger(valueOf(MAX_QP_WR)),
-                maxRecvWR    : fromInteger(valueOf(MAX_QP_WR)),
-                maxSendSGE   : fromInteger(valueOf(MAX_SEND_SGE)),
-                maxRecvSGE   : fromInteger(valueOf(MAX_RECV_SGE)),
-                maxInlineData: fromInteger(valueOf(MAX_INLINE_DATA))
-            },
-            pkeyIndex        : fromInteger(valueOf(DEFAULT_PKEY)),
-            sqDraining       : False,
-            maxReadAtomic    : fromInteger(valueOf(MAX_QP_RD_ATOM)),
-            maxDestReadAtomic: fromInteger(valueOf(MAX_QP_DST_RD_ATOM)),
-            minRnrTimer      : 1, // minRnrTimer 1 - 0.01 milliseconds delay
-            timeout          : 1, // maxTimeOut 0 - infinite, 1 - 8.192 usec (0.000008 sec)
-            retryCnt         : fromInteger(valueOf(DEFAULT_RETRY_NUM)),
-            rnrRetry         : fromInteger(valueOf(DEFAULT_RETRY_NUM))
-        };
-
-        qpAttrQ.enq(qpAttr);
-    endrule
-
-    return toPipeOut(qpAttrQ);
-endmodule
 
 // PayloadConsumer related
 

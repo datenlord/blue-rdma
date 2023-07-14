@@ -30,7 +30,7 @@ typedef Vector#(portSz, PermCheckClt) PermCheckCltVec#(numeric type portSz);
 
 module mkPermCheckCltArbiter#(PermCheckCltVec#(portSz) permCheckCltVec)(PermCheckClt) provisos(
     Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     function Bool isPermCheckReqFinished(PermCheckReq req) = True;
     function Bool isPermCheckRespFinished(Bool resp) = True;
@@ -48,7 +48,7 @@ typedef Vector#(portSz, DmaWriteClt) DmaWriteCltVec#(numeric type portSz);
 
 module mkDmaReadCltArbiter#(DmaReadCltVec#(portSz) dmaReadCltVec)(DmaReadClt) provisos(
     Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     function Bool isDmaReadReqLastFrag(DmaReadReq req) = True;
     function Bool isDmaReadRespLastFrag(DmaReadResp resp) = resp.dataStream.isLast;
@@ -63,7 +63,7 @@ endmodule
 
 module mkDmaWriteCltArbiter#(DmaWriteCltVec#(portSz) dmaWriteCltVec)(DmaWriteClt) provisos(
     Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     function Bool isDmaWriteReqLastFrag(DmaWriteReq req) = req.dataStream.isLast;
     function Bool isDmaWriteRespLastFrag(DmaWriteResp resp) = True;

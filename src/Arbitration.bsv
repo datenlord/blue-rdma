@@ -51,7 +51,7 @@ module mkServerArbiter#(
     Bits#(reqType, reqSz),
     Bits#(respType, respSz),
     Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     function Bool isPipePayloadFinished(Tuple2#(Bit#(TLog#(portSz)), reqType) reqWithIdx);
         let { reqIdx, inputReq } = reqWithIdx;
@@ -130,7 +130,7 @@ module mkClientArbiter#(
     Bits#(reqType, reqSz),
     Bits#(respType, respSz),
     Add#(1, anysize, portSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     FIFOF#(reqType)   reqQ <- mkFIFOF;
     FIFOF#(respType) respQ <- mkFIFOF;
@@ -311,7 +311,7 @@ module mkBinaryPipeOutArbiterTree#(
     Bits#(anytype, tSz),
     // Add#(1, anysize, portSz),
     // Add#(1, anysizeK, TDiv#(portSz, 2))
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
 
     if (valueOf(portSz) == 1) begin
@@ -341,7 +341,7 @@ module mkLeafBinaryPipeOutArbiterVec#(
 ) provisos(
     // FShow#(anytype),
     Bits#(anytype, tSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     Vector#(TDiv#(portSz, TWO), PipeOut#(anytype)) leafArbiterVec = newVector;
 
@@ -367,7 +367,7 @@ module mkPipeOutArbiter#(
 )(PipeOut#(anytype)) provisos(
     // FShow#(anytype),
     Bits#(anytype, tSz),
-    Add#(TLog#(portSz), 1, TLog#(TAdd#(portSz, 1))) // portSz must be power of 2
+    Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
     let leafArbiterVec <- mkLeafBinaryPipeOutArbiterVec(
         inputPipeOutVec, isPipePayloadFinished
