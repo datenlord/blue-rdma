@@ -25,7 +25,17 @@ module mkHeader2DataStream#(
 
     Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
     Reg#(Bool)      headerValidReg <- mkReg(False);
-
+/*
+    rule debug if (!(
+        headerDataStreamOutQ.notFull && headerMetaDataOutQ.notFull
+    ));
+        $display(
+            "time=%0t: mkHeader2DataStream debug", $time,
+            ", headerDataStreamOutQ.notFull=", fshow(headerDataStreamOutQ.notFull),
+            ", headerMetaDataOutQ.notFull=", fshow(headerMetaDataOutQ.notFull)
+        );
+    endrule
+*/
     rule outputHeader;
         let curHeader = headerValidReg ? rdmaHeaderReg : headerPipeIn.first;
         if (!headerValidReg) begin
@@ -95,6 +105,19 @@ module mkDataStream2Header#(
     Reg#(HeaderByteNum) headerInvalidFragByteNumReg <- mkRegU;
     Reg#(HeaderBitNum)   headerInvalidFragBitNumReg <- mkRegU;
     Reg#(Bool)                              busyReg <- mkReg(False);
+
+    rule debug if (!(
+        dataPipeIn.notEmpty           &&
+        headerMetaDataPipeIn.notEmpty &&
+        headerOutQ.notFull
+    ));
+        $display(
+            "time=%0t: mkDataStream2Header debug", $time,
+            ", dataPipeIn.notEmpty=", fshow(dataPipeIn.notEmpty),
+            ", headerMetaDataPipeIn.notEmpty=", fshow(headerMetaDataPipeIn.notEmpty),
+            ", headerOutQ.notFull=", fshow(headerOutQ.notFull)
+        );
+    endrule
 
     rule popHeaderMetaData if (!busyReg);
         busyReg <= True;
@@ -215,7 +238,14 @@ module mkPrependHeader2PipeOut#(
     Reg#(Bool)          isFirstReg <- mkRegU;
 
     Reg#(ExtractOrPrependHeaderStage) stageReg <- mkReg(HEADER_META_DATA_POP);
-
+/*
+    rule debug if (!dataStreamOutQ.notFull);
+        $display(
+            "time=%0t: mkPrependHeader2PipeOut debug", $time,
+            ", dataStreamOutQ.notFull=", fshow(dataStreamOutQ.notFull)
+        );
+    endrule
+*/
     rule popHeaderMetaData if (stageReg == HEADER_META_DATA_POP);
         let headerMetaData = headerMetaDataPipeIn.first;
         headerMetaDataPipeIn.deq;
@@ -385,7 +415,17 @@ module mkExtractHeaderFromDataStreamPipeOut#(
     Reg#(ByteEn)           shiftedCurDataFragByteEnReg <- mkRegU;
 
     Reg#(ExtractOrPrependHeaderStage) stageReg <- mkReg(HEADER_META_DATA_POP);
-
+/*
+    rule debug if (!(
+        headerDataStreamOutQ.notFull && payloadDataStreamOutQ.notFull
+    ));
+        $display(
+            "time=%0t: mkExtractHeaderFromDataStreamPipeOut debug", $time,
+            ", headerDataStreamOutQ.notFull=", fshow(headerDataStreamOutQ.notFull),
+            ", payloadDataStreamOutQ.notFull=", fshow(payloadDataStreamOutQ.notFull)
+        );
+    endrule
+*/
     rule popHeaderMetaData if (stageReg == HEADER_META_DATA_POP);
         let headerMetaData = headerMetaDataPipeIn.first;
         headerMetaDataPipeIn.deq;

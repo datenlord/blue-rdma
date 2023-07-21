@@ -384,6 +384,20 @@ module mkFixedBinaryPipeOutArbiter#(
 )(PipeOut#(anytype));
     let isNotEmpty = pipeIn1.notEmpty || pipeIn2.notEmpty;
 
+    Reg#(Bool) deqPipeIn1Reg[2] <- mkCReg(2, False);
+    Reg#(Bool) deqPipeIn2Reg[2] <- mkCReg(2, False);
+    rule debug if (deqPipeIn1Reg[1] || deqPipeIn2Reg[1]);
+        $display(
+            "time=%0t: mkFixedBinaryPipeOutArbiter debug", $time,
+            ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
+            ", pipeIn1.deq=", fshow(deqPipeIn1Reg[1]),
+            ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty),
+            ", pipeIn2.deq=", fshow(deqPipeIn2Reg[1])
+        );
+        deqPipeIn1Reg[1] <= False;
+        deqPipeIn2Reg[1] <= False;
+    endrule
+
     method anytype first() if (isNotEmpty);
         if (pipeIn1.notEmpty) begin
             return pipeIn1.first;
@@ -396,9 +410,11 @@ module mkFixedBinaryPipeOutArbiter#(
     method Action deq() if (isNotEmpty);
         if (pipeIn1.notEmpty) begin
             pipeIn1.deq;
+            deqPipeIn1Reg[0] <= True;
         end
         else begin
             pipeIn2.deq;
+            deqPipeIn2Reg[0] <= True;
         end
     endmethod
 

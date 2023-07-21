@@ -1547,13 +1547,6 @@ function Tuple2#(PipeOut#(anytype), PipeOut#(anytype)) deMuxPipeOutFunc(
     return tuple2(p1, p2);
 endfunction
 
-module mkBufferN#(
-    Integer depth, PipeOut#(anytype) pipeIn
-)(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
-    let resultPipeOut <- mkBuffer_n(depth, pipeIn);
-    return resultPipeOut;
-endmodule
-
 module mkFunc2Pipe#(
     function tb func(ta inputVal), PipeOut#(ta) pipeIn
 )(PipeOut#(tb));
@@ -1593,7 +1586,10 @@ endmodule
 module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));
     rule drain;
         pipeIn.deq;
-        $display("time=%0t: mkDebugSink drain ", $time, fshow(pipeIn.first));
+        $display(
+            "time=%0t: mkDebugSink debug", $time,
+            ", dequeue first=", fshow(pipeIn.first)
+        );
     endrule
 endmodule
 
@@ -1603,6 +1599,8 @@ module mkDebugConnection#(
     rule connect;
         let data <- getIn.get;
         putOut.put(data);
-        $display("time=%0t:", $time, " mkDebugConnection, data=", fshow(data));
+        $display(
+            "time=%0t: mkDebugConnection debug", $time,
+            ", data=", fshow(data));
     endrule
 endmodule

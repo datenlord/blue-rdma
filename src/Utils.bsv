@@ -1504,6 +1504,13 @@ endfunction
 
 // PipeOut related
 
+module mkBufferN#(
+    Integer depth, PipeOut#(anytype) pipeIn
+)(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
+    let resultPipeOut <- mkBuffer_n(depth, pipeIn);
+    return resultPipeOut;
+endmodule
+
 module mkPipeOutMux#(
     Bool sel, PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));

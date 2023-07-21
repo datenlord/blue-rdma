@@ -262,15 +262,21 @@ module mkPayloadGenerator#(
         // );
     endrule
 /*
-    rule debug if (cntrlStatus.comm.isNonErr && isNormalStateReg);
+    rule debug if (!(
+        payloadGenRespQ.notFull &&
+        pendingGenReqQ.notFull  &&
+        pendingGenRespQ.notFull &&
+        payloadSegmentQ.notFull &&
+        payloadBufQ.notFull
+    ));
         $display(
-            "time=%0t:", $time,
-            " payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            " payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
-            " pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
-            " pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
-            " payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
-            " payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+            "time=%0t: mkPayloadGenerator debug", $time,
+            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+            ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+            ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+            ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+            ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+            ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
         );
     endrule
 */
@@ -285,9 +291,6 @@ module mkPayloadGenerator#(
                 payloadGenReq.dmaReadReq.len
             )
         );
-        // $display(
-        //     "time=%0t: recvPayloadGenReq, payloadGenReq=", $time, fshow(payloadGenReq)
-        // );
 
         let dmaLen = payloadGenReq.dmaReadReq.len;
         let padCnt = calcPadCnt(dmaLen);
@@ -308,6 +311,9 @@ module mkPayloadGenerator#(
 
         pendingGenReqQ.enq(tuple3(payloadGenReq, lastFragByteEnWithPadding, pmtuFragNum));
         dmaReadSrv.request.put(payloadGenReq.dmaReadReq);
+        $display(
+            "time=%0t: recvPayloadGenReq, payloadGenReq=", $time, fshow(payloadGenReq)
+        );
     endrule
 
     rule lastFragAddPadding if (cntrlStatus.comm.isNonErr && isNormalStateReg);
@@ -364,12 +370,6 @@ module mkPayloadGenerator#(
         end
 
         isNormalStateReg <= !hasDmaRespErr;
-        // $display(
-        //     "time=%0t: segmentPayload", $time,
-        //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
-        //     ", curData.isFirst=", fshow(curData.isFirst),
-        //     ", curData.isLast=", fshow(curData.isLast)
-        // );
 
         if (shouldSegment) begin
             if (shouldSetFirstReg || curData.isFirst) begin
@@ -407,6 +407,12 @@ module mkPayloadGenerator#(
         end
 
         payloadBufQ.enq(curData);
+        // $display(
+        //     "time=%0t: segmentPayload", $time,
+        //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
+        //     ", curData.isFirst=", fshow(curData.isFirst),
+        //     ", curData.isLast=", fshow(curData.isLast)
+        // );
     endrule
 
     rule flushDmaReadResp if (cntrlStatus.comm.isERR || (cntrlStatus.comm.isNonErr && !isNormalStateReg));
@@ -558,6 +564,10 @@ module mkPayloadConsumer#(
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
         countReqFragQ.enq(tuple2(consumeReq, isFragNumLessOrEqOne));
+        $display(
+            "time=%0t: recvReq", $time,
+            ", consumeReq=", fshow(consumeReq)
+        );
     endrule
 
     rule countReqFrag if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
@@ -585,8 +595,8 @@ module mkPayloadConsumer#(
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFragReg, isLastReqFrag
         ));
         // $display(
-        //     "time=%0t:", $time,
-        //     " consumeReq.fragNum=%0d", consumeReq.fragNum,
+        //     "time=%0t: countReqFrag", $time,
+        //     ", consumeReq.fragNum=%0d", consumeReq.fragNum,
         //     ", remainingFragNumReg=%0d", remainingFragNumReg,
         //     ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
         //     ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
@@ -661,14 +671,14 @@ module mkPayloadConsumer#(
                     //     $time, consumeReq.fragNum
                     // );
                 end
-                // $display(
-                //     "time=%0t: SendWriteReqReadRespInfo", $time,
-                //     ", consumeReq=", fshow(consumeReq),
-                //     ", isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
-                //     ", isLastReqFrag=", fshow(isLastReqFrag),
-                //     ", payload.isFirst=", fshow(payload.isFirst),
-                //     ", payload.isLast=", fshow(payload.isLast)
-                // );
+                $display(
+                    "time=%0t: SendWriteReqReadRespInfo", $time,
+                    ", consumeReq=", fshow(consumeReq),
+                    ", isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
+                    ", isLastReqFrag=", fshow(isLastReqFrag),
+                    ", payload.isFirst=", fshow(payload.isFirst),
+                    ", payload.isLast=", fshow(payload.isLast)
+                );
 
                 if (isFirstOrOnlyFrag) begin
                     immAssert(
@@ -786,10 +796,6 @@ module mkPayloadConsumer#(
         let dmaWriteResp <- dmaWriteSrv.response.get;
         let consumeReq = genConRespQ.first;
         genConRespQ.deq;
-        // $display(
-        //     "time=%0t: dmaWriteResp=", $time, fshow(dmaWriteResp),
-        //     ", consumeReq=", fshow(consumeReq)
-        // );
 
         case (consumeReq.consumeInfo) matches
             tagged SendWriteReqReadRespInfo .sendWriteReqReadRespInfo: begin
@@ -847,6 +853,11 @@ module mkPayloadConsumer#(
                 );
             end
         endcase
+        $display(
+            "time=%0t: genConResp", $time,
+            ", dmaWriteResp=", fshow(dmaWriteResp),
+            ", consumeReq=", fshow(consumeReq)
+        );
     endrule
 
     // TODO: safe error flush that finish pending requests before flush
