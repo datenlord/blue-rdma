@@ -606,8 +606,8 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
 
                 stepOneResult = keyMatch && accTypeMatch;
                 // $display(
-                //     "time=%0t:", $time,
-                //     " stepOneResult=", fshow(stepOneResult),
+                //     "time=%0t: checkReqStepOne", $time,
+                //     ", stepOneResult=", fshow(stepOneResult),
                 //     ", keyMatch=", fshow(keyMatch),
                 //     ", permCheckReq.localOrRmtKey=", fshow(permCheckReq.localOrRmtKey),
                 //     ", permCheckReq.lkey=", fshow(permCheckReq.lkey),
@@ -637,6 +637,14 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
                     permCheckReq.totalLen,
                     mr.laddr,
                     mr.len
+                );
+                $display(
+                    "time=%0t: checkReqStepTwo", $time,
+                    ", stepTwoResult=", fshow(stepTwoResult),
+                    ", permCheckReq.reqAddr=", fshow(permCheckReq.reqAddr),
+                    ", permCheckReq.totalLen=", fshow(permCheckReq.totalLen),
+                    ", mr.laddr=", fshow(mr.laddr),
+                    ", mr.len=", fshow(mr.len)
                 );
             end
         end

@@ -681,13 +681,13 @@ module mkReqHandleRQ#(
         preStagePktMetaDataReg <= curPktMetaData;
         preStageReqPktInfoReg  <= reqPktInfo;
         preStageStateReg       <= RQ_PRE_CALC_STAGE;
-        // $display(
-        //     "time=%0t:", $time,
-        //     " 0.1st pre-stage, bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, ePSN=%h, epoch=%h", bth.psn, expectedPSN, epoch,
-        //     // ", reqStatus=", fshow(reqStatus),
-        //     ", preStageStateReg=", fshow(preStageStateReg)
-        // );
+        $display(
+            "time=%0t:", $time,
+            " 0.1st pre-stage, bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, ePSN=%h, epoch=%h", bth.psn, expectedPSN, epoch,
+            // ", reqStatus=", fshow(reqStatus),
+            ", preStageStateReg=", fshow(preStageStateReg)
+        );
     endrule
 
     rule preCalcReqInfo if (
@@ -3116,17 +3116,17 @@ module mkReqHandleRQ#(
         workCompReqQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 31st stage genRespPkt, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPSN,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", hasErrRespGen=", fshow(hasErrRespGen),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 31st stage genRespPkt, bth.opcode=", $time, fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPSN,
+            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+            ", hasErrRespGen=", fshow(hasErrRespGen),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -3202,14 +3202,14 @@ module mkReqHandleRQ#(
             // Wait for send/write request DMA write responses and generate WC if needed
             workCompGenReqOutQ.enq(workCompReq);
         end
-        // $display(
-        //     "time=%0t: 32nd stage genWorkCompRQ, bth.opcode=", $time, fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", immDt=%h, ieth=%h", immDt, ieth,
-        //     ", hasImmDt=", fshow(hasImmDt),
-        //     ", hasIETH=", fshow(hasIETH),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 32nd stage genWorkCompRQ, bth.opcode=", $time, fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", immDt=%h, ieth=%h", immDt, ieth,
+            ", hasImmDt=", fshow(hasImmDt),
+            ", hasIETH=", fshow(hasIETH),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     (* fire_when_enabled *)

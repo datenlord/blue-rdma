@@ -21,9 +21,10 @@ import Utils4Test :: *;
 module mkTestTransportLayerNormalCase(Empty);
     let minDmaLength = 1;
     let maxDmaLength = 8192;
-    let qpType = IBV_QPT_RC; // IBV_QPT_XRC_SEND;
+    let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
     let pmtu = IBV_MTU_512;
     let isSendSideQ = True;
+    let normalOrErrCase = True;
 
     FIFOF#(QPN) dqpnQ4RecvSide <- mkFIFOF;
     FIFOF#(QPN) dqpnQ4SendSide <- mkFIFOF;
@@ -46,7 +47,8 @@ module mkTestTransportLayerNormalCase(Empty);
         maxDmaLength,
         qpType,
         pmtu,
-        !isSendSideQ
+        !isSendSideQ,
+        normalOrErrCase
     );
     let noWorkCompOutRule4RecvSideSendQ <- addRules(genEmptyPipeOutRule(
         recvSideTransportLayer.workCompPipeOutSQ,
@@ -69,7 +71,8 @@ module mkTestTransportLayerNormalCase(Empty);
         maxDmaLength,
         qpType,
         pmtu,
-        isSendSideQ
+        isSendSideQ,
+        normalOrErrCase
     );
     let noWorkCompOutRule4SendSideRecvQ <- addRules(genEmptyPipeOutRule(
         sendSideTransportLayer.workCompPipeOutRQ,
@@ -81,7 +84,8 @@ module mkTestTransportLayerNormalCase(Empty);
     mkConnection(sendSideTransportLayer.dmaReadClt, simDmaReadSrv4SendSide);
     mkConnection(sendSideTransportLayer.dmaWriteClt, simDmaWriteSrv4SendSide);
 
-    mkConnection(
+    // mkSink(sendSideTransportLayer.rdmaDataStreamPipeOut);
+    mkDebugConnection(
         toGet(sendSideTransportLayer.rdmaDataStreamPipeOut),
         recvSideTransportLayer.rdmaDataStreamInput
     );
@@ -160,7 +164,8 @@ module mkInitMetaDataAndConnectQP#(
     Length maxDmaLength,
     TypeQP qpType,
     PMTU pmtu,
-    Bool isSendSideQ
+    Bool isSendSideQ,
+    Bool normalOrErrCase
 )(InitMetaDataAndConnectQP) provisos(
     NumAlias#(TDiv#(MAX_QP, MAX_PD), avgQpPerPD),
     NumAlias#(TDiv#(MAX_MR_PER_PD, avgQpPerPD), avgMrPerQP),
@@ -242,6 +247,7 @@ module mkInitMetaDataAndConnectQP#(
         enum2Flag(IBV_ACCESS_REMOTE_WRITE) |
         enum2Flag(IBV_ACCESS_REMOTE_READ)  |
         enum2Flag(IBV_ACCESS_REMOTE_ATOMIC);
+    let invalidAccPerm = enum2Flag(IBV_ACCESS_NO_FLAGS);
 
     PipeOut#(WorkReqID) workReqIdPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(Long) compPipeOut <- mkGenericRandomPipeOut;
@@ -349,7 +355,8 @@ module mkInitMetaDataAndConnectQP#(
                 $display(
                     "time=%0t: issueWorkReq", $time,
                     ", wrOpCode=", fshow(wrOpCode),
-                    ", sqpn=%h, dqpn=%h", sqpn, dqpn
+                    ", sqpn=%h, dqpn=%h, wr.id=%h, wr.len=%0d",
+                    sqpn, dqpn, wr.id, wr.len
                 );
             endrule
 
@@ -399,12 +406,15 @@ module mkInitMetaDataAndConnectQP#(
                     )
                 );
 
+                let expectedWorkCompStatus = normalOrErrCase ?
+                    IBV_WC_SUCCESS : IBV_WC_REM_ACCESS_ERR;
                 immAssert(
-                    wc.status == IBV_WC_SUCCESS,
+                    wc.status == expectedWorkCompStatus,
                     "WC status assertion @ mkInitMetaData",
                     $format(
                         "wc.status=", fshow(wc.status),
-                        " should be success, when wrOpCode=", fshow(wrOpCode)
+                        " should be expectedWorkCompStatus=",
+                        fshow(expectedWorkCompStatus)
                     )
                 );
             endrule
@@ -486,7 +496,7 @@ module mkInitMetaDataAndConnectQP#(
             mr: MemRegion {
                 laddr    : defaultAddr,
                 len      : defaultLen,
-                accFlags : defaultAccPerm,
+                accFlags : normalOrErrCase ? defaultAccPerm : invalidAccPerm,
                 pdHandler: pdHandler,
                 lkeyPart : mrKey,
                 rkeyPart : mrKey
@@ -849,7 +859,7 @@ module mkInitMetaDataAndConnectQP#(
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(qpNum);
             qpRespCnt <= fromInteger(qpNum - 1);
-            initMetaDataStateReg <= META_DATA_ATOMIC_WR;
+            initMetaDataStateReg <= normalOrErrCase ? META_DATA_ATOMIC_WR : META_DATA_SEND_WR;
         end
         else begin
             qpRespCnt.decr(1);
@@ -1267,12 +1277,15 @@ module mkInitMetaDataAndConnectQP#(
                 )
             );
 
+            let expectedWorkCompStatus = normalOrErrCase ?
+                IBV_WC_SUCCESS : IBV_WC_REM_ACCESS_ERR;
             immAssert(
-                wc.status == IBV_WC_SUCCESS,
+                wc.status == expectedWorkCompStatus,
                 "WC status assertion @ mkInitMetaData",
                 $format(
                     "wc.status=", fshow(wc.status),
-                    " should be success"
+                    " should be expectedWorkCompStatus=",
+                    fshow(expectedWorkCompStatus)
                 )
             );
         endrule
@@ -1341,7 +1354,11 @@ module mkInitMetaDataAndConnectQP#(
         end
     endrule
 
-    if (isSendSideQ) begin
+    // When nomal case, SQ will receive Send WC earlier than RQ,
+    // since normal Send requests will generate ACK before DMA write.
+    // When error case, RQ will receive Send WC earlier than SQ.
+    let waitCond = normalOrErrCase ? !isSendSideQ : isSendSideQ;
+    if (waitCond) begin
         rule done if (initMetaDataStateReg == META_DATA_NO_OP);
             normalExit;
         endrule

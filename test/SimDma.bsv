@@ -66,7 +66,22 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
     Reg#(DmaReadReq) curReqReg <- mkRegU;
 
     Bool isFragCntZero = isZero(totalFragCntReg);
-
+/*
+    rule debug if (!(
+        dmaReadReqQ.notFull    &&
+        dmaReadRespQ.notFull   &&
+        dmaReadReqOutQ.notFull &&
+        dmaReadRespOutQ.notFull
+    ));
+        $display(
+            "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
+            ", dmaReadReqQ.notFull=", fshow(dmaReadReqQ.notFull),
+            ", dmaReadRespQ.notFull=", fshow(dmaReadRespQ.notFull),
+            ", dmaReadReqOutQ.notFull=", fshow(dmaReadReqOutQ.notFull),
+            ", dmaReadRespOutQ.notFull=", fshow(dmaReadRespOutQ.notFull)
+        );
+    endrule
+*/
     rule init if (!dmaReadSrvInitReg);
         randomDataStream.cntrl.init;
 
@@ -127,11 +142,11 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             busyReg <= True;
             isFirstReg <= True;
 
-            // $display(
-            //     "time=%0t:", $time,
-            //     " DMA read request, WR ID=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
-            //     dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
-            // );
+            $display(
+                "time=%0t:", $time,
+                " DMA read request, WR ID=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
+                dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
+            );
         end
     endrule
 
@@ -166,14 +181,14 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
         // if (dataStream.isLast) begin
-        //     $display(
-        //         "time=%0t:", $time,
-        //         " DMA read response, WR ID=%h, totalFragNum=%0d",
-        //         curReqReg.wrID, totalFragCntReg
-        //         // ", dataStream.isFirst=", fshow(dataStream.isFirst),
-        //         // ", dataStream.isLast=", fshow(dataStream.isLast)
-        //         // ", dataStream=", fshow(dataStream)
-        //     );
+            $display(
+                "time=%0t:", $time,
+                " DMA read response, WR ID=%h, totalFragNum=%0d",
+                curReqReg.wrID, totalFragCntReg
+                // ", dataStream.isFirst=", fshow(dataStream.isFirst),
+                // ", dataStream.isLast=", fshow(dataStream.isLast)
+                // ", dataStream=", fshow(dataStream)
+            );
         // end
     endrule
 

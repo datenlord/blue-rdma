@@ -104,11 +104,21 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
     Vector#(2, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
         mkForkVector(toPipeOut(headerMetaDataInQ));
     let headerMetaDataPipeIn = headerMetaDataPipeOutVec[0];
-    let headerMetaDataPipeOut = headerMetaDataPipeOutVec[1];
+    let headerMetaDataPipeOut <- mkBuffer(headerMetaDataPipeOutVec[1]);
     let dataPipeIn = toPipeOut(dataInQ);
     let headerAndPayloadPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataPipeIn, headerMetaDataPipeIn
     );
+
+    rule debug if (!(
+        headerMetaDataInQ.notFull && dataInQ.notFull
+    ));
+        $display(
+            "time=%0t: mkExtractHeaderFromRdmaPktPipeOut debug", $time,
+            ", headerMetaDataInQ.notFull=", fshow(headerMetaDataInQ.notFull),
+            ", dataInQ.notFull=", fshow(dataInQ.notFull)
+        );
+    endrule
 
     rule extractHeader;
         let rdmaPktDataStream = rdmaPktPipeIn.first;
@@ -246,12 +256,13 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
     Reg#(RdmaPktBufState) pktBufStateReg <- mkReg(RDMA_PKT_BUT_ST_PRE_CHECK_FRAG);
 
+    // let payloadPipeIn <- mkBufferN(valueOf(PMTU_MAX_FRAG_NUM), pipeIn.payload);
     let payloadPipeIn <- mkBuffer(pipeIn.payload);
     let rdmaHeaderPipeOut <- mkDataStream2Header(
         pipeIn.headerAndMetaData.headerDataStream,
         pipeIn.headerAndMetaData.headerMetaData
     );
-/*
+
     rule debug if (!(
         payloadPipeIn.notEmpty            &&
         rdmaHeaderPipeOut.notEmpty        &&
@@ -280,7 +291,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         payloadOutputQ.notFull
     ));
         $display(
-            "time=%0t: mkInputRdmaPktBufAndHeaderValidation", $time,
+            "time=%0t: mkInputRdmaPktBufAndHeaderValidation debug", $time,
             ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
             ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
             ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
@@ -308,7 +319,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
         );
     endrule
-*/
+
     (* conflict_free = "recvPktFrag, \
                         preCheckHeader, \
                         discardInvalidFrag, \
@@ -489,11 +500,12 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     isResp
                 );
             end
-            // $display(
-            //     "time=%0t: checkQpMetaData", $time,
-            //     ", dqpn=%h, pdHandler=%h",
-            //     headerValidateInfo.dqpn, pdHandler
-            // );
+            $display(
+                "time=%0t: checkQpMetaData", $time,
+                ", dqpn=%h, pdHandler=%h, bth.psn=%h",
+                headerValidateInfo.dqpn, pdHandler, bth.psn,
+                ", bth.opcode=", fshow(bth.opcode)
+            );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
             // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
@@ -811,10 +823,10 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPayloadOutVec[qpIndex].enq(payloadFrag);
         end
-        // $display(
-        //     "time=%0t: 10th stage outputPayload", $time,
-        //     ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
-        // );
+        $display(
+            "time=%0t: 10th stage outputPayload", $time,
+            ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
+        );
     endrule
 
     rule outputHeaderMetaData;
@@ -827,7 +839,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
         end
-        // $display("time=%0t: final stage outputHeaderMetaData", $time);
+        $display("time=%0t: final stage outputHeaderMetaData", $time);
     endrule
 
     function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);
