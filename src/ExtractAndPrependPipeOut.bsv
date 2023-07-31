@@ -105,7 +105,7 @@ module mkDataStream2Header#(
     Reg#(HeaderByteNum) headerInvalidFragByteNumReg <- mkRegU;
     Reg#(HeaderBitNum)   headerInvalidFragBitNumReg <- mkRegU;
     Reg#(Bool)                              busyReg <- mkReg(False);
-
+/*
     rule debug if (!(
         dataPipeIn.notEmpty           &&
         headerMetaDataPipeIn.notEmpty &&
@@ -118,7 +118,7 @@ module mkDataStream2Header#(
             ", headerOutQ.notFull=", fshow(headerOutQ.notFull)
         );
     endrule
-
+*/
     rule popHeaderMetaData if (!busyReg);
         busyReg <= True;
         let headerMetaData = headerMetaDataPipeIn.first;

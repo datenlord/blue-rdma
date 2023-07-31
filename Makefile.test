@@ -1,7 +1,6 @@
 TESTDIR ?= $(abspath ../test)
 LOGDIR ?= $(abspath ../tmp)
 
-            # TestTransportLayer.bsv
 TESTBENCHS = \
             SimDma.bsv \
             SimExtractRdmaHeaderPayload.bsv \
@@ -19,6 +18,7 @@ TESTBENCHS = \
             TestRespHandleSQ.bsv \
             TestRetryHandleSQ.bsv \
             TestSpecialFIFOF.bsv \
+            TestTransportLayer.bsv \
             TestUtils.bsv \
             TestWorkCompGen.bsv
 
@@ -91,7 +91,8 @@ TestSpecialFIFOF.bsv             = mkTestCacheFIFO2 \
                                     mkTestScanFIFOF \
                                     mkTestSearchFIFOF \
                                     mkTestVectorSearch
-# TestTransportLayer.bsv           = mkTestTransportLayer
+TestTransportLayer.bsv           = mkTestTransportLayerNormalCase \
+                                    mkTestTransportLayerErrorCase
 TestUtils.bsv                    = mkTestSegmentDataStream \
                                     mkTestPsnFunc
 TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \

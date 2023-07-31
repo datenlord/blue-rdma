@@ -170,31 +170,38 @@ endmodule
 interface BramPipe#(type anytype);
     interface PipeOut#(anytype) pipeOut;
     method Action clear();
+    // method Bool notEmpty();
 endinterface
 
 module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
     BramPipe#(anytype)
 ) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) postBramQ <- mkFIFOF;
+
     mkConnection(toPut(postBramQ), toGet(bramQ));
+
     // return toPipeOut(postBramQ);
     interface pipeOut = toPipeOut(postBramQ);
     method Action clear();
         postBramQ.clear;
     endmethod
+    // method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
 endmodule
 
 module mkConnectPipeOut2BramQ#(
     PipeOut#(anytype) pipeIn, FIFOF#(anytype) bramQ
 )(BramPipe#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) postBramQ <- mkFIFOF;
+
     mkConnection(toPut(bramQ), toGet(pipeIn));
     mkConnection(toPut(postBramQ), toGet(bramQ));
+
     // return toPipeOut(postBramQ);
     interface pipeOut = toPipeOut(postBramQ);
     method Action clear();
         postBramQ.clear;
     endmethod
+    // method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
 endmodule
 
 function Bool isDiscardPayload(PayloadConInfo payloadConInfo);
@@ -204,10 +211,17 @@ function Bool isDiscardPayload(PayloadConInfo payloadConInfo);
     endcase;
 endfunction
 
+typedef enum {
+    PAYLOAD_GEN_NORMAL,
+    PAYLOAD_GEN_WAIT_LAST_FRAG,
+    PAYLOAD_GEN_WAIT_GRACEFUL_STOP
+    // PAYLOAD_GEN_ERR_FLUSH
+} PayloadGenState deriving(Bits, Eq, FShow);
+
 interface PayloadGenerator;
     interface Server#(PayloadGenReq, PayloadGenResp) srvPort;
     interface DataStreamPipeOut payloadDataStreamPipeOut;
-    // interface PipeOut#(PayloadGenResp) respPipeOut;
+    method Bool notGracefulStop();
 endinterface
 
 // If segment payload DataStream, then PayloadGenResp is sent
@@ -218,8 +232,360 @@ endinterface
 module mkPayloadGenerator#(
     CntrlStatus cntrlStatus,
     DmaReadCntrl dmaReadCntrl
-    // DmaReadSrv dmaReadSrv,
-    // PipeOut#(PayloadGenReq) payloadGenReqQ
+)(PayloadGenerator);
+    FIFOF#(PayloadGenReq)   payloadGenReqQ <- mkFIFOF;
+    FIFOF#(PayloadGenResp) payloadGenRespQ <- mkFIFOF;
+
+    // Pipeline FIFO
+    FIFOF#(Tuple3#(PayloadGenReq, ByteEn, PmtuFragNum)) pendingGenReqQ <- mkFIFOF;
+    FIFOF#(Tuple3#(Bool, Bool, PmtuFragNum)) pendingGenRespQ <- mkFIFOF;
+    FIFOF#(Tuple3#(DataStream, Bool, Bool)) payloadSegmentQ <- mkFIFOF;
+    // TODO: check payloadOutQ buffer size is enough for DMA read delay?
+    FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));
+    let bramQ2PipeOut <- mkConnectBramQ2PipeOut(payloadBufQ);
+    let payloadBufPipeOut = bramQ2PipeOut.pipeOut;
+    // let payloadBufPipeOut <- mkConnectBramQ2PipeOut(payloadBufQ);
+
+    Reg#(PmtuFragNum) pmtuFragCntReg <- mkRegU;
+    Reg#(Bool)     shouldSetFirstReg <- mkReg(False);
+    Reg#(Bool)      isFragCntZeroReg <- mkReg(False);
+    Reg#(Bool)     isRespLastFragReg <- mkReg(True);
+    Reg#(Bool)   hasDmaRespErrReg[2] <- mkCReg(2, False);
+    // Reg#(Bool)      isNormalStateReg <- mkReg(True);
+    Reg#(PayloadGenState) payloadGenStateReg <- mkReg(PAYLOAD_GEN_NORMAL);
+
+    let dmaReadSrv = dmaReadCntrl.srvPort;
+    let hasErrOccurred = (cntrlStatus.comm.isNonErr && hasDmaRespErrReg[1]) || cntrlStatus.comm.isERR;
+
+    // rule debug if (!(
+    //     payloadGenRespQ.notFull &&
+    //     pendingGenReqQ.notFull  &&
+    //     pendingGenRespQ.notFull &&
+    //     payloadSegmentQ.notFull &&
+    //     payloadBufQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debug", $time,
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+    //         ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+    //         ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+    //         ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+    //         ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+    //     );
+    // endrule
+
+    rule resetAndClear if (cntrlStatus.comm.isReset);
+        payloadGenReqQ.clear;
+        payloadGenRespQ.clear;
+
+        pendingGenReqQ.clear;
+        pendingGenRespQ.clear;
+        payloadSegmentQ.clear;
+        payloadBufQ.clear;
+
+        bramQ2PipeOut.clear;
+
+        shouldSetFirstReg <= False;
+        isFragCntZeroReg  <= False;
+        isRespLastFragReg <= True;
+
+        hasDmaRespErrReg[1]  <= False;
+        // isNormalStateReg  <= True;
+        payloadGenStateReg <= PAYLOAD_GEN_NORMAL;
+
+        // $display(
+        //     "time=%0t: reset and clear mkPayloadGenerator", $time,
+        //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
+        // );
+    endrule
+
+    // (* no_implicit_conditions, fire_when_enabled *)
+    rule startWaitLastFrag if (
+        hasErrOccurred && payloadGenStateReg == PAYLOAD_GEN_NORMAL
+    );
+        payloadGenStateReg <= PAYLOAD_GEN_WAIT_LAST_FRAG;
+        $display(
+            "time=%0t: startWaitLastFrag", $time,
+            ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
+            ", isRespLastFragReg=", fshow(isRespLastFragReg),
+            ", hasErrOccurred=", fshow(hasErrOccurred),
+            ", hasDmaRespErrReg[1]=", fshow(hasDmaRespErrReg[1]),
+            ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR)
+        );
+    endrule
+
+    // (* no_implicit_conditions, fire_when_enabled *)
+    rule startWaitGracefulStop if (
+        // isRespLastFragReg is True, which means either no PayloadGenReq at all,
+        // or PayloadGenerator has finished generating one RDMA packet.
+        hasErrOccurred && isRespLastFragReg &&
+        payloadGenStateReg == PAYLOAD_GEN_WAIT_LAST_FRAG
+    );
+        dmaReadCntrl.dmaCntrl.cancel;
+        payloadGenStateReg <= PAYLOAD_GEN_WAIT_GRACEFUL_STOP;
+        $display(
+            "time=%0t: startWaitGracefulStop", $time,
+            ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
+            ", isRespLastFragReg=", fshow(isRespLastFragReg),
+            ", hasErrOccurred=", fshow(hasErrOccurred),
+            ", hasDmaRespErrReg[1]=", fshow(hasDmaRespErrReg[1]),
+            ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR)
+        );
+    endrule
+
+    rule debugGracefulStop if (
+        payloadGenStateReg == PAYLOAD_GEN_WAIT_GRACEFUL_STOP
+    );
+        if (payloadBufPipeOut.notEmpty) begin
+            $display(
+                "time=%0t: debugGracefulStop", $time,
+                ", sqpn=%h", cntrlStatus.comm.getSQPN,
+                ", isSQ=", fshow(cntrlStatus.isSQ),
+                ", payloadBufPipeOut.first.isFirst=", fshow(payloadBufPipeOut.first.isFirst)
+            );
+        end
+        // else begin
+        //     $display(
+        //         "time=%0t: debugGracefulStop", $time,
+        //         ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //         ", isSQ=", fshow(cntrlStatus.isSQ),
+        //         ", payloadBufPipeOut.notEmpty=", fshow(payloadBufPipeOut.notEmpty)
+        //     );
+        // end
+
+        // let ts <- $time;
+        // if (ts > 200000) begin
+        //     $finish;
+        // end
+    endrule
+
+    rule recvPayloadGenReq if (
+        cntrlStatus.comm.isNonErr && payloadGenStateReg == PAYLOAD_GEN_NORMAL
+    );
+        let payloadGenReq = payloadGenReqQ.first;
+        payloadGenReqQ.deq;
+        immAssert(
+            !isZero(payloadGenReq.dmaReadReq.len),
+            "payloadGenReq.dmaReadReq.len assertion @ mkPayloadGenerator",
+            $format(
+                "payloadGenReq.dmaReadReq.len=%0d should not be zero",
+                payloadGenReq.dmaReadReq.len
+            )
+        );
+
+        let dmaLen = payloadGenReq.dmaReadReq.len;
+        let padCnt = calcPadCnt(dmaLen);
+        let lastFragValidByteNum = calcLastFragValidByteNum(dmaLen);
+        let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
+        let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
+        let pmtuFragNum = calcFragNumByPmtu(payloadGenReq.pmtu);
+        immAssert(
+            !isZero(lastFragValidByteNumWithPadding),
+            "lastFragValidByteNumWithPadding assertion @ mkPayloadGenerator",
+            $format(
+                "lastFragValidByteNumWithPadding=%0d should not be zero",
+                lastFragValidByteNumWithPadding,
+                ", dmaLen=%0d, lastFragValidByteNum=%0d, padCnt=%0d",
+                dmaLen, lastFragValidByteNum, padCnt
+            )
+        );
+
+        pendingGenReqQ.enq(tuple3(payloadGenReq, lastFragByteEnWithPadding, pmtuFragNum));
+        dmaReadSrv.request.put(payloadGenReq.dmaReadReq);
+        $display(
+            "time=%0t: recvPayloadGenReq, payloadGenReq=", $time, fshow(payloadGenReq)
+        );
+    endrule
+
+    rule lastFragAddPadding if (
+        (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR) &&
+        (payloadGenStateReg == PAYLOAD_GEN_NORMAL || payloadGenStateReg == PAYLOAD_GEN_WAIT_LAST_FRAG)
+        // (cntrlStatus.comm.isNonErr && payloadGenStateReg == PAYLOAD_GEN_NORMAL) ||
+        // ((cntrlStatus.comm.isERR || hasDmaRespErrReg[0]) && payloadGenStateReg == PAYLOAD_GEN_WAIT_LAST_FRAG)
+    );
+        let dmaReadResp <- dmaReadSrv.response.get;
+        let { payloadGenReq, lastFragByteEnWithPadding, pmtuFragNum } = pendingGenReqQ.first;
+
+        let curData = dmaReadResp.dataStream;
+        let isOrigFirstFrag = curData.isFirst;
+        let isOrigLastFrag  = curData.isLast;
+
+        if (isOrigLastFrag) begin
+            pendingGenReqQ.deq;
+
+            if (payloadGenReq.addPadding) begin
+                curData.byteEn = lastFragByteEnWithPadding;
+            end
+        end
+
+        // TODO: how to notify DmaReadResp error ASAP?
+        if (isOrigFirstFrag) begin
+            pendingGenRespQ.enq(tuple3(
+                payloadGenReq.segment,
+                payloadGenReq.addPadding,
+                pmtuFragNum
+            ));
+        end
+
+        // if (!hasDmaRespErrReg[0]) begin
+        //     hasDmaRespErrReg[0] <= dmaReadResp.isRespErr;
+        // end
+        hasDmaRespErrReg[0] <= hasDmaRespErrReg[0] || dmaReadResp.isRespErr;
+
+        // $display(
+        //     "time=%0t: lastFragAddPadding", $time,
+        //     ", payloadGenReq.addPadding=", fshow(payloadGenReq.addPadding),
+        //     ", isOrigFirstFrag=", fshow(isOrigFirstFrag),
+        //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
+        //     ", dmaReadResp=", fshow(dmaReadResp)
+        // );
+        payloadSegmentQ.enq(tuple3(curData, dmaReadResp.isRespErr, isOrigLastFrag));
+        // if (dmaReadResp.isRespErr) begin
+        //     $display(
+        //         "time=%0t:", $time, " dmaReadResp.isRespErr=", fshow(dmaReadResp.isRespErr)
+        //     );
+        // end
+    endrule
+
+    rule segmentPayload if (
+        (cntrlStatus.comm.isNonErr && !hasDmaRespErrReg[1] && payloadGenStateReg == PAYLOAD_GEN_NORMAL) ||
+        (hasErrOccurred && !isRespLastFragReg && payloadGenStateReg == PAYLOAD_GEN_WAIT_LAST_FRAG)
+    );
+        let { curData, hasDmaRespErr, isOrigLastFrag } = payloadSegmentQ.first;
+        payloadSegmentQ.deq;
+
+        let { shouldSegment, addPadding, pmtuFragNum } = pendingGenRespQ.first;
+        if (isOrigLastFrag) begin
+            pendingGenRespQ.deq;
+            // $display(
+            //     "time=%0t:", $time, " shouldSegment=", fshow(shouldSegment),
+            //     ", pmtuFragNum=%h", pmtuFragNum
+            // );
+        end
+
+        // isNormalStateReg <= !hasDmaRespErr;
+        if (shouldSegment) begin
+            if (shouldSetFirstReg || curData.isFirst) begin
+                curData.isFirst = True;
+                shouldSetFirstReg <= False;
+
+                // let nextPmtuFragCnt = pmtuFragNum - 2;
+                pmtuFragCntReg   <= pmtuFragNum - 2;
+                isFragCntZeroReg <= isTwo(pmtuFragNum);
+            end
+            else if (isFragCntZeroReg) begin
+                curData.isLast = True;
+                shouldSetFirstReg <= True;
+            end
+            else if (!curData.isLast) begin
+                // let nextPmtuFragCnt = pmtuFragCntReg - 1;
+                pmtuFragCntReg   <= pmtuFragCntReg - 1;
+                isFragCntZeroReg <= isOne(pmtuFragCntReg);
+            end
+        end
+        isRespLastFragReg <= curData.isLast;
+
+        // Every segmented payload has a payloadGenResp
+        // Must send payloadGenResp when curData.isLast,
+        // so as to make sure no DMA response error
+        if (curData.isLast || hasDmaRespErr) begin
+            let payloadGenResp = PayloadGenResp {
+                // initiator  : payloadGenReq.initiator,
+                addPadding : addPadding,
+                segment    : shouldSegment,
+                isRespErr  : hasDmaRespErr
+            };
+
+            payloadGenRespQ.enq(payloadGenResp);
+            // $display("time=%0t: payloadGenResp=", $time, fshow(payloadGenResp));
+        end
+
+        payloadBufQ.enq(curData);
+
+        $display(
+            "time=%0t: segmentPayload", $time,
+            ", qpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
+            ", shouldSegment=", fshow(shouldSegment),
+            ", pmtuFragNum=%0d, pmtuFragCntReg=%0d", pmtuFragNum, pmtuFragCntReg,
+            ", isOrigLastFrag=", fshow(isOrigLastFrag),
+            ", curData.isFirst=", fshow(curData.isFirst),
+            ", curData.isLast=", fshow(curData.isLast),
+            ", curData.data=%h, curData.byteEn=%h", curData.data, curData.byteEn
+        );
+        if (hasErrOccurred && isRespLastFragReg) begin
+            immFail(
+                "no payload out after last frag assertion @ mkPayloadGenerator",
+                $format(
+                    "hasErrOccurred=", fshow(hasErrOccurred),
+                    ", isRespLastFragReg=", fshow(isRespLastFragReg)
+                )
+            );
+        end
+    endrule
+
+    rule flushDmaReadResp if (hasErrOccurred && (
+        // payloadGenStateReg == PAYLOAD_GEN_ERR_FLUSH ||
+        payloadGenStateReg == PAYLOAD_GEN_WAIT_GRACEFUL_STOP
+    ));
+        let dmaReadResp <- dmaReadSrv.response.get;
+    endrule
+
+    rule flushReqQ if (hasErrOccurred && (
+        // payloadGenStateReg == PAYLOAD_GEN_ERR_FLUSH ||
+        payloadGenStateReg == PAYLOAD_GEN_WAIT_GRACEFUL_STOP
+    ));
+        payloadGenReqQ.clear;
+        // payloadGenReqQ.deq;
+    endrule
+
+    rule flushPipelineQ if (hasErrOccurred && (
+        // payloadGenStateReg == PAYLOAD_GEN_ERR_FLUSH ||
+        payloadGenStateReg == PAYLOAD_GEN_WAIT_GRACEFUL_STOP
+    ));
+        pendingGenReqQ.clear;
+        pendingGenRespQ.clear;
+        payloadSegmentQ.clear;
+    endrule
+
+    // rule flushRespQ if (hasErrOccurred && payloadGenStateReg == PAYLOAD_GEN_ERR_FLUSH);
+    //     // Response related queues cannot be cleared once isNormalStateReg is False,
+    //     // since some payload DataStream in payloadBufQ might be still under processing.
+    //     payloadGenRespQ.clear;
+    //     payloadBufQ.clear;
+    // endrule
+
+    interface srvPort = toGPServer(payloadGenReqQ, payloadGenRespQ);
+    interface payloadDataStreamPipeOut = payloadBufPipeOut; // toPipeOut(payloadBufQ);
+    method Bool notGracefulStop();
+        let notInWaitGracefulStopState = payloadGenStateReg != PAYLOAD_GEN_WAIT_GRACEFUL_STOP;
+        let hasPendingPayload = payloadBufPipeOut.notEmpty;
+        if (payloadBufPipeOut.notEmpty) begin
+            // If payloadBufPipeOut is notEmpty, it is graceful stop
+            // only when there are no pending request or response headers,
+            // which means the first of payloadBufPipeOut must be isFirst as true.
+            hasPendingPayload = !payloadBufPipeOut.first.isFirst;
+        end
+        return notInWaitGracefulStopState || hasPendingPayload;
+    endmethod
+endmodule
+/*
+interface PayloadGenerator;
+    interface Server#(PayloadGenReq, PayloadGenResp) srvPort;
+    interface DataStreamPipeOut payloadDataStreamPipeOut;
+endinterface
+
+// If segment payload DataStream, then PayloadGenResp is sent
+// at the last fragment of the segmented payload DataStream.
+// If not segment, then PayloadGenResp is sent at the first
+// fragment of the payload DataStream.
+// Flush DMA read responses when error
+module mkPayloadGenerator#(
+    CntrlStatus cntrlStatus,
+    DmaReadCntrl dmaReadCntrl
 )(PayloadGenerator);
     FIFOF#(PayloadGenReq)   payloadGenReqQ <- mkFIFOF;
     FIFOF#(PayloadGenResp) payloadGenRespQ <- mkFIFOF;
@@ -261,25 +627,25 @@ module mkPayloadGenerator#(
         //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
         // );
     endrule
-/*
-    rule debug if (!(
-        payloadGenRespQ.notFull &&
-        pendingGenReqQ.notFull  &&
-        pendingGenRespQ.notFull &&
-        payloadSegmentQ.notFull &&
-        payloadBufQ.notFull
-    ));
-        $display(
-            "time=%0t: mkPayloadGenerator debug", $time,
-            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
-            ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
-            ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
-            ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
-            ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
-        );
-    endrule
-*/
+
+    // rule debug if (!(
+    //     payloadGenRespQ.notFull &&
+    //     pendingGenReqQ.notFull  &&
+    //     pendingGenRespQ.notFull &&
+    //     payloadSegmentQ.notFull &&
+    //     payloadBufQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debug", $time,
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+    //         ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+    //         ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+    //         ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+    //         ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+    //     );
+    // endrule
+
     rule recvPayloadGenReq if (cntrlStatus.comm.isNonErr && isNormalStateReg);
         let payloadGenReq = payloadGenReqQ.first;
         payloadGenReqQ.deq;
@@ -446,7 +812,7 @@ module mkPayloadGenerator#(
     interface payloadDataStreamPipeOut = payloadBufPipeOut; // toPipeOut(payloadBufQ);
     // interface respPipeOut = toPipeOut(payloadGenRespQ);
 endmodule
-
+*/
 interface PayloadConsumer;
     interface PipeOut#(PayloadConResp) respPipeOut;
 endinterface
@@ -565,7 +931,9 @@ module mkPayloadConsumer#(
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
         countReqFragQ.enq(tuple2(consumeReq, isFragNumLessOrEqOne));
         $display(
-            "time=%0t: recvReq", $time,
+            "time=%0t: PayloadConsumer recvReq", $time,
+            ", qpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
             ", consumeReq=", fshow(consumeReq)
         );
     endrule
@@ -594,14 +962,14 @@ module mkPayloadConsumer#(
         pendingConReqQ.enq(tuple4(
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFragReg, isLastReqFrag
         ));
-        // $display(
-        //     "time=%0t: countReqFrag", $time,
-        //     ", consumeReq.fragNum=%0d", consumeReq.fragNum,
-        //     ", remainingFragNumReg=%0d", remainingFragNumReg,
-        //     ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
-        //     ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
-        //     ", isLastReqFrag=", fshow(isLastReqFrag)
-        // );
+        $display(
+            "time=%0t: countReqFrag", $time,
+            ", consumeReq.fragNum=%0d", consumeReq.fragNum,
+            ", remainingFragNumReg=%0d", remainingFragNumReg,
+            ", isRemainingFragNumZeroReg=", fshow(isRemainingFragNumZeroReg),
+            ", isFirstOrOnlyFragReg=", fshow(isFirstOrOnlyFragReg),
+            ", isLastReqFrag=", fshow(isLastReqFrag)
+        );
     endrule
 
     rule consumePayload if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
@@ -641,6 +1009,8 @@ module mkPayloadConsumer#(
                             " for discard consumeReq=", fshow(consumeReq.consumeInfo)
                         )
                     );
+
+                    // $display("time=%0t: consumePayload, discard payload done", $time);
                 end
             end
             tagged AtomicRespInfoAndPayload .atomicRespInfo: begin
@@ -671,14 +1041,14 @@ module mkPayloadConsumer#(
                     //     $time, consumeReq.fragNum
                     // );
                 end
-                $display(
-                    "time=%0t: SendWriteReqReadRespInfo", $time,
-                    ", consumeReq=", fshow(consumeReq),
-                    ", isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
-                    ", isLastReqFrag=", fshow(isLastReqFrag),
-                    ", payload.isFirst=", fshow(payload.isFirst),
-                    ", payload.isLast=", fshow(payload.isLast)
-                );
+                // $display(
+                //     "time=%0t: SendWriteReqReadRespInfo", $time,
+                //     ", consumeReq=", fshow(consumeReq),
+                //     ", isFirstOrOnlyFrag=", fshow(isFirstOrOnlyFrag),
+                //     ", isLastReqFrag=", fshow(isLastReqFrag),
+                //     ", payload.isFirst=", fshow(payload.isFirst),
+                //     ", payload.isLast=", fshow(payload.isLast)
+                // );
 
                 if (isFirstOrOnlyFrag) begin
                     immAssert(

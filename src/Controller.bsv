@@ -44,6 +44,10 @@ function FlagsType#(QpAttrMaskFlag) getRtr2RtsRequiredAttr();
     return requiredFlags;
 endfunction
 
+function FlagsType#(QpAttrMaskFlag) getOnlyStateRequiredAttr();
+    return enum2Flag(IBV_QP_STATE);
+endfunction
+
 typedef Bit#(1) Epoch;
 
 typedef enum {
@@ -162,7 +166,7 @@ interface CntrlQP;
 
     method Action setStateErr();
     method Action errFlushDone();
-    method Action setStateReset();
+    // method Action setStateReset();
 
     // method StateQP getQPS();
     // method Bool isERR();
@@ -222,8 +226,8 @@ module mkCntrlQP(CntrlQP);
 
     Reg#(Bool)     errFlushDoneReg <- mkRegU;
     Reg#(Bool)   setStateErrReg[2] <- mkCReg(2, False);
-    Reg#(Bool) setStateResetReg[2] <- mkCReg(2, False);
     Reg#(Bool)     qpDestroyReg[2] <- mkCReg(2, False);
+    // Reg#(Bool) setStateResetReg[2] <- mkCReg(2, False);
 
     Reg#(Maybe#(StateQP)) nextStateReg[2] <- mkCReg(2, tagged Invalid);
 
@@ -388,7 +392,6 @@ module mkCntrlQP(CntrlQP);
         epsnReg[1] <= epsn;
     endrule
 
-    // rule onCreate if (stateReg == IBV_QPS_UNKNOWN);
     rule onReset if (stateReg == IBV_QPS_RESET);
         let qpReq = reqQ.first;
         reqQ.deq;
@@ -414,13 +417,12 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onReset qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onReset", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", successOrNot=", fshow(qpResp.successOrNot)
         // );
     endrule
 
-    // rule onReset if (stateReg == IBV_QPS_RESET);
     rule onCreate if (stateReg == IBV_QPS_CREATE);
         let qpReq = reqQ.first;
         reqQ.deq;
@@ -445,12 +447,19 @@ module mkCntrlQP(CntrlQP);
             //     sqSigAllReg <= qpReq.qpInitAttr.sqSigAll;
             // end
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                immFail(
+                    "no QP destroy on create @ mkCntrlQP",
+                    $format(
+                        "request QPN=%h", qpReq.qpn,
+                        ", qpReqType=", fshow(qpReq.qpReqType)
+                    )
+                );
             end
             REQ_QP_MODIFY: begin
                 qpResp.successOrNot =
                     // stateReg == IBV_QPS_RESET             &&
-                    qpReq.qpAttr.qpState == IBV_QPS_INIT  &&
+                    qpReq.qpAttr.qpState == IBV_QPS_INIT &&
                     containFlags(qpReq.qpAttrMask, getReset2InitRequiredAttr);
 
                 if (qpResp.successOrNot) begin
@@ -467,7 +476,7 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
@@ -475,8 +484,8 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onCreate qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onCreate", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", qpReq.qpAttr.qpState=", fshow(qpReq.qpAttr.qpState),
         //     ", qpReq.qpAttrMask=", fshow(qpReq.qpAttrMask),
         //     ", getReset2InitRequiredAttr=", fshow(getReset2InitRequiredAttr),
@@ -498,7 +507,14 @@ module mkCntrlQP(CntrlQP);
 
         case (qpReq.qpReqType)
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                immFail(
+                    "no QP destroy on init @ mkCntrlQP",
+                    $format(
+                        "request QPN=%h", qpReq.qpn,
+                        ", qpReqType=", fshow(qpReq.qpReqType)
+                    )
+                );
             end
             REQ_QP_MODIFY: begin
                 qpResp.successOrNot =
@@ -524,7 +540,7 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
@@ -532,8 +548,8 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onINIT qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onINIT", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", qpReq.qpAttr.qpState=", fshow(qpReq.qpAttr.qpState),
         //     ", qpReq.qpAttrMask=", fshow(qpReq.qpAttrMask),
         //     ", getInit2RtrRequiredAttr=", fshow(getInit2RtrRequiredAttr),
@@ -555,12 +571,23 @@ module mkCntrlQP(CntrlQP);
 
         case (qpReq.qpReqType)
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                immFail(
+                    "no QP destroy on RTR @ mkCntrlQP",
+                    $format(
+                        "request QPN=%h", qpReq.qpn,
+                        ", qpReqType=", fshow(qpReq.qpReqType)
+                    )
+                );
             end
             REQ_QP_MODIFY: begin
-                qpResp.successOrNot =
-                    qpReq.qpAttr.qpState == IBV_QPS_RTS &&
-                    containFlags(qpReq.qpAttrMask, getRtr2RtsRequiredAttr);
+                qpResp.successOrNot = (
+                        qpReq.qpAttr.qpState == IBV_QPS_ERR &&
+                        containFlags(qpReq.qpAttrMask, getOnlyStateRequiredAttr)
+                    ) || (
+                        qpReq.qpAttr.qpState == IBV_QPS_RTS &&
+                        containFlags(qpReq.qpAttrMask, getRtr2RtsRequiredAttr)
+                    );
 
                 if (qpResp.successOrNot) begin
                     nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
@@ -588,7 +615,7 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
@@ -596,8 +623,8 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onRTR qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onRTR", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", qpReq.qpAttr.qpState=", fshow(qpReq.qpAttr.qpState),
         //     ", qpReq.qpAttrMask=", fshow(qpReq.qpAttrMask),
         //     ", getRtr2RtsRequiredAttr=", fshow(getRtr2RtsRequiredAttr),
@@ -619,10 +646,20 @@ module mkCntrlQP(CntrlQP);
 
         case (qpReq.qpReqType)
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                immFail(
+                    "no QP destroy on RTS @ mkCntrlQP",
+                    $format(
+                        "request QPN=%h", qpReq.qpn,
+                        ", qpReqType=", fshow(qpReq.qpReqType)
+                    )
+                );
             end
             REQ_QP_MODIFY: begin
-                qpResp.successOrNot = qpReq.qpAttr.qpState == IBV_QPS_SQD;
+                qpResp.successOrNot = (
+                        qpReq.qpAttr.qpState == IBV_QPS_SQD ||
+                        qpReq.qpAttr.qpState == IBV_QPS_ERR
+                    ) && containFlags(qpReq.qpAttrMask, getOnlyStateRequiredAttr);
 
                 if (qpResp.successOrNot) begin
                     nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
@@ -651,7 +688,7 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
@@ -659,8 +696,8 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onRTS qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onRTS", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", successOrNot=", fshow(qpResp.successOrNot)
         // );
     endrule
@@ -679,10 +716,20 @@ module mkCntrlQP(CntrlQP);
 
         case (qpReq.qpReqType)
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                immFail(
+                    "no QP destroy on SQD @ mkCntrlQP",
+                    $format(
+                        "request QPN=%h", qpReq.qpn,
+                        ", qpReqType=", fshow(qpReq.qpReqType)
+                    )
+                );
             end
             REQ_QP_MODIFY: begin
-                qpResp.successOrNot = qpReq.qpAttr.qpState == IBV_QPS_RTS;
+                qpResp.successOrNot = (
+                        qpReq.qpAttr.qpState == IBV_QPS_ERR ||
+                        qpReq.qpAttr.qpState == IBV_QPS_RTS
+                    ) && containFlags(qpReq.qpAttrMask, getOnlyStateRequiredAttr);
 
                 if (qpResp.successOrNot) begin
                     nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
@@ -711,7 +758,7 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
@@ -719,13 +766,13 @@ module mkCntrlQP(CntrlQP);
 
         respQ.enq(qpResp);
         // $display(
-        //     "time=%0t:", $time,
-        //     " onSQD qpReq.qpn=%h", qpReq.qpn,
+        //     "time=%0t: onSQD", $time,
+        //     ", qpReq.qpn=%h", qpReq.qpn,
         //     ", successOrNot=", fshow(qpResp.successOrNot)
         // );
     endrule
 
-    rule onERR if (stateReg == IBV_QPS_ERR);
+    rule onERR if (stateReg == IBV_QPS_ERR && errFlushDoneReg);
         let qpReq = reqQ.first;
         reqQ.deq;
 
@@ -739,15 +786,19 @@ module mkCntrlQP(CntrlQP);
 
         case (qpReq.qpReqType)
             REQ_QP_DESTROY: begin
-                nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                // TODO: only destroy QP when error, this is too rigid
+                // nextStateReg[0] <= tagged Valid IBV_QPS_UNKNOWN;
+                nextStateReg[0] <= tagged Valid IBV_QPS_RESET;
             end
-            // REQ_QP_MODIFY: begin
-            //     qpResp.successOrNot = qpReq.qpAttr.qpState == IBV_QPS_RESET;
+            REQ_QP_MODIFY: begin
+                qpResp.successOrNot =
+                    qpReq.qpAttr.qpState == IBV_QPS_RESET &&
+                    containFlags(qpReq.qpAttrMask, getOnlyStateRequiredAttr);
 
-            //     if (qpResp.successOrNot) begin
-            //         nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
-            //     end
-            // end
+                if (qpResp.successOrNot) begin
+                    nextStateReg[0]  <= tagged Valid qpReq.qpAttr.qpState;
+                end
+            end
             REQ_QP_QUERY : begin
                 qpResp.qpAttr.curQpState = stateReg;
             end
@@ -756,30 +807,24 @@ module mkCntrlQP(CntrlQP);
                     "unreachible case @ mkCntrlQP",
                     $format(
                         "request QPN=%h", qpReq.qpn,
-                        "qpReqType=", fshow(qpReq.qpReqType)
+                        ", qpReqType=", fshow(qpReq.qpReqType)
                     )
                 );
             end
         endcase
 
         respQ.enq(qpResp);
-        // $display(
-        //     "time=%0t:", $time,
-        //     " onERR qpReq.qpn=%h", qpReq.qpn,
-        //     // ", qpReq=", fshow(qpReq),
-        //     // ", qpResp=", fshow(qpResp),
-        //     ", successOrNot=", fshow(qpResp.successOrNot)
-        // );
+        $display(
+            "time=%0t: onERR", $time,
+            ", qpReq.qpn=%h", qpReq.qpn,
+            // ", qpReq=", fshow(qpReq),
+            // ", qpResp=", fshow(qpResp),
+            ", successOrNot=", fshow(qpResp.successOrNot)
+        );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule canonicalize;
-        // immAssert(
-        //     stateReg != IBV_QPS_UNKNOWN,
-        //     "unknown state assertion @ mkCntrlQP",
-        //     $format("stateReg=", fshow(stateReg), " should not be IBV_QPS_UNKNOWN")
-        // );
-
         let nextState = stateReg;
         if (nextStateReg[1] matches tagged Valid .setState) begin
             nextState = setState;
@@ -790,7 +835,7 @@ module mkCntrlQP(CntrlQP);
             //     ", nextState=", fshow(nextState)
             // );
         end
-
+/*
         // IBV_QPS_UNKNOWN and IBV_QPS_RESET has higher priority than IBV_QPS_ERR,
         // IBV_QPS_ERR has higher priority than other states.
         if (stateReg == IBV_QPS_UNKNOWN && setStateResetReg[1]) begin
@@ -807,7 +852,6 @@ module mkCntrlQP(CntrlQP);
             // TODO: check destroy QP response is consumed before clear
             respQ.clear;
         end
-        // if (nextState != IBV_QPS_UNKNOWN && nextState != IBV_QPS_RESET && setStateErrReg[1]) begin
         else if (nextState != IBV_QPS_UNKNOWN && setStateErrReg[1]) begin
             nextState = IBV_QPS_ERR;
             // $display(
@@ -817,11 +861,26 @@ module mkCntrlQP(CntrlQP);
             //     ", nextState=", fshow(nextState)
             // );
         end
+*/
+        if (setStateErrReg[1]) begin
+            nextState = IBV_QPS_ERR;
+            // TODO: never clear reqQ and respQ
+            // reqQ.clear;
+            // respQ.clear;
+            immAssert(
+                stateReg != IBV_QPS_UNKNOWN && stateReg != IBV_QPS_RESET,
+                "set state error assertion @ mkCntrlQP",
+                $format(
+                    "stateReg=", fshow(stateReg),
+                    " should not be IBV_QPS_UNKNOWN or IBV_QPS_RESET"
+                )
+            );
+        end
 
-        stateReg            <= nextState;
-        nextStateReg[1]     <= tagged Invalid;
-        setStateErrReg[1]   <= False;
-        setStateResetReg[1] <= False;
+        stateReg          <= nextState;
+        nextStateReg[1]   <= tagged Invalid;
+        setStateErrReg[1] <= False;
+        // setStateResetReg[1] <= False;
     endrule
 
     function getCntrlCommStatus();
@@ -885,9 +944,9 @@ module mkCntrlQP(CntrlQP);
     method Action errFlushDone if (inited && stateReg == IBV_QPS_ERR && !errFlushDoneReg);
         errFlushDoneReg <= True;
     endmethod
-    method Action setStateReset() if (stateReg == IBV_QPS_UNKNOWN);
-        setStateResetReg[0] <= True;
-    endmethod
+    // method Action setStateReset() if (stateReg == IBV_QPS_UNKNOWN);
+    //     setStateResetReg[0] <= True;
+    // endmethod
 
     interface srvPort = toGPServer(reqQ, respQ);
 

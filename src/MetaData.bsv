@@ -605,19 +605,20 @@ module mkPermCheckSrv#(MetaDataPDs pdMetaData)(PermCheckSrv);
                 );
 
                 stepOneResult = keyMatch && accTypeMatch;
-                // $display(
-                //     "time=%0t: checkReqStepOne", $time,
-                //     ", stepOneResult=", fshow(stepOneResult),
-                //     ", keyMatch=", fshow(keyMatch),
-                //     ", permCheckReq.localOrRmtKey=", fshow(permCheckReq.localOrRmtKey),
-                //     ", permCheckReq.lkey=", fshow(permCheckReq.lkey),
-                //     ", permCheckReq.rkey=", fshow(permCheckReq.rkey),
-                //     ", mr.lkeyPart=", fshow(mr.lkeyPart),
-                //     ", mr.rkeyPart=", fshow(mr.rkeyPart),
-                //     ", accTypeMatch=", fshow(accTypeMatch),
-                //     ", permCheckReq.accFlags=", fshow(permCheckReq.accFlags),
-                //     ", mr.accFlags=", fshow(mr.accFlags)
-                // );
+                $display(
+                    "time=%0t: checkReqStepOne", $time,
+                    ", stepOneResult=", fshow(stepOneResult),
+                    ", permCheckReq.pdHandler=%h", permCheckReq.pdHandler,
+                    ", keyMatch=", fshow(keyMatch),
+                    ", permCheckReq.localOrRmtKey=", fshow(permCheckReq.localOrRmtKey),
+                    ", permCheckReq.lkey=", fshow(permCheckReq.lkey),
+                    ", permCheckReq.rkey=", fshow(permCheckReq.rkey),
+                    ", mr.lkeyPart=", fshow(mr.lkeyPart),
+                    ", mr.rkeyPart=", fshow(mr.rkeyPart),
+                    ", accTypeMatch=", fshow(accTypeMatch),
+                    ", permCheckReq.accFlags=", fshow(permCheckReq.accFlags),
+                    ", mr.accFlags=", fshow(mr.accFlags)
+                );
             end
         end
 

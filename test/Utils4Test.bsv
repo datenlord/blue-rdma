@@ -1100,6 +1100,11 @@ module mkCntrlStateCycle#(
 
         cntrlSrvPort.request.put(qpInitReq);
         simCntrlStateReg <= SIM_CNTRL_SET_QP_RTR;
+        // $display(
+        //     "time=%0t: qpCreateResp=", $time, fshow(qpCreateResp),
+        //     " should be success, and qpCreateResp.qpn=%h",
+        //     qpCreateResp.qpn
+        // );
     endrule
 
     rule setRTR if (simCntrlStateReg == SIM_CNTRL_SET_QP_RTR);
@@ -1128,6 +1133,11 @@ module mkCntrlStateCycle#(
 
         cntrlSrvPort.request.put(qpModifyReq);
         simCntrlStateReg <= SIM_CNTRL_SET_QP_RTS;
+        // $display(
+        //     "time=%0t: qpInitResp=", $time, fshow(qpInitResp),
+        //     " should be success, and qpInitResp.qpn=%h",
+        //     qpInitResp.qpn
+        // );
     endrule
 
     rule setRTS if (simCntrlStateReg == SIM_CNTRL_SET_QP_RTS);
@@ -1157,6 +1167,11 @@ module mkCntrlStateCycle#(
 
         cntrlSrvPort.request.put(qpModifyReq);
         simCntrlStateReg <= SIM_CNTRL_CHECK_RTS_RESP;
+        // $display(
+        //     "time=%0t: qpRtrResp=", $time, fshow(qpRtrResp),
+        //     " should be success, and qpRtrResp.qpn=%h",
+        //     qpRtrResp.qpn
+        // );
     endrule
 
     rule checkRtsResp if (simCntrlStateReg == SIM_CNTRL_CHECK_RTS_RESP);
@@ -1224,35 +1239,19 @@ module mkCntrlStateCycle#(
         );
 
         immAssert(
-            cntrlStatus.comm.isUnknown,
-            "cntrlStatus.comm.isUnknown assertion @ mkCntrlStateCycle",
+            cntrlStatus.comm.isReset,
+            "cntrlStatus.comm.isReset assertion @ mkCntrlStateCycle",
             $format(
-                "cntrlStatus.comm.isUnknown=", fshow(cntrlStatus.comm.isUnknown),
+                "cntrlStatus.comm.isReset=", fshow(cntrlStatus.comm.isReset),
                 " should be true when qpDestroyResp=", fshow(qpDestroyResp)
             )
         );
 
-        simCntrlStateReg <= SIM_CNTRL_WAIT_RESET;
+        simCntrlStateReg <= SIM_CNTRL_CREATE_QP;
         // $display(
         //     "time=%0t: qpDestroyResp=", $time, fshow(qpDestroyResp),
         //     " should be success, and qpDestroyResp.qpn=%h",
         //     qpDestroyResp.qpn
-        // );
-    endrule
-
-    rule waitReset if (simCntrlStateReg == SIM_CNTRL_WAIT_RESET);
-        if (cntrlStatus.comm.isReset) begin
-            simCntrlStateReg <= SIM_CNTRL_CREATE_QP;
-            // $display(
-            //     "time=%0t: waitReset", $time,
-            //     ", cntrlStatus.comm.isReset=", fshow(cntrlStatus.comm.isReset)
-            // );
-        end
-        // $display(
-        //     "time=%0t: waitReset", $time,
-        //     ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
-        //     ", cntrlStatus.comm.isReset=", fshow(cntrlStatus.comm.isReset),
-        //     ", cntrlStatus.comm.isUnknown=", fshow(cntrlStatus.comm.isUnknown)
         // );
     endrule
 endmodule
@@ -1556,7 +1555,7 @@ endmodule
 
 module mkActionValueFunc2Pipe#(
     function ActionValue#(tb) avfn(ta inputVal), PipeOut#(ta) pipeIn
-)(PipeOut #(tb)) provisos(Bits #(ta, taSz), Bits #(tb, tbSz));
+)(PipeOut #(tb)) provisos(Bits#(ta, taSz), Bits#(tb, tbSz));
     // let resultPipeOut <- mkTap(avfn, pipeIn); // No delay
     let resultPipeOut <- mkAVFn_to_Pipe(avfn, pipeIn); // One cycle delay
     return resultPipeOut;
@@ -1570,7 +1569,7 @@ endmodule
 module mkPipeFilter#(
     function Bool filterFunc(anytype inputVal),
     PipeOut#(anytype) pipeIn
-)(PipeOut#(anytype)) provisos(Bits #(anytype, anysize));
+)(PipeOut#(anytype)) provisos(Bits#(anytype, anysize));
     FIFOF#(anytype) outQ <- mkFIFOF;
 
     rule filter;
@@ -1583,6 +1582,32 @@ module mkPipeFilter#(
     return toPipeOut(outQ);
 endmodule
 
+module mkVector2PipeOut#(
+    Vector#(vSz, anytype) inVec, Bool isVecValid
+)(PipeOut#(anytype)) provisos(
+    FShow#(anytype),
+    Bits#(anytype, anysize)
+);
+    Count#(Bit#(TLog#(vSz))) idxCnt <- mkCount(fromInteger(valueOf(vSz) - 1));
+
+    method anytype first() = inVec[idxCnt];
+    method Bool notEmpty() = isVecValid;
+    method Action deq();
+        if (isZero(idxCnt)) begin
+            idxCnt <= fromInteger(valueOf(vSz) - 1);
+        end
+        else begin
+            idxCnt.decr(1);
+        end
+        $display(
+            "time=%0t: mkVector2PipeOut deq", $time,
+            ", vSz=%0d, idxCnt=%0d", valueOf(vSz), idxCnt,
+            ", isVecValid=", fshow(isVecValid),
+            ", first=", fshow(inVec[idxCnt])
+        );
+    endmethod
+endmodule
+
 module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));
     rule drain;
         pipeIn.deq;
@@ -1593,14 +1618,48 @@ module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));
     endrule
 endmodule
 
-module mkDebugConnection#(
-    Get#(anytype) getIn, Put#(anytype) putOut
-)(Empty) provisos(FShow#(anytype));
-    rule connect;
+module mkConnectionWhen#(
+    Get#(anytype) getIn, Put#(anytype) putOut, Bool condition
+)(Empty) provisos(Bits#(anytype, anysize));
+    rule connect if (condition);
         let data <- getIn.get;
         putOut.put(data);
         $display(
-            "time=%0t: mkDebugConnection debug", $time,
-            ", data=", fshow(data));
+            "time=%0t: mkConnectionWhen connect", $time,
+            ", condition=", fshow(condition)
+        );
+    endrule
+endmodule
+
+module mkDebugConnection#(
+    Get#(anytype) getIn, Put#(anytype) putOut
+)(Empty) provisos(
+    FShow#(anytype),
+    Bits#(anytype, anysize),
+    Bits#(DataStream, anysize)
+);
+    Reg#(BTH) bthReg <- mkRegU;
+
+    rule connect;
+        let data <- getIn.get;
+        putOut.put(data);
+
+        DataStream dataStream = unpack(pack(data));
+        let bth = extractBTH(zeroExtendLSB(dataStream.data));
+        if (dataStream.isFirst) begin
+            bthReg <= bth;
+            $display(
+                "time=%0t: mkDebugConnection debug", $time,
+                ", bth=", fshow(bth),
+                ", data=", fshow(data)
+            );
+        end
+        else if (dataStream.isLast) begin
+            $display(
+                "time=%0t: mkDebugConnection debug", $time,
+                ", bth=", fshow(bthReg),
+                ", data=", fshow(data)
+            );
+        end
     endrule
 endmodule

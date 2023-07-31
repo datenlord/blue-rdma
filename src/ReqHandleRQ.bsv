@@ -423,6 +423,7 @@ interface ReqHandleRQ;
     interface PipeOut#(PayloadConReq) payloadConReqPipeOut;
     interface DataStreamPipeOut rdmaRespDataStreamPipeOut;
     interface PipeOut#(WorkCompGenReqRQ) workCompGenReqPipeOut;
+    method Bool respHeaderOutNotEmpty();
 endinterface
 
 module mkReqHandleRQ#(
@@ -438,7 +439,7 @@ module mkReqHandleRQ#(
     FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
     // FIFOF#(PayloadGenReq)     payloadGenReqOutQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqRQ) workCompGenReqOutQ <- mkFIFOF;
-    FIFOF#(RdmaHeader)                  headerQ <- mkFIFOF;
+    FIFOF#(RdmaHeader)           respHeaderOutQ <- mkFIFOF;
 
     // Pipeline FIFO
     // TODO: add more buffer after 0th stage
@@ -514,7 +515,7 @@ module mkReqHandleRQ#(
     //     cntrlStatus, dmaReadSrv, toPipeOut(payloadGenReqOutQ)
     // );
     let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
-        toPipeOut(headerQ)
+        toPipeOut(respHeaderOutQ)
     );
     let rdmaRespPipeOut <- mkPrependHeader2PipeOut(
         headerDataStreamAndMetaDataPipeOut.headerDataStream,
@@ -536,7 +537,7 @@ module mkReqHandleRQ#(
         payloadConReqOutQ.clear;
         // payloadGenReqOutQ.clear;
         workCompGenReqOutQ.clear;
-        headerQ.clear;
+        respHeaderOutQ.clear;
 
         // clearRetryRelatedPipelineQ;
         supportedReqOpCodeCheckQ.clear;
@@ -2007,6 +2008,14 @@ module mkReqHandleRQ#(
                 curDmaWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
                 payloadConReqOutQ
             );
+            $display(
+                "time=%0t:", $time,
+                " issuePayloadConReqOrDiscard discard payload",
+                ", bth.opcode=", fshow(bth.opcode),
+                ", bth.psn=%h, dqpn=%h, pktFragNum=%0d, pktPayloadLen=%0d",
+                bth.psn, cntrlStatus.comm.getSQPN,
+                pktMetaData.pktFragNum, pktMetaData.pktPayloadLen
+            );
         end
 
         // Set internal error state if any error request status,
@@ -3005,7 +3014,7 @@ module mkReqHandleRQ#(
                 );
 
                 if (maybeFirstOrOnlyHeader matches tagged Valid .firstOrOnlyHeader) begin
-                    headerQ.enq(firstOrOnlyHeader);
+                    respHeaderOutQ.enq(firstOrOnlyHeader);
                     // $display(
                     //     "time=%0t: generate first or only response header", $time,
                     //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
@@ -3103,7 +3112,7 @@ module mkReqHandleRQ#(
                 );
 
                 if (maybeMiddleOrLastHeader matches tagged Valid .middleOrLastHeader) begin
-                    headerQ.enq(middleOrLastHeader);
+                    respHeaderOutQ.enq(middleOrLastHeader);
                     // $display(
                     //     "time=%0t: generate middle or last response header", $time,
                     //     ", respPSN=%h", respPSN,
@@ -3116,17 +3125,17 @@ module mkReqHandleRQ#(
         workCompReqQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        $display(
-            "time=%0t: 31st stage genRespPkt, bth.opcode=", $time, fshow(bth.opcode),
-            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-            ", respPSN=%h", respPSN,
-            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-            ", hasReqStatusErr=", fshow(hasReqStatusErr),
-            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-            ", hasErrRespGen=", fshow(hasErrRespGen),
-            ", reqStatus=", fshow(reqStatus)
-        );
+        // $display(
+        //     "time=%0t: 31st stage genRespPkt, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+        //     ", respPSN=%h", respPSN,
+        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
+        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+        //     ", hasErrRespGen=", fshow(hasErrRespGen),
+        //     ", reqStatus=", fshow(reqStatus)
+        // );
     endrule
 
     // This rule still runs at retry or error state
@@ -3202,18 +3211,21 @@ module mkReqHandleRQ#(
             // Wait for send/write request DMA write responses and generate WC if needed
             workCompGenReqOutQ.enq(workCompReq);
         end
-        $display(
-            "time=%0t: 32nd stage genWorkCompRQ, bth.opcode=", $time, fshow(bth.opcode),
-            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-            ", immDt=%h, ieth=%h", immDt, ieth,
-            ", hasImmDt=", fshow(hasImmDt),
-            ", hasIETH=", fshow(hasIETH),
-            ", reqStatus=", fshow(reqStatus)
-        );
+        // $display(
+        //     "time=%0t: 32nd stage genWorkCompRQ, bth.opcode=", $time, fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+        //     ", immDt=%h, ieth=%h", immDt, ieth,
+        //     ", hasImmDt=", fshow(hasImmDt),
+        //     ", hasIETH=", fshow(hasIETH),
+        //     ", reqStatus=", fshow(reqStatus)
+        // );
     endrule
 
     (* fire_when_enabled *)
-    rule errFlushRecvReq if (inErrorState && recvReqBuf.notEmpty);
+    rule errFlushRecvReq if (
+        inErrorState && recvReqBuf.notEmpty && !pktMetaDataPipeIn.notEmpty
+        // inErrorState && recvReqBuf.notEmpty
+    );
         let recvReq = recvReqBuf.first;
         recvReqBuf.deq;
         let maybeRecvReq = tagged Valid recvReq;
@@ -3288,7 +3300,8 @@ module mkReqHandleRQ#(
 
     (* fire_when_enabled *)
     rule errFlushIncomingReq if (
-        inErrorState && !recvReqBuf.notEmpty && pktMetaDataPipeIn.notEmpty
+        inErrorState && pktMetaDataPipeIn.notEmpty
+        // inErrorState && !recvReqBuf.notEmpty && pktMetaDataPipeIn.notEmpty
     );
         let curPktMetaData = pktMetaDataPipeIn.first;
         pktMetaDataPipeIn.deq;
@@ -3332,7 +3345,8 @@ module mkReqHandleRQ#(
         $display(
             "time=%0t:", $time,
             " 1st error flush incoming request stage, bth.opcode=", fshow(bth.opcode),
-            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", bth.psn=%h, dqpn=%h", bth.psn, cntrlStatus.comm.getSQPN,
+            ", bth.ackReq=", fshow(bth.ackReq),
             ", reqStatus=", fshow(reqStatus)
         );
     endrule
@@ -3440,4 +3454,5 @@ module mkReqHandleRQ#(
     // interface payloadGenReqPipeOut      = toPipeOut(payloadGenReqOutQ);
     interface rdmaRespDataStreamPipeOut = rdmaRespPipeOut;
     interface workCompGenReqPipeOut     = toPipeOut(workCompGenReqOutQ);
+    method Bool respHeaderOutNotEmpty() = respHeaderOutQ.notEmpty;
 endmodule
