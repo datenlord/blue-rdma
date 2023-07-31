@@ -365,7 +365,7 @@ module mkPipeOutArbiter#(
     Vector#(portSz, PipeOut#(anytype)) inputPipeOutVec,
     function Bool isPipePayloadFinished(anytype pipePayload)
 )(PipeOut#(anytype)) provisos(
-    // FShow#(anytype),
+    FShow#(anytype),
     Bits#(anytype, tSz),
     Add#(TLog#(portSz), 1, TLog#(TAdd#(1, portSz))) // portSz must be power of 2
 );
@@ -375,9 +375,28 @@ module mkPipeOutArbiter#(
     let resultPipeOut <- mkBinaryPipeOutArbiterTree(
         leafArbiterVec, isPipePayloadFinished
     );
+/*
+    rule debug;
+        for (Integer idx = 0; idx < valueOf(portSz); idx = idx + 1) begin
+            let pipeHasOutput = inputPipeOutVec[idx].notEmpty;
+            $display(
+                "time=%0t: mkPipeOutArbiter", $time,
+                " inputPipeOutVec[idx=%0d].notEmpty=",
+                idx, fshow(pipeHasOutput)
+            );
+            if (pipeHasOutput) begin
+                $display(
+                    "time=%0t: mkPipeOutArbiter", $time,
+                    " inputPipeOutVec[idx=%0d].first=",
+                    idx, fshow(inputPipeOutVec[idx].first)
+                );
+            end
+        end
+    endrule
+*/
     return resultPipeOut;
 endmodule
-
+/*
 // pipeIn1 has priority over pipeIn2
 module mkFixedBinaryPipeOutArbiter#(
     PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
@@ -420,7 +439,7 @@ module mkFixedBinaryPipeOutArbiter#(
 
     method Bool notEmpty() = isNotEmpty;
 endmodule
-
+*/
 interface ServerProxy#(type reqType, type respType);
     interface Server#(reqType, respType) srvPort;
     interface Client#(reqType, respType) cltPort;

@@ -1540,7 +1540,7 @@ module mkPipeOutMux#(
 endmodule
 /*
 module mkPipeOutBuffer#(PipeOut#(anytype) pipeIn
-)(PipeOut#(anytype)) provisos(Bits #(anytype, anysize));
+)(PipeOut#(anytype)) provisos(Bits#(anytype, anysize));
     FIFOF#(anytype) bufferQ <- mkFIFOF;
     mkConnection(toPut(bufferQ), toGet(pipeIn));
     return toPipeOut(bufferQ);

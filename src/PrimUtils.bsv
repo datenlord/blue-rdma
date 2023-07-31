@@ -5,11 +5,11 @@ typedef 2 TWO;
 typedef 4 FOUR;
 
 function Bool isZero(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
-    // TODO: consider using fold
     Bool ret = unpack(|bits);
     return !ret;
 endfunction
 
+// TODO: consider using fold
 function Bool isZeroR(Bit#(nSz) bits) provisos(
     NumAlias#(TDiv#(nSz, 2), halfSz)
 );

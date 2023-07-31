@@ -182,6 +182,10 @@ module mkRetryHandleSQ#(
             retryCntReg        <= cntrlStatus.comm.getMaxRetryCnt;
             rnrCntReg          <= cntrlStatus.comm.getMaxRnrCnt;
             disableRetryCntReg <= cntrlStatus.comm.getMaxRetryCnt == fromInteger(valueOf(INFINITE_RETRY));
+            // $display(
+            //     "time=%0t: resetRetryCntInternal cntrlStatus.comm.getMaxRetryCnt=%0d",
+            //     $time, cntrlStatus.comm.getMaxRetryCnt
+            // );
         endaction
     endfunction
 
@@ -193,7 +197,10 @@ module mkRetryHandleSQ#(
             isTimeOutCntHighPartZeroReg <= False;
             isTimeOutCntLowPartZeroReg  <= False;
             // timeOutNotificationQ.clear;
-            // $display("time=%0t: cntrlStatus.comm.getMaxTimeOut=%0d", $time, origMaxTimeOutReg);
+            // $display(
+            //     "time=%0t: resetTimeOutCntInternal cntrlStatus.comm.getMaxTimeOut=%0d",
+            //     $time, cntrlStatus.comm.getMaxTimeOut
+            // );
         endaction
     endfunction
 

@@ -180,16 +180,14 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             "dmaReadResp.data.byteEn non-zero assertion",
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
-        // if (dataStream.isLast) begin
-            $display(
-                "time=%0t:", $time,
-                " DMA read response, WR ID=%h, totalFragNum=%0d",
-                curReqReg.wrID, totalFragCntReg
-                // ", dataStream.isFirst=", fshow(dataStream.isFirst),
-                // ", dataStream.isLast=", fshow(dataStream.isLast)
-                // ", dataStream=", fshow(dataStream)
-            );
-        // end
+        $display(
+            "time=%0t:", $time,
+            " DMA read response, WR ID=%h, totalFragNum=%0d",
+            curReqReg.wrID, totalFragCntReg,
+            ", dataStream=", fshow(dataStream)
+            // ", dataStream.isFirst=", fshow(dataStream.isFirst),
+            // ", dataStream.isLast=", fshow(dataStream.isLast)
+        );
     endrule
 
     interface dmaReadSrv  = toGPServer(dmaReadReqQ, dmaReadRespQ);

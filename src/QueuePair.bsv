@@ -140,6 +140,8 @@ endmodule
 interface SQ;
     interface DataStreamPipeOut rdmaReqDataStreamPipeOut;
     interface WorkCompGen workCompSQ;
+    method Bool notGracefulStop();
+    method Bool pendingWorkReqNotEmpty();
     // interface PipeOut#(WorkComp) workCompPipeOutSQ;
 endinterface
 
@@ -147,12 +149,10 @@ module mkSQ#(
     ContextSQ contextSQ,
     DmaReadCntrl dmaReadCntrl,
     DmaWriteCntrl dmaWriteCntrl,
-    // DmaReadSrv dmaReadSrv,
-    // DmaWriteSrv dmaWriteSrv,
+    // PayloadGenerator payloadGenerator,
     PermCheckSrv permCheckSrv,
     PipeOut#(WorkReq) workReqPipeIn,
     RdmaPktMetaDataAndPayloadPipeOut respPktPipeOut
-    // PipeOut#(WorkCompStatus) workCompStatusPipeInFromRQ
 )(SQ);
     PendingWorkReqBuf pendingWorkReqBuf <- mkScanFIFOF;
 
@@ -175,7 +175,6 @@ module mkSQ#(
     );
     let reqGenSQ <- mkReqGenSQ(
         contextSQ,
-        // dmaReadSrv,
         payloadGenerator,
         pendingWorkReqPipeOut,
         pendingWorkReqBuf.fifof.notEmpty
@@ -195,7 +194,6 @@ module mkSQ#(
     let payloadConsumer <- mkPayloadConsumer(
         contextSQ.statusSQ,
         respPktPipeOut.payload,
-        // dmaWriteSrv,
         dmaWriteCntrl,
         respHandleSQ.payloadConReqPipeOut
     );
@@ -214,15 +212,31 @@ module mkSQ#(
 
         // $display("time=%0t: reset and clear mkSQ", $time);
     endrule
-
+/*
+    rule debug if (
+        contextSQ.statusSQ.comm.isERR &&
+        (reqGenSQ.reqHeaderOutNotEmpty || payloadGenerator.notGracefulStop)
+    );
+        $display(
+            "time=%0t: mkSQ debug", $time,
+            ", qpn=%h", contextSQ.statusSQ.comm.getSQPN,
+            ", contextSQ.statusSQ.comm.isERR=", fshow(contextSQ.statusSQ.comm.isERR),
+            ", reqGenSQ.reqHeaderOutNotEmpty=", fshow(reqGenSQ.reqHeaderOutNotEmpty),
+            ", payloadGenerator.notGracefulStop=", fshow(payloadGenerator.notGracefulStop)
+        );
+    endrule
+*/
     interface rdmaReqDataStreamPipeOut = reqGenSQ.rdmaReqDataStreamPipeOut;
     interface workCompSQ = workCompGenSQ;
+    method Bool notGracefulStop() = reqGenSQ.reqHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
+    method Bool pendingWorkReqNotEmpty() = pendingWorkReqBuf.fifof.notEmpty;
     // interface workCompPipeOutSQ = workCompPipeOut;
 endmodule
 
 interface RQ;
     interface DataStreamPipeOut rdmaRespDataStreamPipeOut;
     interface WorkCompGen workCompRQ;
+    method Bool notGracefulStop();
     // interface PipeOut#(WorkComp) workCompPipeOutRQ;
     // interface PipeOut#(WorkCompStatus) workCompStatusPipeOutRQ;
 endinterface
@@ -231,8 +245,7 @@ module mkRQ#(
     ContextRQ contextRQ,
     DmaReadCntrl dmaReadCntrl,
     DmaWriteCntrl dmaWriteCntrl,
-    // DmaReadSrv dmaReadSrv,
-    // DmaWriteSrv dmaWriteSrv,
+    // PayloadGenerator payloadGenerator,
     PermCheckSrv permCheckSrv,
     RecvReqBuf recvReqBuf,
     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn
@@ -246,7 +259,6 @@ module mkRQ#(
     );
     let reqHandlerRQ <- mkReqHandleRQ(
         contextRQ,
-        // dmaReadSrv,
         payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
@@ -257,7 +269,6 @@ module mkRQ#(
     let payloadConsumer <- mkPayloadConsumer(
         contextRQ.statusRQ,
         reqPktPipeIn.payload,
-        // dmaWriteSrv,
         dmaWriteCntrl,
         reqHandlerRQ.payloadConReqPipeOut
     );
@@ -277,6 +288,7 @@ module mkRQ#(
 
     interface rdmaRespDataStreamPipeOut = reqHandlerRQ.rdmaRespDataStreamPipeOut;
     interface workCompRQ = workCompGenRQ;
+    method Bool notGracefulStop() = reqHandlerRQ.respHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
     // interface workCompPipeOutRQ = workCompGenRQ.workCompPipeOut;
     // interface workCompStatusPipeOutRQ = workCompGenRQ.workCompStatusPipeOutRQ;
 endmodule
@@ -459,7 +471,9 @@ interface QueuePair;
     // Output
     interface CntrlStatus        statusSQ;
     interface CntrlStatus        statusRQ;
-    interface DataStreamPipeOut  rdmaReqRespPipeOut;
+    // interface DataStreamPipeOut  rdmaReqRespPipeOut;
+    interface DataStreamPipeOut  rdmaReqPipeOut;
+    interface DataStreamPipeOut  rdmaRespPipeOut;
     interface PipeOut#(WorkComp) workCompPipeOutRQ;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
 endinterface
@@ -495,12 +509,8 @@ module mkQP(QueuePair);
 
     let rq <- mkRQ(
         cntrl.contextRQ,
-        // dmaArbiter.dmaReadSrv4RQ,
-        // dmaArbiter.dmaWriteSrv4RQ,
         dmaReadCntrl4RQ,
         dmaWriteCntrl4RQ,
-        // dmaReadProxy4RQ.srvPort,
-        // dmaWriteProxy4RQ.srvPort,
         permCheckProxy4RQ.srvPort,
         recvReqBufPipeOut,
         reqPktPipe.pktPipeOut
@@ -508,20 +518,15 @@ module mkQP(QueuePair);
 
     let sq <- mkSQ(
         cntrl.contextSQ,
-        // dmaArbiter.dmaReadSrv4SQ,
-        // dmaArbiter.dmaWriteSrv4SQ,
         dmaReadCntrl4SQ,
         dmaWriteCntrl4SQ,
-        // dmaReadProxy4SQ.srvPort,
-        // dmaWriteProxy4SQ.srvPort,
         permCheckProxy4SQ.srvPort,
         workReqBufPipeOut,
         respPktPipe.pktPipeOut
-        // rq.workCompStatusPipeOutRQ
     );
-    let reqRespPipeOut <- mkFixedBinaryPipeOutArbiter(
-        rq.rdmaRespDataStreamPipeOut, sq.rdmaReqDataStreamPipeOut
-    );
+    // let reqRespPipeOut <- mkFixedBinaryPipeOutArbiter(
+    //     rq.rdmaRespDataStreamPipeOut, sq.rdmaReqDataStreamPipeOut
+    // );
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (cntrl.contextSQ.statusSQ.comm.isReset);
@@ -541,31 +546,61 @@ module mkQP(QueuePair);
         cntrl.setStateErr;
     endrule
 
-    // TODO: check error flush done
-    rule errFlush if (cntrl.contextSQ.statusSQ.comm.isERR);
-        // TODO: if pending WR queue is empty, then error flush is done
-        if (!workReqQ.notEmpty && !recvReqQ.notEmpty) begin
-            // Notify controller when flush done
-            cntrl.errFlushDone;
-            $display(
-                "time=%0t:", $time,
-                " error flush done, workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
-                ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
-            );
-        end
-    endrule
-
-    rule resetQP if (
-        cntrl.contextSQ.statusSQ.comm.isUnknown &&
-        cntrl.contextRQ.statusRQ.comm.isUnknown &&
-        dmaReadCntrl4RQ.dmaCntrl.isIdle         &&
-        dmaWriteCntrl4RQ.dmaCntrl.isIdle        &&
-        dmaReadCntrl4SQ.dmaCntrl.isIdle         &&
+    // (* no_implicit_conditions, fire_when_enabled *)
+    rule waitGracefulStop if (
+        cntrl.contextSQ.statusSQ.comm.isERR &&
+        !recvReqQ.notEmpty                  &&
+        // !workReqQ.notEmpty                  &&
+        // !sq.pendingWorkReqNotEmpty          &&
+        !rq.notGracefulStop                 &&
+        !sq.notGracefulStop                 &&
+        dmaReadCntrl4RQ.dmaCntrl.isIdle     &&
+        dmaWriteCntrl4RQ.dmaCntrl.isIdle    &&
+        dmaReadCntrl4SQ.dmaCntrl.isIdle     &&
         dmaWriteCntrl4SQ.dmaCntrl.isIdle
     );
-        cntrl.setStateReset;
+        // Notify controller when graceful stop
+        cntrl.errFlushDone;
+        $display(
+            "time=%0t: waitGracefulStop", $time,
+            ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        );
     endrule
-
+/*
+    rule debug if (
+        cntrl.contextRQ.statusRQ.comm.isERR &&
+        cntrl.contextSQ.statusSQ.comm.isERR &&
+        !(
+            !recvReqQ.notEmpty                 &&
+            !workReqQ.notEmpty                 &&
+            !sq.pendingWorkReqNotEmpty         &&
+            !rq.notGracefulStop                &&
+            !sq.notGracefulStop                &&
+            dmaReadCntrl4RQ.dmaCntrl.isIdle    &&
+            dmaWriteCntrl4RQ.dmaCntrl.isIdle   &&
+            dmaReadCntrl4SQ.dmaCntrl.isIdle    &&
+            dmaWriteCntrl4SQ.dmaCntrl.isIdle
+        )
+    );
+        $display(
+            "time=%0t: mkQP debug", $time,
+            ", qpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+            ", cntrl.contextRQ.statusRQ.comm.isERR=", fshow(cntrl.contextRQ.statusRQ.comm.isERR),
+            ", cntrl.contextSQ.statusSQ.comm.isERR=", fshow(cntrl.contextSQ.statusSQ.comm.isERR),
+            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty),
+            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+            ", sq.pendingWorkReqNotEmpty=", fshow(sq.pendingWorkReqNotEmpty),
+            ", rq.notGracefulStop=", fshow(rq.notGracefulStop),
+            ", sq.notGracefulStop=", fshow(sq.notGracefulStop),
+            ", dmaReadCntrl4RQ.dmaCntrl.isIdle=", fshow(dmaReadCntrl4RQ.dmaCntrl.isIdle),
+            ", dmaWriteCntrl4RQ.dmaCntrl.isIdle=", fshow(dmaWriteCntrl4RQ.dmaCntrl.isIdle),
+            ", dmaReadCntrl4SQ.dmaCntrl.isIdle=", fshow(dmaReadCntrl4SQ.dmaCntrl.isIdle),
+            ", dmaWriteCntrl4SQ.dmaCntrl.isIdle=", fshow(dmaWriteCntrl4SQ.dmaCntrl.isIdle)
+        );
+    endrule
+*/
     interface srvPortQP       = cntrl.srvPort;
     interface recvReqIn       = toPut(recvReqQ);
     interface workReqIn       = toPut(workReqQ);
@@ -582,7 +617,9 @@ module mkQP(QueuePair);
 
     interface statusSQ           = cntrl.contextSQ.statusSQ;
     interface statusRQ           = cntrl.contextRQ.statusRQ;
-    interface rdmaReqRespPipeOut = reqRespPipeOut;
+    // interface rdmaReqRespPipeOut = reqRespPipeOut;
+    interface rdmaRespPipeOut    = rq.rdmaRespDataStreamPipeOut;
+    interface rdmaReqPipeOut     = sq.rdmaReqDataStreamPipeOut;
     interface workCompPipeOutRQ  = rq.workCompRQ.workCompPipeOut;
     interface workCompPipeOutSQ  = sq.workCompSQ.workCompPipeOut;
 endmodule

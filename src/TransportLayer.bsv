@@ -6,6 +6,8 @@ import Vector :: *;
 
 import Arbitration :: *;
 import DataTypes :: *;
+import ExtractAndPrependPipeOut :: *;
+import Headers :: *;
 import InputPktHandle :: *;
 import MetaData :: *;
 import PrimUtils :: *;
@@ -13,7 +15,8 @@ import QueuePair :: *;
 import Settings :: *;
 import Utils :: *;
 
-// TODO: check QP state when dispatching WR and RR
+// TODO: check QP state when dispatching WR and RR,
+// and discard WR and RR when QP in abnormal state
 module mkWorkReqAndRecvReqDispatcher#(
     PipeOut#(WorkReq) workReqPipeIn, PipeOut#(RecvReq) recvReqPipeIn
 )(Tuple2#(Vector#(MAX_QP, PipeOut#(WorkReq)), Vector#(MAX_QP, PipeOut#(RecvReq))));
@@ -52,17 +55,253 @@ module mkWorkReqAndRecvReqDispatcher#(
     );
 endmodule
 
+// TODO: remove it
+module mkSimExtractNormalReqResp#(
+    MetaDataQPs qpMetaData,
+    DataStreamPipeOut rdmaPktPipeIn
+)(Vector#(MAX_QP, InputRdmaPktBuf));
+    // Output FIFO for PipeOut
+    Vector#(MAX_QP, FIFOF#(BTH))                         cnpOutVec <- replicateM(mkFIFOF);
+    Vector#(MAX_QP, FIFOF#(DataStream))           reqPayloadOutVec <- replicateM(mkFIFOF);
+    Vector#(MAX_QP, FIFOF#(RdmaPktMetaData))  reqPktMetaDataOutVec <- replicateM(mkFIFOF);
+    Vector#(MAX_QP, FIFOF#(DataStream))          respPayloadOutVec <- replicateM(mkFIFOF);
+    Vector#(MAX_QP, FIFOF#(RdmaPktMetaData)) respPktMetaDataOutVec <- replicateM(mkFIFOF);
+
+    Reg#(RdmaHeader)  rdmaHeaderReg <- mkRegU;
+    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktLen)          pktLenReg <- mkRegU;
+    Reg#(Bool)          pktValidReg <- mkRegU;
+
+    let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
+        rdmaPktPipeIn
+    );
+    let payloadPipeIn <- mkBuffer(headerAndMetaDataAndPayloadPipeOut.payload);
+    let rdmaHeaderPipeOut <- mkDataStream2Header(
+        headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
+        headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData
+    );
+
+    rule extractHeader;
+        let payloadFrag = payloadPipeIn.first;
+        payloadPipeIn.deq;
+
+        let rdmaHeader = rdmaHeaderReg;
+        if (payloadFrag.isFirst) begin
+            rdmaHeader = rdmaHeaderPipeOut.first;
+            rdmaHeaderPipeOut.deq;
+            rdmaHeaderReg <= rdmaHeader;
+        end
+        let bth    = extractBTH(rdmaHeader.headerData);
+        let aeth   = extractAETH(rdmaHeader.headerData);
+        let deth   = extractDETH(rdmaHeader.headerData);
+        let xrceth = extractXRCETH(rdmaHeader.headerData);
+
+        let isCNP          = isCongestionNotificationPkt(bth);
+        let isRespPkt      = isRdmaRespOpCode(bth.opcode);
+        let isRespPktOrCNP = isRespPkt || isCNP;
+
+        let dqpn      = (bth.trans == TRANS_TYPE_XRC && !isRespPktOrCNP) ? xrceth.srqn : bth.dqpn;
+        let bthPadCnt = bth.padCnt;
+        let qpIndex   = getIndexQP(dqpn);
+
+        let maybeHandlerPD = qpMetaData.getPD(dqpn);
+        $display(
+            "time=%0t: extractHeader, maybeHandlerPD=", $time, fshow(maybeHandlerPD),
+            " should be valid, when dqpn=%h, bth.psn=%h, bth.opcode=",
+            dqpn, bth.psn, fshow(bth.opcode)
+        );
+        // immAssert(
+        //     isValid(maybeHandlerPD),
+        //     "PD valid assertion @ mkSimExtractNormalReqResp",
+        //     $format(
+        //         "isValid(maybeHandlerPD)=", fshow(isValid(maybeHandlerPD)),
+        //         " should be valid, when bth.trans=", fshow(bth.trans),
+        //         " and dqpn=%h", dqpn
+        //     )
+        // );
+
+        let isFirstOrMidPkt = isFirstOrMiddleRdmaOpCode(bth.opcode);
+        let isLastPkt       = isLastRdmaOpCode(bth.opcode);
+
+        let pktLen = pktLenReg;
+        let pktFragNum = pktFragNumReg;
+        let pktValid = False;
+
+        let isByteEnAllOne = isAllOnesR(payloadFrag.byteEn);
+        let payloadFragLen = calcFragByteNumFromByteEn(payloadFrag.byteEn);
+        immAssert(
+            isValid(payloadFragLen),
+            "isValid(payloadFragLen) assertion @ mkSimExtractNormalReqResp",
+            $format(
+                "payloadFragLen=", fshow(payloadFragLen), " should be valid"
+            )
+        );
+
+        let fragLen = unwrapMaybe(payloadFragLen);
+        let isByteEnNonZero = !isZero(fragLen);
+        ByteEnBitNum fragLenWithOutPad = fragLen - zeroExtend(bthPadCnt);
+        PktLen fragLenExtWithOutPad = zeroExtend(fragLenWithOutPad);
+        case ({ pack(payloadFrag.isFirst), pack(payloadFrag.isLast) })
+            2'b11: begin // payloadFrag.isFirst && payloadFrag.isLast
+                pktLen = fragLenExtWithOutPad;
+                pktFragNum = 1;
+                pktValid = (isFirstOrMidPkt ? False : (isLastPkt ? isByteEnNonZero : True));
+            end
+            2'b10: begin // payloadFrag.isFirst && !payloadFrag.isLast
+                pktLen = fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
+                pktFragNum = 1;
+                pktValid = isByteEnAllOne;
+            end
+            2'b01: begin // !payloadFrag.isFirst && payloadFrag.islast
+                pktLen = pktLenAddFragLen(pktLenReg, fragLenWithOutPad);
+                // pktLen = pktLenReg + fragLenExtWithOutPad;
+                pktFragNum = pktFragNumReg + 1;
+                pktValid = pktValidReg;
+            end
+            2'b00: begin // !payloadFrag.isFirst && !payloadFrag.islast
+                pktLen = pktLenAddBusByteWidth(pktLenReg);
+                // pktLen = pktLenReg + fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
+                pktFragNum = pktFragNumReg + 1;
+                pktValid = pktValidReg && isByteEnAllOne;
+            end
+        endcase
+
+        pktLenReg     <= pktLen;
+        pktValidReg   <= pktValid;
+        pktFragNumReg <= pktFragNum;
+
+        let pktStatus = PKT_ST_VALID;
+        if (!pktValid) begin
+            // Invalid packet length
+            pktStatus = PKT_ST_LEN_ERR;
+        end
+        immAssert(
+            pktValid,
+            "pktValid assertion @ mkSimExtractNormalReqResp",
+            $format(
+                "pktValid=", fshow(pktValid), " should be valid"
+            )
+        );
+
+        let isZeroPayloadLen = isZeroR(pktLen);
+        let pktMetaData = RdmaPktMetaData {
+            pktPayloadLen   : pktLen,
+            pktFragNum      : (isZeroPayloadLen ? 0 : pktFragNum),
+            isZeroPayloadLen: isZeroPayloadLen,
+            pktHeader       : rdmaHeader,
+            pdHandler       : unwrapMaybe(maybeHandlerPD),
+            pktValid        : pktValid,
+            pktStatus       : pktStatus
+        };
+        if (isValid(maybeHandlerPD)) begin
+            let bthCheckResult = checkZeroFields4BTH(bth);
+            let headerCheckResult =
+                padCntCheckReqHeader(bth) || padCntCheckRespHeader(bth, aeth);
+            immAssert(
+                bthCheckResult && headerCheckResult,
+                "bth valid assertion @ mkSimExtractNormalReqResp",
+                $format(
+                    "bth=", fshow(bth),
+                    " should be valid, but bthCheckResult=", fshow(bthCheckResult),
+                    " and headerCheckResult=", fshow(headerCheckResult)
+                )
+            );
+
+            if (isCNP) begin
+                cnpOutVec[qpIndex].enq(bth);
+            end
+            else if (isRespPkt) begin
+                // Do not use rdmaHeader.headerMetaData.hasPayload here,
+                // since it is only depend on RdamOpCode
+                if (!isZeroPayloadLen) begin
+                    respPayloadOutVec[qpIndex].enq(payloadFrag);
+                end
+                if (payloadFrag.isLast) begin
+                    respPktMetaDataOutVec[qpIndex].enq(pktMetaData);
+                end
+            end
+            else begin
+                // Do not use rdmaHeader.headerMetaData.hasPayload here,
+                // since it is only depend on RdamOpCode
+                if (!isZeroPayloadLen) begin
+                    reqPayloadOutVec[qpIndex].enq(payloadFrag);
+                end
+                if (payloadFrag.isLast) begin
+                    reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
+                end
+            end
+        end
+
+        if (isZeroPayloadLen) begin
+            immAssert(
+                !rdmaHeader.headerMetaData.hasPayload,
+                "hasPayload assertion @ mkSimExtractNormalReqResp",
+                $format(
+                    "hasPayload=", fshow(rdmaHeader.headerMetaData.hasPayload),
+                    " should be false when isZeroPayloadLen=", fshow(isZeroPayloadLen)
+                )
+            );
+        end
+
+        if (bth.opcode == ACKNOWLEDGE) begin
+            immAssert(
+                isZeroPayloadLen && payloadFrag.isLast && payloadFrag.isFirst,
+                "isZeroPayloadLen assertion @ mkSimExtractNormalReqResp",
+                $format(
+                    "isZeroPayloadLen=", fshow(isZeroPayloadLen),
+                    ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+                    ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+                    " should all be true when bth.opcode=", fshow(bth.opcode)
+                )
+            );
+        end
+        $display(
+            "time=%0t: mkSimExtractNormalReqResp recvPktFrag", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, dqpn=%h, pktFragNum=%0d, pktLen=%0d",
+            bth.psn, dqpn, pktFragNum, pktLen
+            // ", bthPadCnt=%0d", bthPadCnt,
+            // ", fragLen=%0d", fragLen,
+            // ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+            // ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+            // ", fragLenWithOutPad=%0d", fragLenWithOutPad,
+            // ", rdmaHeader=", fshow(rdmaHeader)
+        );
+    endrule
+
+    function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);
+        return interface InputRdmaPktBuf;
+            interface reqPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
+                interface pktMetaData = toPipeOut(reqPktMetaDataOutVec[idx]);
+                interface payload     = toPipeOut(reqPayloadOutVec[idx]);
+            endinterface;
+
+            interface respPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
+                interface pktMetaData = toPipeOut(respPktMetaDataOutVec[idx]);
+                interface payload     = toPipeOut(respPayloadOutVec[idx]);
+            endinterface;
+
+            interface cnpPipeOut  = toPipeOut(cnpOutVec[idx]);
+        endinterface;
+    endfunction
+
+    return map(genInputRdmaPktBuf, genVector);
+endmodule
+
 interface TransportLayer;
-    interface Put#(DataStream) rdmaDataStreamInput;
     interface Put#(RecvReq) recvReqInput;
     interface Put#(WorkReq) workReqInput;
+    interface Put#(DataStream) rdmaDataStreamInput;
     interface DataStreamPipeOut rdmaDataStreamPipeOut;
     interface PipeOut#(WorkComp) workCompPipeOutRQ;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
     interface MetaDataSrv srvPortMetaData;
     interface DmaReadClt  dmaReadClt;
     interface DmaWriteClt dmaWriteClt;
-    // method Maybe#(MetaDataMRs) getMRs4PD(HandlerPD pdHandler);
+
+    // method Maybe#(HandlerPD) getPD(QPN qpn);
+    // interface Vector#(MAX_QP, rdmaReqRespPipeOut) rdmaReqRespPipeOut;
+    // interface Vector#(MAX_QP, RdmaPktMetaDataAndPayloadPipeIn) respPktPipeInVec;
 endinterface
 
 (* synthesize *)
@@ -87,17 +326,21 @@ module mkTransportLayer(TransportLayer) provisos(
         toPipeOut(inputWorkReqQ), toPipeOut(inputRecvReqQ)
     );
 
-    let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
-        rdmaReqRespPipeIn
+    let pktMetaDataAndPayloadPipeOutVec <- mkSimExtractNormalReqResp(
+        qpMetaData, rdmaReqRespPipeIn
     );
-    let pktMetaDataAndPayloadPipeOutVec <- mkInputRdmaPktBufAndHeaderValidation(
-        headerAndMetaDataAndPayloadPipeOut, qpMetaData
-    );
+    // let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
+    //     rdmaReqRespPipeIn
+    // );
+    // let pktMetaDataAndPayloadPipeOutVec <- mkInputRdmaPktBufAndHeaderValidation(
+    //     headerAndMetaDataAndPayloadPipeOut, qpMetaData
+    // );
 
-    Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
+    // Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpSendWorkCompPipeOutVec = newVector;
 
+    Vector#(TMul#(2, MAX_QP), DataStreamPipeOut) qpDataStreamPipeOutVec = newVector;
     Vector#(TMul#(2, MAX_QP), PermCheckClt) permCheckCltVec = newVector;
     Vector#(TMul#(2, MAX_QP), DmaReadClt)     dmaReadCltVec = newVector;
     Vector#(TMul#(2, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
@@ -117,12 +360,14 @@ module mkTransportLayer(TransportLayer) provisos(
             qp.respPktPipeIn
         );
 
-        qpDataStreamPipeOutVec[idx]   = qp.rdmaReqRespPipeOut;
+        // qpDataStreamPipeOutVec[idx]   = qp.rdmaReqRespPipeOut;
         qpRecvWorkCompPipeOutVec[idx] = qp.workCompPipeOutRQ;
         qpSendWorkCompPipeOutVec[idx] = qp.workCompPipeOutSQ;
 
         let leftIdx = 2 * idx;
         let rightIdx = 2 * idx + 1;
+        qpDataStreamPipeOutVec[leftIdx]  = qp.rdmaRespPipeOut;
+        qpDataStreamPipeOutVec[rightIdx] = qp.rdmaReqPipeOut;
         permCheckCltVec[leftIdx]  = qp.permCheckClt4RQ;
         permCheckCltVec[rightIdx] = qp.permCheckClt4SQ;
         dmaReadCltVec[leftIdx]    = qp.dmaReadClt4RQ;
@@ -167,5 +412,6 @@ module mkTransportLayer(TransportLayer) provisos(
     interface dmaReadClt  = arbitratedDmaReadClt;
     interface dmaWriteClt = arbitratedDmaWriteClt;
 
+    // method Maybe#(HandlerPD) getPD(QPN qpn) = qpMetaData.getPD(qpn);
     // method Maybe#(MetaDataMRs) getMRs4PD(HandlerPD pdHandler) = pdMetaData.getMRs4PD(pdHandler);
 endmodule

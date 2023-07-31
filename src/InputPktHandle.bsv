@@ -77,7 +77,8 @@ endfunction
 // TODO: check XRC domain match
 function Bool validateHeader(TransType transType, QKEY qkey, CntrlStatus cntrlStatus, Bool isRespPkt);
     let transTypeMatch = transTypeMatchQpType(transType, cntrlStatus.getTypeQP, isRespPkt);
-    let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
+    let qpStateMatch = cntrlStatus.comm.isERR ||
+        (isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr);
     // UD has no responses
     let qKeyMatch = transType == TRANS_TYPE_UD ? qkey == cntrlStatus.comm.getQKEY : True;
     // TODO: verify RoCEv2 only use default PKEY
@@ -109,17 +110,23 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
     let headerAndPayloadPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataPipeIn, headerMetaDataPipeIn
     );
-
+/*
     rule debug if (!(
-        headerMetaDataInQ.notFull && dataInQ.notFull
+        rdmaPktPipeIn.notEmpty    &&
+        headerMetaDataInQ.notFull &&
+        dataInQ.notFull
     ));
-        $display(
-            "time=%0t: mkExtractHeaderFromRdmaPktPipeOut debug", $time,
-            ", headerMetaDataInQ.notFull=", fshow(headerMetaDataInQ.notFull),
-            ", dataInQ.notFull=", fshow(dataInQ.notFull)
-        );
+        let curTS <- $time;
+        if (curTS < 17600) begin
+            $display(
+                "time=%0t: mkExtractHeaderFromRdmaPktPipeOut debug", $time,
+                ", rdmaPktPipeIn.notFull=", fshow(rdmaPktPipeIn.notEmpty),
+                ", headerMetaDataInQ.notFull=", fshow(headerMetaDataInQ.notFull),
+                ", dataInQ.notFull=", fshow(dataInQ.notFull)
+            );
+        end
     endrule
-
+*/
     rule extractHeader;
         let rdmaPktDataStream = rdmaPktPipeIn.first;
         rdmaPktPipeIn.deq;
@@ -263,63 +270,91 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         pipeIn.headerAndMetaData.headerMetaData
     );
 
+    function Bool fifofNotEmpty(FIFOF#(anytype) fifof) = fifof.notEmpty;
+    function Bool fifofNotFull(FIFOF#(anytype) fifof) = fifof.notFull;
+    function Bool fifofVecAll(
+        function Bool mapFunc(FIFOF#(anytype) fifof),
+        Vector#(vSz, FIFOF#(anytype)) fifofVec
+    ) provisos(Add#(1, anysize, vSz));
+        let fifofMapVec = map(mapFunc, fifofVec);
+        let result = fold(\&& , fifofMapVec);
+        return result;
+    endfunction
+/*
     rule debug if (!(
-        payloadPipeIn.notEmpty            &&
-        rdmaHeaderPipeOut.notEmpty        &&
-        cnpOutVec[0].notFull              &&
-        reqPayloadOutVec[0].notFull       &&
-        reqPktMetaDataOutVec[0].notFull   &&
-        respPayloadOutVec[0].notFull      &&
-        respPktMetaDataOutVec[0].notFull  &&
-        rdmaHeaderRecvQ.notFull           &&
-        payloadRecvQ.notFull              &&
-        rdmaHeaderPreCheckQ.notFull       &&
-        payloadPreCheckQ.notFull          &&
-        rdmaHeaderValidationQ.notFull     &&
-        payloadValidationQ.notFull        &&
-        rdmaHeaderFilterQ.notFull         &&
-        payloadFilterQ.notFull            &&
-        rdmaHeaderFragLenCalcQ.notFull    &&
-        payloadFragLenCalcQ.notFull       &&
-        rdmaHeaderPktLenCalcQ.notFull     &&
-        payloadPktLenCalcQ.notFull        &&
-        rdmaHeaderPktLenPreCheckQ.notFull &&
-        payloadPktLenPreCheckQ.notFull    &&
-        rdmaHeaderPktLenCheckQ.notFull    &&
-        payloadPktLenCheckQ.notFull       &&
-        rdmaHeaderOutputQ.notFull         &&
+        payloadPipeIn.notEmpty                 &&
+        rdmaHeaderPipeOut.notEmpty             &&
+        fifofVecAll(fifofNotFull, cnpOutVec)             &&
+        fifofVecAll(fifofNotFull, reqPayloadOutVec)      &&
+        fifofVecAll(fifofNotFull, reqPktMetaDataOutVec)  &&
+        fifofVecAll(fifofNotFull, respPayloadOutVec)     &&
+        fifofVecAll(fifofNotFull, respPktMetaDataOutVec) &&
+        rdmaHeaderRecvQ.notFull                &&
+        payloadRecvQ.notFull                   &&
+        rdmaHeaderPreCheckQ.notFull            &&
+        payloadPreCheckQ.notFull               &&
+        rdmaHeaderValidationQ.notFull          &&
+        payloadValidationQ.notFull             &&
+        rdmaHeaderFilterQ.notFull              &&
+        payloadFilterQ.notFull                 &&
+        rdmaHeaderFragLenCalcQ.notFull         &&
+        payloadFragLenCalcQ.notFull            &&
+        rdmaHeaderPktLenCalcQ.notFull          &&
+        payloadPktLenCalcQ.notFull             &&
+        rdmaHeaderPktLenPreCheckQ.notFull      &&
+        payloadPktLenPreCheckQ.notFull         &&
+        rdmaHeaderPktLenCheckQ.notFull         &&
+        payloadPktLenCheckQ.notFull            &&
+        rdmaHeaderOutputQ.notFull              &&
         payloadOutputQ.notFull
     ));
-        $display(
-            "time=%0t: mkInputRdmaPktBufAndHeaderValidation debug", $time,
-            ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
-            ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
-            ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
-            ", reqPayloadOutVec[0].notFull=", fshow(reqPayloadOutVec[0].notFull),
-            ", reqPktMetaDataOutVec[0].notFull=", fshow(reqPktMetaDataOutVec[0].notFull),
-            ", respPayloadOutVec[0].notFull=", fshow(respPayloadOutVec[0].notFull),
-            ", respPktMetaDataOutVec[0].notFull=", fshow(respPktMetaDataOutVec[0].notFull),
-            ", rdmaHeaderRecvQ.notFull=", fshow(rdmaHeaderRecvQ.notFull),
-            ", payloadRecvQ.notFull=", fshow(payloadRecvQ.notFull),
-            ", rdmaHeaderPreCheckQ.notFull=", fshow(rdmaHeaderPreCheckQ.notFull),
-            ", payloadPreCheckQ.notFull=", fshow(payloadPreCheckQ.notFull),
-            ", rdmaHeaderValidationQ.notFull=", fshow(rdmaHeaderValidationQ.notFull),
-            ", payloadValidationQ.notFull=", fshow(payloadValidationQ.notFull),
-            ", rdmaHeaderFilterQ.notFull=", fshow(rdmaHeaderFilterQ.notFull),
-            ", payloadFilterQ.notFull=", fshow(payloadFilterQ.notFull),
-            ", rdmaHeaderFragLenCalcQ.notFull=", fshow(rdmaHeaderFragLenCalcQ.notFull),
-            ", payloadFragLenCalcQ.notFull=", fshow(payloadFragLenCalcQ.notFull),
-            ", rdmaHeaderPktLenCalcQ.notFull=", fshow(rdmaHeaderPktLenCalcQ.notFull),
-            ", payloadPktLenCalcQ.notFull=", fshow(payloadPktLenCalcQ.notFull),
-            ", rdmaHeaderPktLenPreCheckQ.notFull=", fshow(rdmaHeaderPktLenPreCheckQ.notFull),
-            ", payloadPktLenPreCheckQ.notFull=", fshow(payloadPktLenPreCheckQ.notFull),
-            ", rdmaHeaderPktLenCheckQ.notFull=", fshow(rdmaHeaderPktLenCheckQ.notFull),
-            ", payloadPktLenCheckQ.notFull=", fshow(payloadPktLenCheckQ.notFull),
-            ", rdmaHeaderOutputQ.notFull=", fshow(rdmaHeaderOutputQ.notFull),
-            ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
-        );
+        let curTS <- $time;
+        if (curTS < 17600) begin
+            $display(
+                "time=%0t: mkInputRdmaPktBufAndHeaderValidation debug", $time,
+                ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
+                ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
+                // ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
+                // ", reqPayloadOutVec[0].notFull=", fshow(reqPayloadOutVec[0].notFull),
+                // ", reqPktMetaDataOutVec[0].notFull=", fshow(reqPktMetaDataOutVec[0].notFull),
+                // ", respPayloadOutVec[0].notFull=", fshow(respPayloadOutVec[0].notFull),
+                // ", respPktMetaDataOutVec[0].notFull=", fshow(respPktMetaDataOutVec[0].notFull),
+                ", rdmaHeaderRecvQ.notFull=", fshow(rdmaHeaderRecvQ.notFull),
+                ", payloadRecvQ.notFull=", fshow(payloadRecvQ.notFull),
+                ", rdmaHeaderPreCheckQ.notFull=", fshow(rdmaHeaderPreCheckQ.notFull),
+                ", payloadPreCheckQ.notFull=", fshow(payloadPreCheckQ.notFull),
+                ", rdmaHeaderValidationQ.notFull=", fshow(rdmaHeaderValidationQ.notFull),
+                ", payloadValidationQ.notFull=", fshow(payloadValidationQ.notFull),
+                ", rdmaHeaderFilterQ.notFull=", fshow(rdmaHeaderFilterQ.notFull),
+                ", payloadFilterQ.notFull=", fshow(payloadFilterQ.notFull),
+                ", rdmaHeaderFragLenCalcQ.notFull=", fshow(rdmaHeaderFragLenCalcQ.notFull),
+                ", payloadFragLenCalcQ.notFull=", fshow(payloadFragLenCalcQ.notFull),
+                ", rdmaHeaderPktLenCalcQ.notFull=", fshow(rdmaHeaderPktLenCalcQ.notFull),
+                ", payloadPktLenCalcQ.notFull=", fshow(payloadPktLenCalcQ.notFull),
+                ", rdmaHeaderPktLenPreCheckQ.notFull=", fshow(rdmaHeaderPktLenPreCheckQ.notFull),
+                ", payloadPktLenPreCheckQ.notFull=", fshow(payloadPktLenPreCheckQ.notFull),
+                ", rdmaHeaderPktLenCheckQ.notFull=", fshow(rdmaHeaderPktLenCheckQ.notFull),
+                ", payloadPktLenCheckQ.notFull=", fshow(payloadPktLenCheckQ.notFull),
+                ", rdmaHeaderOutputQ.notFull=", fshow(rdmaHeaderOutputQ.notFull),
+                ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
+            );
+            for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
+                $display(
+                    ", cnpOutVec[%0d].notFull=", idx, fshow(cnpOutVec[idx].notFull),
+                    ", reqPayloadOutVec[%0d].notFull=", idx, fshow(reqPayloadOutVec[idx].notFull),
+                    ", reqPktMetaDataOutVec[%0d].notFull=", idx, fshow(reqPktMetaDataOutVec[idx].notFull),
+                    ", respPayloadOutVec[%0d].notFull=", idx, fshow(respPayloadOutVec[idx].notFull),
+                    ", respPktMetaDataOutVec[%0d].notFull=", idx, fshow(respPktMetaDataOutVec[idx].notFull),
+                    ", cnpOutVec[%0d].notEmpty=", idx, fshow(cnpOutVec[idx].notEmpty),
+                    ", reqPayloadOutVec[%0d].notEmpty=", idx, fshow(reqPayloadOutVec[idx].notEmpty),
+                    ", reqPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(reqPktMetaDataOutVec[idx].notEmpty),
+                    ", respPayloadOutVec[%0d].notEmpty=", idx, fshow(respPayloadOutVec[idx].notEmpty),
+                    ", respPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(respPktMetaDataOutVec[idx].notEmpty)
+                );
+            end
+        end
     endrule
-
+*/
     (* conflict_free = "recvPktFrag, \
                         preCheckHeader, \
                         discardInvalidFrag, \
@@ -504,7 +539,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 "time=%0t: checkQpMetaData", $time,
                 ", dqpn=%h, pdHandler=%h, bth.psn=%h",
                 headerValidateInfo.dqpn, pdHandler, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode)
+                ", bth.opcode=", fshow(bth.opcode),
+                ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
             );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
@@ -823,10 +859,10 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPayloadOutVec[qpIndex].enq(payloadFrag);
         end
-        $display(
-            "time=%0t: 10th stage outputPayload", $time,
-            ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
-        );
+        // $display(
+        //     "time=%0t: 10th stage outputPayload", $time,
+        //     ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
+        // );
     endrule
 
     rule outputHeaderMetaData;
@@ -839,7 +875,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         else begin
             reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
         end
-        $display("time=%0t: final stage outputHeaderMetaData", $time);
+        // $display("time=%0t: final stage outputHeaderMetaData", $time);
     endrule
 
     function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);
