@@ -142,11 +142,11 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             busyReg <= True;
             isFirstReg <= True;
 
-            $display(
-                "time=%0t:", $time,
-                " DMA read request, WR ID=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
-                dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
-            );
+            // $display(
+            //     "time=%0t:", $time,
+            //     " DMA read request, wr.id=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
+            //     dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
+            // );
         end
     endrule
 
@@ -180,14 +180,14 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             "dmaReadResp.data.byteEn non-zero assertion",
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
-        $display(
-            "time=%0t:", $time,
-            " DMA read response, WR ID=%h, totalFragNum=%0d",
-            curReqReg.wrID, totalFragCntReg,
-            ", dataStream=", fshow(dataStream)
-            // ", dataStream.isFirst=", fshow(dataStream.isFirst),
-            // ", dataStream.isLast=", fshow(dataStream.isLast)
-        );
+        // $display(
+        //     "time=%0t:", $time,
+        //     " DMA read response, wr.id=%h, totalFragNum=%0d",
+        //     curReqReg.wrID, totalFragCntReg,
+        //     ", dataStream=", fshow(dataStream)
+        //     // ", dataStream.isFirst=", fshow(dataStream.isFirst),
+        //     // ", dataStream.isLast=", fshow(dataStream.isLast)
+        // );
     endrule
 
     interface dmaReadSrv  = toGPServer(dmaReadReqQ, dmaReadRespQ);
@@ -248,12 +248,18 @@ module mkSimDmaReadSrvWithErr#(
                     payloadLenCnt <= payloadLenCnt + zeroExtend(curFragLen);
                 end
             end
+        //     dmaReadRespQ.enq(dmaReadResp);
+        // end
+        // else begin
+        end
+        dmaReadRespQ.enq(dmaReadResp);
 
-                dmaReadRespQ.enq(dmaReadResp);
-        end
-        else begin
-            dmaReadRespQ.enq(dmaReadResp);
-        end
+        $display(
+            "time=%0t: genErrDmaReadRespIfNeeded", $time,
+            ", dmaReadResp.isRespErr=", fshow(dmaReadResp.isRespErr),
+            ", payloadLenCnt=%0d", payloadLenCnt,
+            ", errLen=%0d", errLen
+        );
     endrule
 
     interface request = simDmaReadSrv.dmaReadSrv.request;
@@ -390,7 +396,7 @@ module mkRandomLenSimDataStreamPipeOut#(
     return simDataStreamPipeOut;
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestFixedLenSimDataStreamPipeOut(Empty);
     let minDmaLength = 1;
     let maxDmaLength = 125;

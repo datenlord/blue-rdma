@@ -359,7 +359,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                         preCheckHeader, \
                         discardInvalidFrag, \
                         prepareValidation, \
-                        checkQpMetaData, \
+                        checkMetaDataQP, \
                         discardInvalidHeaderPkt, \
                         calcFraglen, \
                         calcPktLen, \
@@ -506,7 +506,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         // $display("time=%0t: 3rd stage prepareValidation", $time);
     endrule
 
-    rule checkQpMetaData;
+    rule checkMetaDataQP;
         let payloadFrag = payloadValidationQ.first;
         payloadValidationQ.deq;
 
@@ -536,7 +536,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 );
             end
             $display(
-                "time=%0t: checkQpMetaData", $time,
+                "time=%0t: checkMetaDataQP", $time,
                 ", dqpn=%h, pdHandler=%h, bth.psn=%h",
                 headerValidateInfo.dqpn, pdHandler, bth.psn,
                 ", bth.opcode=", fshow(bth.opcode),
@@ -575,7 +575,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         end
 
         payloadFilterQ.enq(payloadFrag);
-        // $display("time=%0t: 4th stage checkQpMetaData", $time);
+        // $display("time=%0t: 4th stage checkMetaDataQP", $time);
     endrule
 
     rule discardInvalidHeaderPkt;

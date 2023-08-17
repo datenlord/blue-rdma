@@ -12,7 +12,7 @@ import SimDma :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestSegmentDataStream(Empty);
     let minDmaLen = 1;
     let maxDmaLen = 10000;
@@ -76,7 +76,7 @@ module mkTestSegmentDataStream(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPsnFunc(Empty);
     let maxCycles = 100;
 

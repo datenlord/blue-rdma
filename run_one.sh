@@ -9,14 +9,14 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-TEST_LOG=try.log
+TEST_LOG=test.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
 FILES=`ls TestReqGenSQ.bsv`
 for FILE in $FILES; do
     # echo $FILE
-    TESTCASES=`grep -Phzo 'synthesize.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`
+    TESTCASES=`grep -Phzo 'doc.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`
     for TESTCASE in $TESTCASES; do
         make -j8 TESTFILE=$FILE TOPMODULE=$TESTCASE 2>&1 | tee -a $TEST_LOG
     done

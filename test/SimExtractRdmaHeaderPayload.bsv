@@ -178,7 +178,7 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
     interface payload     = toPipeOut(payloadOutQ);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestSimExtractNormalHeaderPayload(Empty);
     let minPayloadLen = 1;
     let maxPayloadLen = 2048;

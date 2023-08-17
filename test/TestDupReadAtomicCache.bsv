@@ -15,7 +15,7 @@ import Utils4Test :: *;
 
 typedef Bit#(64) ItemType;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCacheFIFO(Empty);
     function Tuple2#(ItemType, ItemType) convertFunc(ItemType item4Search, ItemType itemInQ);
         return tuple2(item4Search, itemInQ);
@@ -95,7 +95,7 @@ module mkTestCacheFIFO(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestDupReadAtomicCache(Empty);
     function Bool compareDupReadAddrAndLen(PMTU pmtu, RETH dupReadReth, RETH origReadReth);
         let {

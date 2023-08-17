@@ -126,19 +126,19 @@ module mkSimGenNormalOrErrOrRetryRdmaResp#(
     endcase
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleNormalRespCase(Empty);
     let respType = TEST_RESP_HANDLE_NORMAL_RESP;
     let result <- mkTestRespHandleNormalOrDupOrGhostRespCase(respType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleDupRespCase(Empty);
     let respType = TEST_RESP_HANDLE_DUP_RESP;
     let result <- mkTestRespHandleNormalOrDupOrGhostRespCase(respType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleGhostRespCase(Empty);
     let respType = TEST_RESP_HANDLE_GHOST_RESP;
     let result <- mkTestRespHandleNormalOrDupOrGhostRespCase(respType);
@@ -305,7 +305,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
             // );
         end
         // $display(
-        //     "time=%0t:", $time, ", pendingWR ID=%h", pendingWR.wr.id
+        //     "time=%0t:", $time, ", pendingWR.wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -375,25 +375,25 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleRespErrCase(Empty);
     let respType = TEST_RESP_HANDLE_ERROR_RESP;
     let result <- mkTestRespHandleAbnormalCase(respType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleRetryErrCase(Empty);
     let respType = TEST_RESP_HANDLE_RETRY_LIMIT_EXC;
     let result <- mkTestRespHandleAbnormalCase(respType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleTimeOutErrCase(Empty);
     let respType = TEST_RESP_HANDLE_TIMEOUT_ERR;
     let result <- mkTestRespHandleAbnormalCase(respType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandlePermCheckFailCase(Empty);
     let respType = TEST_RESP_HANDLE_PERM_CHECK_FAIL;
     let result <- mkTestRespHandleAbnormalCase(respType);
@@ -564,21 +564,21 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleRnrCase(Empty);
     let rnrOrSeqErr = True;
     let nestedRetry = False;
     let result <- mkTestRespHandleRetryCase(rnrOrSeqErr, nestedRetry);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleSeqErrCase(Empty);
     let rnrOrSeqErr = False;
     let nestedRetry = False;
     let result <- mkTestRespHandleRetryCase(rnrOrSeqErr, nestedRetry);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRespHandleNestedRetryCase(Empty);
     let rnrOrSeqErr = False;
     let nestedRetry = True;
@@ -824,8 +824,8 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
         else begin
             // $display(
             //     "time=%0t:", $time,
-            //     " wait retry restart for WR ID=%h", retryWorkReqIdReg,
-            //     ", but current WR ID=%h", workReqID
+            //     " wait retry restart for wr.id=%h", retryWorkReqIdReg,
+            //     ", but current wr.id=%h", workReqID
             // );
         end
     endrule

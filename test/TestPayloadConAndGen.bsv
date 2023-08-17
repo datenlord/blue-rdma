@@ -22,7 +22,7 @@ typedef enum {
     TEST_DMA_CNTRL_WAIT_IDLE
 } TestDmaCntrlState deriving(Bits, Eq, FShow);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestDmaReadCntrl(Empty);
     let minpktLen = 2048;
     let maxpktLen = 4096;
@@ -37,7 +37,7 @@ module mkTestDmaReadCntrl(Empty);
     let pktLenPipeOut4Read = pktLenPipeOutVec[0];
 
     let simDmaReadSrv <- mkSimDmaReadSrv;
-    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
 
     Reg#(TestDmaCntrlState) stateReg <- mkReg(TEST_DMA_CNTRL_ISSUE_REQ);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
@@ -72,7 +72,7 @@ module mkTestDmaReadCntrl(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestDmaWriteCntrl(Empty);
     let minpktLen = 2048;
     let maxpktLen = 4096;
@@ -148,7 +148,7 @@ module mkTestDmaWriteCntrl(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPayloadConAndGenNormalCase(Empty);
     let minpktLen = 2048;
     let maxpktLen = 4096;
@@ -172,7 +172,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let simDmaReadSrvDataStreamPipeOut <- mkBufferN(2, simDmaReadSrv.dataStream);
 
-    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv.dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus,
         dmaReadCntrl
@@ -311,7 +311,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     let minpktLen = 2048;
     let maxpktLen = 4096;
@@ -335,7 +335,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         simDmaReadSrvDataStreamPipeOut, pmtuPipeOut
     );
 
-    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv.dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus,
         dmaReadCntrl

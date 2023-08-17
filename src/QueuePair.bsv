@@ -140,16 +140,17 @@ endmodule
 interface SQ;
     interface DataStreamPipeOut rdmaReqDataStreamPipeOut;
     interface WorkCompGen workCompSQ;
-    method Bool notGracefulStop();
+    method Bool reqHeaderOutNotEmpty();
     method Bool pendingWorkReqNotEmpty();
+    // method Bool notGracefulStop();
     // interface PipeOut#(WorkComp) workCompPipeOutSQ;
 endinterface
 
 module mkSQ#(
     ContextSQ contextSQ,
-    DmaReadCntrl dmaReadCntrl,
+    PayloadGenerator payloadGenerator,
+    // DmaReadCntrl dmaReadCntrl,
     DmaWriteCntrl dmaWriteCntrl,
-    // PayloadGenerator payloadGenerator,
     PermCheckSrv permCheckSrv,
     PipeOut#(WorkReq) workReqPipeIn,
     RdmaPktMetaDataAndPayloadPipeOut respPktPipeOut
@@ -170,9 +171,9 @@ module mkSQ#(
         newPendingWorkReqPiptOut
     );
 
-    let payloadGenerator <- mkPayloadGenerator(
-        contextSQ.statusSQ, dmaReadCntrl
-    );
+    // let payloadGenerator <- mkPayloadGenerator(
+    //     contextSQ.statusSQ, dmaReadCntrl
+    // );
     let reqGenSQ <- mkReqGenSQ(
         contextSQ,
         payloadGenerator,
@@ -228,7 +229,8 @@ module mkSQ#(
 */
     interface rdmaReqDataStreamPipeOut = reqGenSQ.rdmaReqDataStreamPipeOut;
     interface workCompSQ = workCompGenSQ;
-    method Bool notGracefulStop() = reqGenSQ.reqHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
+    method Bool reqHeaderOutNotEmpty() = reqGenSQ.reqHeaderOutNotEmpty;
+    // method Bool notGracefulStop() = reqGenSQ.reqHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
     method Bool pendingWorkReqNotEmpty() = pendingWorkReqBuf.fifof.notEmpty;
     // interface workCompPipeOutSQ = workCompPipeOut;
 endmodule
@@ -236,16 +238,17 @@ endmodule
 interface RQ;
     interface DataStreamPipeOut rdmaRespDataStreamPipeOut;
     interface WorkCompGen workCompRQ;
-    method Bool notGracefulStop();
+    method Bool respHeaderOutNotEmpty();
+    // method Bool notGracefulStop();
     // interface PipeOut#(WorkComp) workCompPipeOutRQ;
     // interface PipeOut#(WorkCompStatus) workCompStatusPipeOutRQ;
 endinterface
 
 module mkRQ#(
     ContextRQ contextRQ,
-    DmaReadCntrl dmaReadCntrl,
+    PayloadGenerator payloadGenerator,
+    // DmaReadCntrl dmaReadCntrl,
     DmaWriteCntrl dmaWriteCntrl,
-    // PayloadGenerator payloadGenerator,
     PermCheckSrv permCheckSrv,
     RecvReqBuf recvReqBuf,
     RdmaPktMetaDataAndPayloadPipeOut reqPktPipeIn
@@ -254,9 +257,9 @@ module mkRQ#(
         contextRQ.statusRQ.comm.getPMTU
     );
 
-    let payloadGenerator <- mkPayloadGenerator(
-        contextRQ.statusRQ, dmaReadCntrl
-    );
+    // let payloadGenerator <- mkPayloadGenerator(
+    //     contextRQ.statusRQ, dmaReadCntrl
+    // );
     let reqHandlerRQ <- mkReqHandleRQ(
         contextRQ,
         payloadGenerator,
@@ -288,7 +291,8 @@ module mkRQ#(
 
     interface rdmaRespDataStreamPipeOut = reqHandlerRQ.rdmaRespDataStreamPipeOut;
     interface workCompRQ = workCompGenRQ;
-    method Bool notGracefulStop() = reqHandlerRQ.respHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
+    method Bool respHeaderOutNotEmpty() = reqHandlerRQ.respHeaderOutNotEmpty;
+    // method Bool notGracefulStop() = reqHandlerRQ.respHeaderOutNotEmpty || payloadGenerator.notGracefulStop;
     // interface workCompPipeOutRQ = workCompGenRQ.workCompPipeOut;
     // interface workCompStatusPipeOutRQ = workCompGenRQ.workCompStatusPipeOutRQ;
 endmodule
@@ -486,6 +490,11 @@ module mkQP(QueuePair);
     let recvReqBufPipeOut = toPipeOut(recvReqQ);
     let workReqBufPipeOut = toPipeOut(workReqQ);
 
+    Reg#(Bool)  sqDmaReadCancelReg <- mkReg(False);
+    Reg#(Bool)  rqDmaReadCancelReg <- mkReg(False);
+    Reg#(Bool) sqDmaWriteCancelReg <- mkReg(False);
+    Reg#(Bool) rqDmaWriteCancelReg <- mkReg(False);
+
     let cntrl <- mkCntrlQP;
     // let dmaArbiter <- mkDmaArbiter4QP;
     DmaReadProxy   dmaReadProxy4SQ   <- mkServerProxy;
@@ -495,13 +504,24 @@ module mkQP(QueuePair);
     PermCheckProxy permCheckProxy4RQ <- mkServerProxy;
     PermCheckProxy permCheckProxy4SQ <- mkServerProxy;
 
-    let dmaReadCntrl4RQ <- mkDmaReadCntrl(dmaReadProxy4RQ.srvPort);
+    let dmaReadCntrl4RQ <- mkDmaReadCntrl(
+        cntrl.contextRQ.statusRQ, dmaReadProxy4RQ.srvPort
+    );
     let dmaWriteCntrl4RQ <- mkDmaWriteCntrl(
         cntrl.contextRQ.statusRQ, dmaWriteProxy4RQ.srvPort
     );
-    let dmaReadCntrl4SQ <- mkDmaReadCntrl(dmaReadProxy4SQ.srvPort);
+    let dmaReadCntrl4SQ <- mkDmaReadCntrl(
+        cntrl.contextSQ.statusSQ, dmaReadProxy4SQ.srvPort
+    );
     let dmaWriteCntrl4SQ <- mkDmaWriteCntrl(
         cntrl.contextSQ.statusSQ, dmaWriteProxy4SQ.srvPort
+    );
+
+    let payloadGenerator4RQ <- mkPayloadGenerator(
+        cntrl.contextRQ.statusRQ, dmaReadCntrl4RQ
+    );
+    let payloadGenerator4SQ <- mkPayloadGenerator(
+        cntrl.contextSQ.statusSQ, dmaReadCntrl4SQ
     );
 
     let reqPktPipe  <- mkRdmaPktMetaDataAndPayloadPipe;
@@ -509,7 +529,8 @@ module mkQP(QueuePair);
 
     let rq <- mkRQ(
         cntrl.contextRQ,
-        dmaReadCntrl4RQ,
+        payloadGenerator4RQ,
+        // dmaReadCntrl4RQ,
         dmaWriteCntrl4RQ,
         permCheckProxy4RQ.srvPort,
         recvReqBufPipeOut,
@@ -518,7 +539,8 @@ module mkQP(QueuePair);
 
     let sq <- mkSQ(
         cntrl.contextSQ,
-        dmaReadCntrl4SQ,
+        payloadGenerator4SQ,
+        // dmaReadCntrl4SQ,
         dmaWriteCntrl4SQ,
         permCheckProxy4SQ.srvPort,
         workReqBufPipeOut,
@@ -536,6 +558,10 @@ module mkQP(QueuePair);
         reqPktPipe.clear;
         respPktPipe.clear;
 
+        sqDmaReadCancelReg  <= False;
+        rqDmaReadCancelReg  <= False;
+        sqDmaWriteCancelReg <= False;
+        rqDmaWriteCancelReg <= False;
         // $display("time=%0t: reset and clear mkQueuePair", $time);
     endrule
 
@@ -547,13 +573,64 @@ module mkQP(QueuePair);
     endrule
 
     // (* no_implicit_conditions, fire_when_enabled *)
+    rule cancelDmaReadRQ if (
+        cntrl.contextSQ.statusSQ.comm.isERR &&
+        !rq.respHeaderOutNotEmpty           &&
+        !rqDmaReadCancelReg
+    );
+        dmaReadCntrl4RQ.dmaCntrl.cancel;
+        rqDmaReadCancelReg <= True;
+
+        $display(
+            "time=%0t: cancelDmaReadRQ", $time,
+            ", dqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        );
+    endrule
+
+    // (* no_implicit_conditions, fire_when_enabled *)
+    rule cancelDmaReadSQ if (
+        cntrl.contextSQ.statusSQ.comm.isERR &&
+        !sq.reqHeaderOutNotEmpty            &&
+        !sqDmaReadCancelReg
+    );
+        dmaReadCntrl4SQ.dmaCntrl.cancel;
+        sqDmaReadCancelReg <= True;
+
+        $display(
+            "time=%0t: cancelDmaReadSQ", $time,
+            ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        );
+    endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule cancelDmaWriteRQ if (cntrl.contextSQ.statusSQ.comm.isERR);
+        // TODO: support graceful stop for DMA write
+        dmaWriteCntrl4RQ.dmaCntrl.cancel;
+        rqDmaWriteCancelReg <= True;
+    endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule cancelDmaWriteSQ if (cntrl.contextSQ.statusSQ.comm.isERR);
+        // TODO: support graceful stop for DMA write
+        dmaWriteCntrl4SQ.dmaCntrl.cancel;
+        sqDmaWriteCancelReg <= True;
+    endrule
+
+    // (* no_implicit_conditions, fire_when_enabled *)
+    (* fire_when_enabled *)
     rule waitGracefulStop if (
         cntrl.contextSQ.statusSQ.comm.isERR &&
         !recvReqQ.notEmpty                  &&
         // !workReqQ.notEmpty                  &&
         // !sq.pendingWorkReqNotEmpty          &&
-        !rq.notGracefulStop                 &&
-        !sq.notGracefulStop                 &&
+        rqDmaReadCancelReg                  &&
+        rqDmaWriteCancelReg                 &&
+        sqDmaReadCancelReg                  &&
+        sqDmaWriteCancelReg                 &&
         dmaReadCntrl4RQ.dmaCntrl.isIdle     &&
         dmaWriteCntrl4RQ.dmaCntrl.isIdle    &&
         dmaReadCntrl4SQ.dmaCntrl.isIdle     &&
@@ -568,19 +645,23 @@ module mkQP(QueuePair);
             ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
         );
     endrule
-/*
+
     rule debug if (
         cntrl.contextRQ.statusRQ.comm.isERR &&
         cntrl.contextSQ.statusSQ.comm.isERR &&
         !(
-            !recvReqQ.notEmpty                 &&
-            !workReqQ.notEmpty                 &&
-            !sq.pendingWorkReqNotEmpty         &&
-            !rq.notGracefulStop                &&
-            !sq.notGracefulStop                &&
-            dmaReadCntrl4RQ.dmaCntrl.isIdle    &&
-            dmaWriteCntrl4RQ.dmaCntrl.isIdle   &&
-            dmaReadCntrl4SQ.dmaCntrl.isIdle    &&
+            !recvReqQ.notEmpty               &&
+            !workReqQ.notEmpty               &&
+            !rq.respHeaderOutNotEmpty        &&
+            !sq.reqHeaderOutNotEmpty         &&
+            !sq.pendingWorkReqNotEmpty       &&
+            rqDmaReadCancelReg               &&
+            rqDmaWriteCancelReg              &&
+            sqDmaReadCancelReg               &&
+            sqDmaWriteCancelReg              &&
+            dmaReadCntrl4RQ.dmaCntrl.isIdle  &&
+            dmaWriteCntrl4RQ.dmaCntrl.isIdle &&
+            dmaReadCntrl4SQ.dmaCntrl.isIdle  &&
             dmaWriteCntrl4SQ.dmaCntrl.isIdle
         )
     );
@@ -591,16 +672,20 @@ module mkQP(QueuePair);
             ", cntrl.contextSQ.statusSQ.comm.isERR=", fshow(cntrl.contextSQ.statusSQ.comm.isERR),
             ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty),
             ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+            ", rq.respHeaderOutNotEmpty=", fshow(rq.respHeaderOutNotEmpty),
+            ", sq.reqHeaderOutNotEmpty=", fshow(sq.reqHeaderOutNotEmpty),
             ", sq.pendingWorkReqNotEmpty=", fshow(sq.pendingWorkReqNotEmpty),
-            ", rq.notGracefulStop=", fshow(rq.notGracefulStop),
-            ", sq.notGracefulStop=", fshow(sq.notGracefulStop),
+            ", rqDmaReadCancelReg=", fshow(rqDmaReadCancelReg),
+            ", rqDmaWriteCancelReg=", fshow(rqDmaWriteCancelReg),
+            ", sqDmaReadCancelReg=", fshow(sqDmaReadCancelReg),
+            ", sqDmaWriteCancelReg=", fshow(sqDmaWriteCancelReg),
             ", dmaReadCntrl4RQ.dmaCntrl.isIdle=", fshow(dmaReadCntrl4RQ.dmaCntrl.isIdle),
             ", dmaWriteCntrl4RQ.dmaCntrl.isIdle=", fshow(dmaWriteCntrl4RQ.dmaCntrl.isIdle),
             ", dmaReadCntrl4SQ.dmaCntrl.isIdle=", fshow(dmaReadCntrl4SQ.dmaCntrl.isIdle),
             ", dmaWriteCntrl4SQ.dmaCntrl.isIdle=", fshow(dmaWriteCntrl4SQ.dmaCntrl.isIdle)
         );
     endrule
-*/
+
     interface srvPortQP       = cntrl.srvPort;
     interface recvReqIn       = toPut(recvReqQ);
     interface workReqIn       = toPut(workReqQ);

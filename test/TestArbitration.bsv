@@ -137,7 +137,7 @@ endmodule
 function Bool reqFinished(ReqType req) = getTupleSecond(req);
 function Bool respFinished(RespType resp) = getTupleSecond(resp);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestServerArbiter(Empty);
     function genClientFragCnt(idx);
         return mkCount(fromInteger(idx));
@@ -221,7 +221,7 @@ module mkTestServerArbiter(Empty);
     end
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestClientArbiter(Empty);
     function genClient(idx);
         return mkEchoClt(idx);
@@ -283,7 +283,7 @@ module mkTestClientArbiter(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPipeOutArbiter(Empty);
     function Bool isPipePayloadFinished(
         PayloadType pipePayload
