@@ -1211,7 +1211,6 @@ module mkReqHandleRQ#(
         let rdmaHeader = pktMetaData.pktHeader;
         let reth       = extractRETH(rdmaHeader.headerData, bth.trans);
         let atomicEth  = extractAtomicEth(rdmaHeader.headerData, bth.trans);
-
         let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
         let isFirstOrOnlyPkt = reqPktInfo.isFirstOrOnlyPkt;
         let isSendReq        = reqPktInfo.isSendReq;
@@ -1220,45 +1219,78 @@ module mkReqHandleRQ#(
         let isWriteImmReq    = reqPktInfo.isWriteImmReq;
         let isAtomicReq      = reqPktInfo.isAtomicReq;
 
-        // TODO: remove RR ID for request error cases
-        let curPermCheckReq = contextRQ.getPermCheckReq;
-        // Duplicate requests no use PermCheckReq
-        if (reqStatus == RDMA_REQ_ST_NORMAL && !hasErrHappened) begin
-            case ({ pack(isFirstOrOnlyPkt && isSendReq), pack(hasReth), pack(isAtomicReq) })
-                3'b100: begin // send
-                    let recvReq = unwrapMaybe(maybeRecvReq);
-                    immAssert(
-                        isValid(maybeRecvReq),
-                        "maybeRecvReq assertion @ mkReqHandleRQ",
-                        $format(
-                            "maybeRecvReq=", fshow(maybeRecvReq),
-                            " should be valid when isFirstOrOnlyPkt=", fshow(isFirstOrOnlyPkt),
-                            " and isSendReq=", fshow(isSendReq)
-                        )
-                    );
+        let isZeroRethLen   = isZeroR(reth.dlen);
+        let curPermCheckReq = PermCheckReq {
+            wrID         : tagged Invalid,
+            lkey         : dontCareValue,
+            rkey         : dontCareValue,
+            reqAddr      : dontCareValue,
+            totalLen     : 0,
+            pdHandler    : pktMetaData.pdHandler,
+            isZeroDmaLen : True,
+            accFlags     : enum2Flag(IBV_ACCESS_LOCAL_WRITE),
+            localOrRmtKey: True
+        };
 
-                    curPermCheckReq.wrID          = tagged Valid recvReq.id;
-                    curPermCheckReq.lkey          = recvReq.lkey;
-                    curPermCheckReq.rkey          = dontCareValue;
-                    curPermCheckReq.reqAddr       = recvReq.laddr;
-                    curPermCheckReq.totalLen      = isZeroPayloadLen ? 0 : recvReq.len;
-                    curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
-                    curPermCheckReq.isZeroDmaLen  = isZeroPayloadLen;
-                    curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_LOCAL_WRITE);
-                    curPermCheckReq.localOrRmtKey = True;
+        // Duplicate requests no use PermCheckReq except read
+        let isNormalReq = reqStatus == RDMA_REQ_ST_NORMAL;
+        let isDupReq    = reqStatus == RDMA_REQ_ST_DUP;
+        if (!hasErrHappened) begin
+            case ({
+                pack(isSendReq   && isNormalReq),
+                pack(isWriteReq  && isNormalReq),
+                pack(isReadReq   && (isNormalReq || isDupReq)),
+                pack(isAtomicReq && isNormalReq)
+            })
+                4'b1000: begin // send
+                    if (isFirstOrOnlyPkt) begin
+                        let recvReq = unwrapMaybe(maybeRecvReq);
+                        immAssert(
+                            isValid(maybeRecvReq),
+                            "maybeRecvReq assertion @ mkReqHandleRQ",
+                            $format(
+                                "maybeRecvReq=", fshow(maybeRecvReq),
+                                " should be valid when isFirstOrOnlyPkt=", fshow(isFirstOrOnlyPkt),
+                                " and isSendReq=", fshow(isSendReq)
+                            )
+                        );
+
+                        curPermCheckReq.wrID          = tagged Valid recvReq.id;
+                        curPermCheckReq.lkey          = recvReq.lkey;
+                        curPermCheckReq.rkey          = dontCareValue;
+                        curPermCheckReq.reqAddr       = recvReq.laddr;
+                        curPermCheckReq.totalLen      = isZeroPayloadLen ? 0 : recvReq.len;
+                        curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
+                        curPermCheckReq.isZeroDmaLen  = isZeroPayloadLen;
+                        curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_LOCAL_WRITE);
+                        curPermCheckReq.localOrRmtKey = True;
+
+                        contextRQ.setPermCheckReq(curPermCheckReq);
+                    end
+                    else begin
+                        curPermCheckReq = contextRQ.getPermCheckReq;
+                    end
                 end
-                3'b010: begin // read and write
-                    curPermCheckReq.wrID          = tagged Invalid;
-                    curPermCheckReq.rkey          = reth.rkey;
-                    curPermCheckReq.lkey          = dontCareValue;
-                    curPermCheckReq.reqAddr       = reth.va;
-                    curPermCheckReq.totalLen      = reth.dlen;
-                    curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
-                    curPermCheckReq.isZeroDmaLen  = isZeroR(reth.dlen);
-                    curPermCheckReq.accFlags      = enum2Flag(isReadReq ? IBV_ACCESS_REMOTE_READ : IBV_ACCESS_REMOTE_WRITE);
-                    curPermCheckReq.localOrRmtKey = False;
+                4'b0100: begin // write
+                    if (isFirstOrOnlyPkt) begin
+                        curPermCheckReq.wrID          = tagged Invalid;
+                        curPermCheckReq.rkey          = reth.rkey;
+                        curPermCheckReq.lkey          = dontCareValue;
+                        curPermCheckReq.reqAddr       = reth.va;
+                        curPermCheckReq.totalLen      = reth.dlen;
+                        curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
+                        curPermCheckReq.isZeroDmaLen  = isZeroRethLen;
+                        curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_REMOTE_WRITE);
+                        curPermCheckReq.localOrRmtKey = False;
+
+                        contextRQ.setPermCheckReq(curPermCheckReq);
+                    end
+                    else begin
+                        curPermCheckReq = contextRQ.getPermCheckReq;
+                    end
 
                     if (isWriteImmReq) begin
+                        let recvReq = unwrapMaybe(maybeRecvReq);
                         immAssert(
                             isValid(maybeRecvReq),
                             "maybeRecvReq assertion @ mkReqHandleRQ",
@@ -1267,7 +1299,19 @@ module mkReqHandleRQ#(
                                 " should be valid when isWriteImmReq=", fshow(isWriteImmReq)
                             )
                         );
+
+                        curPermCheckReq.wrID = tagged Valid recvReq.id;
                     end
+                    // if (isWriteImmReq) begin
+                    //     immAssert(
+                    //         isValid(maybeRecvReq),
+                    //         "maybeRecvReq assertion @ mkReqHandleRQ",
+                    //         $format(
+                    //             "maybeRecvReq=", fshow(maybeRecvReq),
+                    //             " should be valid when isWriteImmReq=", fshow(isWriteImmReq)
+                    //         )
+                    //     );
+                    // end
                     else begin
                         immAssert(
                             !isValid(maybeRecvReq),
@@ -1279,7 +1323,27 @@ module mkReqHandleRQ#(
                         );
                     end
                 end
-                3'b001: begin // atomic
+                4'b0010: begin // read
+                    immAssert(
+                        !isValid(maybeRecvReq),
+                        "maybeRecvReq assertion @ mkReqHandleRQ",
+                        $format(
+                            "maybeRecvReq=", fshow(maybeRecvReq),
+                            " should be invalid when bth.opcode=", fshow(bth.opcode)
+                        )
+                    );
+
+                    curPermCheckReq.wrID          = tagged Invalid;
+                    curPermCheckReq.rkey          = reth.rkey;
+                    curPermCheckReq.lkey          = dontCareValue;
+                    curPermCheckReq.reqAddr       = reth.va;
+                    curPermCheckReq.totalLen      = reth.dlen;
+                    curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
+                    curPermCheckReq.isZeroDmaLen  = isZeroRethLen;
+                    curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_REMOTE_READ);
+                    curPermCheckReq.localOrRmtKey = False;
+                end
+                4'b0001: begin // atomic
                     immAssert(
                         !isValid(maybeRecvReq),
                         "maybeRecvReq assertion @ mkReqHandleRQ",
@@ -1300,78 +1364,71 @@ module mkReqHandleRQ#(
                     curPermCheckReq.localOrRmtKey = False;
                 end
                 default: begin
-                    immAssert(
-                        (isSendReq || isWriteReq) && !isFirstOrOnlyPkt,
-                        "unreachible case @ mkReqHandleRQ",
-                        $format(
-                            "bth.opcode=", fshow(bth.opcode),
-                            ", hasReth=", fshow(hasReth),
-                            ", isSendReq=", fshow(isSendReq),
-                            ", isWriteReq=", fshow(isWriteReq),
-                            ", isReadReq=", fshow(isReadReq),
-                            ", isAtomicReq=", fshow(isAtomicReq),
-                            ", isFirstOrOnlyPkt=", fshow(isFirstOrOnlyPkt)
-                        )
-                    );
+                    if (reqStatus == RDMA_REQ_ST_ERR_FLUSH_RR) begin
+                        if (maybeRecvReq matches tagged Valid .recvReq) begin
+                            curPermCheckReq.wrID     = tagged Valid recvReq.id;
+                            curPermCheckReq.lkey     = recvReq.lkey;
+                            curPermCheckReq.reqAddr  = recvReq.laddr;
+                            curPermCheckReq.totalLen = recvReq.len;
+                        end
+                    end
+                    // immAssert(
+                    //     (isSendReq || isWriteReq) && !isFirstOrOnlyPkt,
+                    //     "unreachible case @ mkReqHandleRQ",
+                    //     $format(
+                    //         "bth.opcode=", fshow(bth.opcode),
+                    //         ", hasReth=", fshow(hasReth),
+                    //         ", isSendReq=", fshow(isSendReq),
+                    //         ", isWriteReq=", fshow(isWriteReq),
+                    //         ", isReadReq=", fshow(isReadReq),
+                    //         ", isAtomicReq=", fshow(isAtomicReq),
+                    //         ", isFirstOrOnlyPkt=", fshow(isFirstOrOnlyPkt)
+                    //     )
+                    // );
 
-                    if (isWriteImmReq) begin
-                        immAssert(
-                            isValid(maybeRecvReq),
-                            "maybeRecvReq assertion @ mkReqHandleRQ",
-                            $format(
-                                "maybeRecvReq=", fshow(maybeRecvReq),
-                                " should be valid when isWriteImmReq=", fshow(isWriteImmReq)
-                            )
-                        );
-                    end
-                    else begin
-                        immAssert(
-                            !isValid(maybeRecvReq),
-                            "maybeRecvReq assertion @ mkReqHandleRQ",
-                            $format(
-                                "maybeRecvReq=", fshow(maybeRecvReq),
-                                " should be invalid when bth.opcode=", fshow(bth.opcode)
-                            )
-                        );
-                    end
+                    // if (isWriteImmReq) begin
+                    //     immAssert(
+                    //         isValid(maybeRecvReq),
+                    //         "maybeRecvReq assertion @ mkReqHandleRQ",
+                    //         $format(
+                    //             "maybeRecvReq=", fshow(maybeRecvReq),
+                    //             " should be valid when isWriteImmReq=", fshow(isWriteImmReq)
+                    //         )
+                    //     );
+                    // end
+                    // else begin
+                    //     immAssert(
+                    //         !isValid(maybeRecvReq),
+                    //         "maybeRecvReq assertion @ mkReqHandleRQ",
+                    //         $format(
+                    //             "maybeRecvReq=", fshow(maybeRecvReq),
+                    //             " should be invalid when bth.opcode=", fshow(bth.opcode)
+                    //         )
+                    //     );
+                    // end
                 end
             endcase
-
-            if (isWriteImmReq) begin
-                let recvReq = unwrapMaybe(maybeRecvReq);
-                immAssert(
-                    isValid(maybeRecvReq),
-                    "maybeRecvReq assertion @ mkReqHandleRQ",
-                    $format(
-                        "maybeRecvReq=", fshow(maybeRecvReq),
-                        " should be valid when isWriteImmReq=", fshow(isWriteImmReq)
-                    )
-                );
-
-                curPermCheckReq.wrID = tagged Valid recvReq.id;
-            end
-            contextRQ.setPermCheckReq(curPermCheckReq);
         end
-        else begin
-            curPermCheckReq.wrID          = tagged Invalid;
-            curPermCheckReq.lkey          = dontCareValue;
-            curPermCheckReq.rkey          = dontCareValue;
-            curPermCheckReq.reqAddr       = dontCareValue;
-            curPermCheckReq.totalLen      = 0;
-            curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
-            curPermCheckReq.isZeroDmaLen  = True;
-            curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_LOCAL_WRITE);
-            curPermCheckReq.localOrRmtKey = True;
+        // else begin
+        //     curPermCheckReq.wrID          = tagged Invalid;
+        //     curPermCheckReq.lkey          = dontCareValue;
+        //     curPermCheckReq.rkey          = dontCareValue;
+        //     curPermCheckReq.reqAddr       = dontCareValue;
+        //     curPermCheckReq.totalLen      = 0;
+        //     curPermCheckReq.pdHandler     = pktMetaData.pdHandler;
+        //     curPermCheckReq.isZeroDmaLen  = True;
+        //     curPermCheckReq.accFlags      = enum2Flag(IBV_ACCESS_LOCAL_WRITE);
+        //     curPermCheckReq.localOrRmtKey = True;
 
-            if (reqStatus == RDMA_REQ_ST_ERR_FLUSH_RR) begin
-                if (maybeRecvReq matches tagged Valid .recvReq) begin
-                    curPermCheckReq.wrID     = tagged Valid recvReq.id;
-                    curPermCheckReq.lkey     = recvReq.lkey;
-                    curPermCheckReq.reqAddr  = recvReq.laddr;
-                    curPermCheckReq.totalLen = recvReq.len;
-                end
-            end
-        end
+        //     if (reqStatus == RDMA_REQ_ST_ERR_FLUSH_RR) begin
+        //         if (maybeRecvReq matches tagged Valid .recvReq) begin
+        //             curPermCheckReq.wrID     = tagged Valid recvReq.id;
+        //             curPermCheckReq.lkey     = recvReq.lkey;
+        //             curPermCheckReq.reqAddr  = recvReq.laddr;
+        //             curPermCheckReq.totalLen = recvReq.len;
+        //         end
+        //     end
+        // end
 
         reqPermQueryQ.enq(tuple5(
             pktMetaData, reqStatus, curPermCheckReq, reqPktInfo, reth
@@ -1379,7 +1436,9 @@ module mkReqHandleRQ#(
         $display(
             "time=%0t: 7th stage buildPermCheckReq", $time,
             ", bth.opcode=", fshow(bth.opcode),
-            ", bth.psn=%h", bth.psn, ", reqStatus=", fshow(reqStatus)
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", curPermCheckReq=", fshow(curPermCheckReq)
         );
     endrule
 
@@ -3085,6 +3144,7 @@ module mkReqHandleRQ#(
                     $display(
                         "time=%0t: generate middle or last response header", $time,
                         ", respPSN=%h", respPSN,
+                        ", reqStatus=", fshow(reqStatus),
                         ", middleOrLastHeader=", fshow(middleOrLastHeader)
                     );
                 end

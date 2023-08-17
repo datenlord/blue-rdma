@@ -23,6 +23,7 @@ module mkTestTransportLayerNormalCase(Empty);
     let result <- mkTestTransportLayerNormalOrErrCase(normalOrErrCase);
 endmodule
 
+(* doc = "testcase" *)
 module mkTestTransportLayerErrorCase(Empty);
     let normalOrErrCase = False;
     let result <- mkTestTransportLayerNormalOrErrCase(normalOrErrCase);
@@ -371,12 +372,12 @@ module mkInitMetaDataAndConnectQP#(
                 if (needCheckResp) begin
                     workReqIdQ4Cmp.enq(tuple2(sqpn, wr.id));
                 end
-                $display(
-                    "time=%0t: issueWorkReq", $time,
-                    ", wrOpCode=", fshow(wrOpCode),
-                    ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
-                    sqpn, dqpn, lkey, rkey, wr.id, wr.len
-                );
+                // $display(
+                //     "time=%0t: issueWorkReq", $time,
+                //     ", wrOpCode=", fshow(wrOpCode),
+                //     ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
+                //     sqpn, dqpn, lkey, rkey, wr.id, wr.len
+                // );
             endrule
 
             rule collectWorkComp4SendSide if (
@@ -597,12 +598,12 @@ module mkInitMetaDataAndConnectQP#(
                 end
             endcase
 
-            $display(
-                "time=%0d: respAllocMRs", $time,
-                ", pdHandler=%h, allocRespMR.lkey=%h, allocRespMR.rkey=%h, vecIdx=%0d, reqTypeIdx=%0d",
-                pdHandler, allocRespMR.lkey, allocRespMR.rkey, vecIdx, reqTypeIdx,
-                ", isSendSideQ=", fshow(isSendSideQ)
-            );
+            // $display(
+            //     "time=%0d: respAllocMRs", $time,
+            //     ", pdHandler=%h, allocRespMR.lkey=%h, allocRespMR.rkey=%h, vecIdx=%0d, reqTypeIdx=%0d",
+            //     pdHandler, allocRespMR.lkey, allocRespMR.rkey, vecIdx, reqTypeIdx,
+            //     ", isSendSideQ=", fshow(isSendSideQ)
+            // );
         end
         else begin
             immFail(
@@ -637,11 +638,11 @@ module mkInitMetaDataAndConnectQP#(
         metaDataSrv.request.put(tagged Req4QP createReqQP);
 
         // if (isSendSideQ) begin
-        $display(
-            "time=%0t: reqCreateQPs", $time,
-            ", pdHandler=%h, qpReqCnt=%0d", pdHandler, qpReqCnt,
-            ", isSendSideQ=", fshow(isSendSideQ)
-        );
+        // $display(
+        //     "time=%0t: reqCreateQPs", $time,
+        //     ", pdHandler=%h, qpReqCnt=%0d", pdHandler, qpReqCnt,
+        //     ", isSendSideQ=", fshow(isSendSideQ)
+        // );
         // end
 
         // $display(
@@ -708,22 +709,6 @@ module mkInitMetaDataAndConnectQP#(
             qpnQ4ERR.enq(qpn);
             qpnQ4Destroy.enq(qpn);
 
-            // let maybeHandlerPD = transportLayer.getPD(qpn);
-            // immAssert(
-            //     isValid(maybeHandlerPD),
-            //     "PD valid assertion @ mkInitMetaData",
-            //     $format(
-            //         "isValid(maybeHandlerPD)=", fshow(isValid(maybeHandlerPD)),
-            //         " should be valid, when qpType=", fshow(createRespQP.qpInitAttr.qpType),
-            //         " and qpn=%h", qpn
-            //     )
-            // );
-            // $display(
-            //     "time=%0t: maybeHandlerPD=", $time, fshow(maybeHandlerPD),
-            //     " should be valid, when pdHandler=%h, qpn=%h, qpRespCnt=%h",
-            //     pdHandler, qpn, qpRespCnt
-            // );
-
             immAssert(
                 createRespQP.pdHandler == pdHandler,
                 "HandlerPD assertion @ mkInitMetaData",
@@ -773,13 +758,13 @@ module mkInitMetaDataAndConnectQP#(
         };
         metaDataSrv.request.put(tagged Req4QP initReqQP);
 
-        if (isSendSideQ) begin
-        $display(
-            "time=%0t: reqInitQPs", $time,
-            ", qpReqCnt=%0d", qpReqCnt,
-            ", isSendSideQ=", fshow(isSendSideQ)
-        );
-        end
+        // if (isSendSideQ) begin
+        // $display(
+        //     "time=%0t: reqInitQPs", $time,
+        //     ", qpReqCnt=%0d", qpReqCnt,
+        //     ", isSendSideQ=", fshow(isSendSideQ)
+        // );
+        // end
     endrule
 
     rule respInitQPs if (initMetaDataStateReg == META_DATA_INIT_QP);
@@ -858,13 +843,13 @@ module mkInitMetaDataAndConnectQP#(
         };
         metaDataSrv.request.put(tagged Req4QP setRtrReqQP);
 
-        if (isSendSideQ) begin
-        $display(
-            "time=%0t: reqRtrQPs", $time,
-            ", qpReqCnt=%0d", qpReqCnt,
-            ", isSendSideQ=", fshow(isSendSideQ)
-        );
-        end
+        // if (isSendSideQ) begin
+        // $display(
+        //     "time=%0t: reqRtrQPs", $time,
+        //     ", qpReqCnt=%0d", qpReqCnt,
+        //     ", isSendSideQ=", fshow(isSendSideQ)
+        // );
+        // end
     endrule
 
     rule respRtrQPs if (initMetaDataStateReg == META_DATA_SET_QP_RTR);
@@ -951,9 +936,9 @@ module mkInitMetaDataAndConnectQP#(
         };
         metaDataSrv.request.put(tagged Req4QP setRtsReqQP);
 
-        if (isSendSideQ) begin
-        $display("time=%0t: reqRtsQPs, qpReqCnt=%0d", $time, qpReqCnt);
-        end
+        // if (isSendSideQ) begin
+        // $display("time=%0t: reqRtsQPs, qpReqCnt=%0d", $time, qpReqCnt);
+        // end
     endrule
 
     rule respRtsQPs if (initMetaDataStateReg == META_DATA_SET_QP_RTS);
@@ -978,14 +963,14 @@ module mkInitMetaDataAndConnectQP#(
                 )
             );
 
-            if (isSendSideQ) begin
-            $display(
-                "time=%0t: setRtsRespQP=", $time, fshow(setRtsRespQP),
-                " should be success, and setRtsRespQP.qpn=%h, qpRespCnt=%h",
-                setRtsRespQP.qpn, qpRespCnt,
-                ", isSendSideQ=", fshow(isSendSideQ)
-            );
-            end
+            // if (isSendSideQ) begin
+            // $display(
+            //     "time=%0t: setRtsRespQP=", $time, fshow(setRtsRespQP),
+            //     " should be success, and setRtsRespQP.qpn=%h, qpRespCnt=%h",
+            //     setRtsRespQP.qpn, qpRespCnt,
+            //     ", isSendSideQ=", fshow(isSendSideQ)
+            // );
+            // end
         end
         else begin
             immFail(
@@ -1083,11 +1068,12 @@ module mkInitMetaDataAndConnectQP#(
 
             transportLayer.recvReqInput.put(rr);
             recvReqIdQ4Cmp.enq(tuple2(sqpn4RQ, rrID));
-            $display(
-                "time=%0t:", $time,
-                " issueRecvReq, rr.id=%h, sqpn4RQ=%h, lkey4Recv=%h",
-                rrID, sqpn4RQ, lkey4Recv
-            );
+
+            // $display(
+            //     "time=%0t:", $time,
+            //     " issueRecvReq, rr.id=%h, sqpn4RQ=%h, lkey4Recv=%h",
+            //     rrID, sqpn4RQ, lkey4Recv
+            // );
         endrule
 
         rule collectWorkComp4RecvSide if (
@@ -1100,12 +1086,13 @@ module mkInitMetaDataAndConnectQP#(
 
             let qpIndex = getIndexQP(wc.qpn);
             workCompVec4RecvReq[qpIndex] <= wc;
-            $display(
-                "time=%0t: collectWorkComp4RecvSide", $time,
-                ", qpIndex=%0d, wc.id=%h, wc.len=%0d", qpIndex, wc.id, wc.len,
-                ", wc.opcode=", fshow(wc.opcode),
-                ", wc.status=", fshow(wc.status)
-            );
+
+            // $display(
+            //     "time=%0t: collectWorkComp4RecvSide", $time,
+            //     ", qpIndex=%0d, wc.id=%h, wc.len=%0d", qpIndex, wc.id, wc.len,
+            //     ", wc.opcode=", fshow(wc.opcode),
+            //     ", wc.status=", fshow(wc.status)
+            // );
         endrule
 
         rule compareWorkComp4RecvSide if (
@@ -1235,13 +1222,13 @@ module mkInitMetaDataAndConnectQP#(
             qpInitAttr: dontCareValue
         };
         metaDataSrv.request.put(tagged Req4QP destroyReqQP);
-        if (isSendSideQ) begin
-        $display(
-            "time=%0t: reqDestroyQPs", $time,
-            ", qpReqCnt=%0d", qpReqCnt,
-            ", isSendSideQ=", fshow(isSendSideQ)
-        );
-        end
+        // if (isSendSideQ) begin
+        // $display(
+        //     "time=%0t: reqDestroyQPs", $time,
+        //     ", qpReqCnt=%0d", qpReqCnt,
+        //     ", isSendSideQ=", fshow(isSendSideQ)
+        // );
+        // end
     endrule
 
     rule respDestroyQPs if (initMetaDataStateReg == META_DATA_DESTROY_QP);
@@ -1300,14 +1287,8 @@ module mkInitMetaDataAndConnectQP#(
         sqpnQ4Read.clear;
         sqpnQ4Atomic.clear;
 
-        $display("time=%0t: loop, isSendSideQ=", $time, fshow(isSendSideQ));
+        // $display("time=%0t: loop, isSendSideQ=", $time, fshow(isSendSideQ));
     endrule
-    // let waitCond = normalOrErrCase ? !isSendSideQ : isSendSideQ;
-    // if (waitCond) begin
-    //     rule done if (initMetaDataStateReg == META_DATA_NO_OP);
-    //         normalExit;
-    //     endrule
-    // end
 
     interface qpnPipeOut         = toPipeOut(qpnQ4Out);
     // interface rkeyPipeOut4Send   = rkeyVecPipeOut4Send;

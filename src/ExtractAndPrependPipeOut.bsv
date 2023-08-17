@@ -670,8 +670,8 @@ module mkCombineHeaderAndPayload#(
             ", psnPipeIn.notEmpty=", fshow(psnPipeIn.notEmpty)
         );
     endrule
-*/
-    rule connect; // if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
+
+    rule connect;
         let dataStream = rdmaDataStreamPipeOut.first;
         rdmaDataStreamPipeOut.deq;
         outputQ.enq(dataStream);
@@ -705,18 +705,18 @@ module mkCombineHeaderAndPayload#(
             );
         end
     endrule
+*/
+    function Action deqActionFunc(DataStream dataStream);
+        action
+            if (dataStream.isLast) begin
+                psnPipeIn.deq;
+            end
+        endaction
+    endfunction
 
-    // function Action deqActionFunc(DataStream dataStream);
-    //     action
-    //         if (dataStream.isLast) begin
-    //             psnPipeIn.deq;
-    //         end
-    //     endaction
-    // endfunction
-
-    // mkConnectionWithAction(
-    //     toGet(rdmaDataStreamPipeOut), toPut(outputQ), deqActionFunc
-    // );
+    mkConnectionWithAction(
+        toGet(rdmaDataStreamPipeOut), toPut(outputQ), deqActionFunc
+    );
 
     return toPipeOut(outputQ);
 endmodule

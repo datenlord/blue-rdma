@@ -113,7 +113,7 @@ module mkSimDmaReadClt(SimDmaReadClt) provisos(
 
         reqQ.enq(dmaReadReq);
         reqCnt.decr(1);
-        $display("time=%0t: issued one request, reqCnt=%0d", $time, reqCnt);
+        // $display("time=%0t: issued one request, reqCnt=%0d", $time, reqCnt);
     endrule
 
     rule recvResp if (!isZero(respCnt));
@@ -122,7 +122,7 @@ module mkSimDmaReadClt(SimDmaReadClt) provisos(
 
         if (dmaReadResp.dataStream.isLast) begin
             respCnt.decr(1);
-            $display("time=%0t: received whole response, respCnt=%0d", $time, respCnt);
+            // $display("time=%0t: received whole response, respCnt=%0d", $time, respCnt);
         end
     endrule
 
