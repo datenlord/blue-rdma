@@ -15,7 +15,7 @@ import Utils4Test :: *;
 
 function Length headerMetaData2DmaLen(HeaderMetaData hmd) = zeroExtend(hmd.headerLen);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestHeaderAndDataStreamConversion(Empty);
     let alwaysHasPayload = False;
     let minHeaderLen = 1;
@@ -36,9 +36,14 @@ module mkTestHeaderAndDataStreamConversion(Empty);
     let ds2hPipeOut <- mkDataStream2Header(
         dataStreamPipeOut4Conv, headerMetaDataPipeOut4Conv
     );
-    let h2dsPipeOut <- mkHeader2DataStream(ds2hPipeOut);
+    Reg#(Bool) clearReg <- mkReg(True);
+    let h2dsPipeOut <- mkHeader2DataStream(clearReg, ds2hPipeOut);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule clearAll if (clearReg);
+        clearReg <= False;
+    endrule
 
     rule compareHeaderMetaData;
         let headerMetaData = h2dsPipeOut.headerMetaData.first;
@@ -77,7 +82,7 @@ module mkTestHeaderAndDataStreamConversion(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPrependHeaderBeforeEmptyDataStream(Empty);
     let alwaysHasPayload = False;
     let minHeaderLen = 1;
@@ -101,11 +106,19 @@ module mkTestPrependHeaderBeforeEmptyDataStream(Empty);
     let headerDataStreamPipeOut4Prepend = dataStreamPipeOutVec[0];
     let headerDataStreamPipeOut4Ref <- mkBufferN(2, dataStreamPipeOutVec[1]);
 
+    Reg#(Bool) clearReg <- mkReg(True);
     let prependHeader2PipeOut <- mkPrependHeader2PipeOut(
-        headerDataStreamPipeOut4Prepend, headerMetaDataPipeOut4Prepend, emptyDataStreamPipeOut
+        clearReg,
+        headerDataStreamPipeOut4Prepend,
+        headerMetaDataPipeOut4Prepend,
+        emptyDataStreamPipeOut
     );
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule clearAll if (clearReg);
+        clearReg <= False;
+    endrule
 
     rule compare;
         let dataStreamAfterPrepend = prependHeader2PipeOut.first;
@@ -127,7 +140,7 @@ module mkTestPrependHeaderBeforeEmptyDataStream(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestExtractHeaderWithPayloadLessThanOneFrag(Empty);
     let alwaysHasPayload = True;
     Length minPayloadLen = 1;
@@ -167,13 +180,20 @@ module mkTestExtractHeaderWithPayloadLessThanOneFrag(Empty);
     let extractHeaderFromPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataStreamPipeOut4Extract, headerMetaDataPipeOut4Extract
     );
+
+    Reg#(Bool) clearReg <- mkReg(True);
     let prependHeader2PipeOut <- mkPrependHeader2PipeOut(
+        clearReg,
         extractHeaderFromPipeOut.header,
         headerMetaDataPipeOut4Prepend,
         extractHeaderFromPipeOut.payload
     );
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule clearAll if (clearReg);
+        clearReg <= False;
+    endrule
 
     rule compare;
         let prependHeaderDataStream = prependHeader2PipeOut.first;
@@ -195,7 +215,7 @@ module mkTestExtractHeaderWithPayloadLessThanOneFrag(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestExtractHeaderLongerThanDataStream(Empty);
     let minDmaLength = 1;
     let maxDmaLength = fromInteger(valueOf(HEADER_MAX_BYTE_LENGTH)) - 1;
@@ -255,7 +275,7 @@ module mkTestExtractHeaderLongerThanDataStream(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestExtractAndPrependHeader(Empty);
     let alwaysHasPayload = True; // TODO: support no payload case
     let minDmaLength = 128;
@@ -272,7 +292,10 @@ module mkTestExtractAndPrependHeader(Empty);
     let extractHeaderFromPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataStreamPipeOutVec[0], headerMetaDataPipeOut4Extract
     );
+
+    Reg#(Bool) clearReg <- mkReg(True);
     let prependHeader2PipeOut <- mkPrependHeader2PipeOut(
+        clearReg,
         extractHeaderFromPipeOut.header,
         headerMetaDataPipeOut4Prepend,
         extractHeaderFromPipeOut.payload
@@ -280,6 +303,10 @@ module mkTestExtractAndPrependHeader(Empty);
     let refDataStreamPipeOut <- mkBufferN(2, dataStreamPipeOutVec[1]);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule clearAll if (clearReg);
+        clearReg <= False;
+    endrule
 
     rule compare;
         let prependHeaderDataStream = prependHeader2PipeOut.first;

@@ -12,13 +12,13 @@ import Utils :: *;
 import Utils4Test :: *;
 import WorkCompGen :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestWorkCompGenNormalCaseSQ(Empty);
     let isNormalCase = True;
     let result <- mkTestWorkCompGenSQ(isNormalCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestWorkCompGenErrFlushCaseSQ(Empty);
     let isNormalCase = False;
     let result <- mkTestWorkCompGenSQ(isNormalCase);
@@ -177,13 +177,13 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestWorkCompGenNormalCaseRQ(Empty);
     let isNormalCase = True;
     let result <- mkTestWorkCompGenRQ(isNormalCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestWorkCompGenErrFlushCaseRQ(Empty);
     let isNormalCase = False;
     let result <- mkTestWorkCompGenRQ(isNormalCase);

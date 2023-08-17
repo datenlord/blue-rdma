@@ -663,7 +663,7 @@ module mkRetryHandleSQ#(
         );
 
         retryHandleStateReg <= RETRY_HANDLE_ST_MODIFY_PARTIAL_RETRY_WR;
-        // $display("time=%0t:", $time, " checkPartialRetry WR ID=%h", firstRetryWR.wr.id);
+        // $display("time=%0t:", $time, " checkPartialRetry wr.id=%h", firstRetryWR.wr.id);
     endrule
 
     rule modifyPartialRetryWR if (
@@ -688,7 +688,7 @@ module mkRetryHandleSQ#(
         pendingWorkReqScanCntrl.modifyHead(firstRetryWR);
         retryHandleStateReg <= RETRY_HANDLE_ST_START_RETRY;
 
-        // $display("time=%0t:", $time, " modifyPartialRetryWR WR ID=%h", firstRetryWR.wr.id);
+        // $display("time=%0t:", $time, " modifyPartialRetryWR wr.id=%h", firstRetryWR.wr.id);
     endrule
 
     rule startRetry if (

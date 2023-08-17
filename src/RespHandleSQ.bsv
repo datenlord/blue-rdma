@@ -302,7 +302,7 @@ module mkRespHandleSQ#(
         //     // ", retryReason=", fshow(retryReason),
         //     // ", wrAckType=", fshow(wrAckType),
         //     // ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", curPendingWR.wr.id
+        //     ", wr.id=%h", curPendingWR.wr.id
         // );
     endrule
 
@@ -455,7 +455,7 @@ module mkRespHandleSQ#(
         //     ", wrAckType=", fshow(wrAckType),
         //     // ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", curPendingWR.wr.id
+        //     ", wr.id=%h", curPendingWR.wr.id
         // );
     endrule
 
@@ -504,7 +504,7 @@ module mkRespHandleSQ#(
         if (deqPendingWorkReq) begin
             pendingWorkReqPipeIn.deq;
             // $display(
-            //     "time=%0t:", $time, " dequeue WR ID=%h", curPendingWR.wr.id
+            //     "time=%0t:", $time, " dequeue wr.id=%h", curPendingWR.wr.id
             // );
         end
 
@@ -544,7 +544,7 @@ module mkRespHandleSQ#(
         //     ", WR opcode=", fshow(curPendingWR.wr.opcode),
         //     ", rdmaRespType=", fshow(rdmaRespType),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", curPendingWR.wr.id
+        //     ", wr.id=%h", curPendingWR.wr.id
         // );
     endrule
 
@@ -656,7 +656,7 @@ module mkRespHandleSQ#(
         //     // ", rdmaRespType=", fshow(rdmaRespType),
         //     ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -738,7 +738,7 @@ module mkRespHandleSQ#(
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -783,7 +783,7 @@ module mkRespHandleSQ#(
         //     ", respAction=", fshow(respAction),
         //     ", wcReqType=", fshow(wcReqType),
         //     ", expectPermCheckResp=", fshow(expectPermCheckResp),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -910,7 +910,7 @@ module mkRespHandleSQ#(
         //     ", respAction=", fshow(respAction),
         //     ", wcStatus=", fshow(wcStatus),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -956,7 +956,7 @@ module mkRespHandleSQ#(
         //     ", respAction=", fshow(respAction),
         //     ", wcStatus=", fshow(wcStatus),
         //     ", wcReqType=", fshow(wcReqType),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -1027,7 +1027,7 @@ module mkRespHandleSQ#(
         //     ", wcReqType=", fshow(wcReqType),
         //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
         //     ", readRespPktNum=%0d", readRespPktNum,
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -1099,7 +1099,7 @@ module mkRespHandleSQ#(
         //     ", wcReqType=", fshow(wcReqType),
         //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
         //     ", readRespPktNum=%0d", readRespPktNum,
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -1193,7 +1193,7 @@ module mkRespHandleSQ#(
         //     ", wcReqType=", fshow(wcReqType),
         //     ", nextReadRespWriteAddr=", fshow(nextReadRespWriteAddr),
         //     ", readRespPktNum=%0d", readRespPktNum,
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -1283,7 +1283,7 @@ module mkRespHandleSQ#(
                     //     // ", wcStatus=", fshow(wcStatus),
                     //     // ", genWorkComp=", fshow(genWorkComp),
                     //     // ", wcWaitDmaResp=", fshow(wcWaitDmaResp),
-                    //     ", WR ID=%h, WR len=%0d, pktPayloadLen=%0d",
+                    //     ", wr.id=%h, WR len=%0d, pktPayloadLen=%0d",
                     //     pendingWR.wr.id, pendingWR.wr.len, pktMetaData.pktPayloadLen
                     // );
                 end
@@ -1378,7 +1378,7 @@ module mkRespHandleSQ#(
         //     ", wcStatus=", fshow(wcStatus),
         //     ", genWorkComp=", fshow(genWorkComp),
         //     ", wcWaitDmaResp=", fshow(wcWaitDmaResp),
-        //     ", WR ID=%h", pendingWR.wr.id
+        //     ", wr.id=%h", pendingWR.wr.id
         // );
     endrule
 
@@ -1420,7 +1420,7 @@ module mkRespHandleSQ#(
         //     ", wcStatus=", fshow(wcStatus),
         //     ", genWorkComp=", fshow(genWorkComp),
         //     ", wcWaitDmaResp=", fshow(wcWaitDmaResp),
-        //     ", WR ID=%h", workCompGenReq.wr.id
+        //     ", wr.id=%h", workCompGenReq.wr.id
         // );
     endrule
 
@@ -1673,7 +1673,7 @@ module mkRespHandleSQ#(
             $display(
                 "time=%0t: 1st retry flush stage, bth.psn=%h", $time, bth.psn,
                 ", bth.opcode=", fshow(bth.opcode),
-                // ", WR ID=%h", pendingWR.wr.id,
+                // ", wr.id=%h", pendingWR.wr.id,
                 // ", rdmaRespType=", fshow(rdmaRespType),
                 // ", retryReason=", fshow(retryReason),
                 // ", respAction=", fshow(respAction),

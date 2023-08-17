@@ -17,7 +17,7 @@ import TransportLayer :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestTransportLayerNormalCase(Empty);
     let normalOrErrCase = True;
     let result <- mkTestTransportLayerNormalOrErrCase(normalOrErrCase);
@@ -29,21 +29,17 @@ module mkTestTransportLayerErrorCase(Empty);
 endmodule
 
 module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
-    let minDmaLength = 1;
-    let maxDmaLength = 8192;
+    let minDmaLength = normalOrErrCase ? 1    : 8192; // 524288;
+    let maxDmaLength = normalOrErrCase ? 8192 : 16384; // 1048576;
     let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
     let pmtu = IBV_MTU_512;
     let isSendSideQ = True;
 
     FIFOF#(QPN) dqpnQ4RecvSide <- mkFIFOF;
-    // FIFOF#(QPN) dqpnQ4SendSide <- mkFIFOF;
 
     FIFOF#(RKEY) recvSideRKeyQ4Write  <- mkFIFOF;
     FIFOF#(RKEY) recvSideRKeyQ4Read   <- mkFIFOF;
     FIFOF#(RKEY) recvSideRKeyQ4Atomic <- mkFIFOF;
-    // FIFOF#(RKEY) sendSideRKeyQ4Write  <- mkFIFOF;
-    // FIFOF#(RKEY) sendSideRKeyQ4Read   <- mkFIFOF;
-    // FIFOF#(RKEY) sendSideRKeyQ4Atomic <- mkFIFOF;
 
     let recvSideTransportLayer <- mkTransportLayer;
     let initRecvSide <- mkInitMetaDataAndConnectQP(
@@ -61,7 +57,7 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
     );
     let noWorkCompOutRule4RecvSideSendQ <- addRules(genEmptyPipeOutRule(
         recvSideTransportLayer.workCompPipeOutSQ,
-        "recvSideTransportLayer.workCompPipeOutSQ empty assertion @ mkTestTransportLayerNormalCase"
+        "recvSideTransportLayer.workCompPipeOutSQ empty assertion @ mkTestTransportLayerNormalOrErrCase"
     ));
 
     let simDmaReadSrv4RecvSide  <- mkSimDmaReadSrv;
@@ -80,10 +76,6 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
         initRecvSide.rkeyPipeOut4Write,
         initRecvSide.rkeyPipeOut4Read,
         initRecvSide.rkeyPipeOut4Atomic,
-        // toPipeOut(dqpnQ4SendSide),
-        // toPipeOut(sendSideRKeyQ4Write),
-        // toPipeOut(sendSideRKeyQ4Read),
-        // toPipeOut(sendSideRKeyQ4Atomic),
         minDmaLength,
         maxDmaLength,
         qpType,
@@ -93,7 +85,7 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
     );
     let noWorkCompOutRule4SendSideRecvQ <- addRules(genEmptyPipeOutRule(
         sendSideTransportLayer.workCompPipeOutRQ,
-        "sendSideTransportLayer.workCompPipeOutRQ empty assertion @ mkTestTransportLayerNormalCase"
+        "sendSideTransportLayer.workCompPipeOutRQ empty assertion @ mkTestTransportLayerNormalOrErrCase"
     ));
 
     let simDmaReadSrv4SendSide  <- mkSimDmaReadSrv;
@@ -105,12 +97,11 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
         sendSideTransportLayer.dmaWriteClt, simDmaWriteSrv4SendSide
     );
 
-    // mkSink(sendSideTransportLayer.rdmaDataStreamPipeOut);
-    let req2RecvSide <- mkConnection(
+    let req2RecvSide <- mkDebugConnection(
         toGet(sendSideTransportLayer.rdmaDataStreamPipeOut),
         recvSideTransportLayer.rdmaDataStreamInput
     );
-    let resp2SendSide <- mkConnection(
+    let resp2SendSide <- mkDebugConnection(
         toGet(recvSideTransportLayer.rdmaDataStreamPipeOut),
         sendSideTransportLayer.rdmaDataStreamInput
     );
@@ -123,43 +114,6 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
     //     initSendSide.qpnPipeOut.deq;
     //     dqpnQ4RecvSide.enq(qpnSendSide);
     // endrule
-/*
-    let qpnRecvSide2SendSide <- mkConnection(
-        toGet(initRecvSide.qpnPipeOut), toPut(dqpnQ4SendSide)
-    );
-    // rule popRecvSideQPN;
-    //     let qpnRecvSide = initRecvSide.qpnPipeOut.first;
-    //     initRecvSide.qpnPipeOut.deq;
-    //     dqpnQ4SendSide.enq(qpnRecvSide);
-    // endrule
-
-    let rkeyWrite2SendSide <- mkConnection(
-        toGet(initRecvSide.rkeyPipeOut4Write), toPut(sendSideRKeyQ4Write)
-    );
-    // rule popRecvSideWriteRKey;
-    //     let rkey4Write = initRecvSide.rkeyPipeOut4Write.first;
-    //     initRecvSide.rkeyPipeOut4Write.deq;
-    //     sendSideRKeyQ4Write.enq(rkey4Write);
-    // endrule
-
-    let rkeyRead2SendSide <- mkConnection(
-        toGet(initRecvSide.rkeyPipeOut4Read), toPut(sendSideRKeyQ4Read)
-    );
-    // rule popRecvSideReadRKey;
-    //     let rkey4Read = initRecvSide.rkeyPipeOut4Read.first;
-    //     initRecvSide.rkeyPipeOut4Read.deq;
-    //     sendSideRKeyQ4Read.enq(rkey4Read);
-    // endrule
-
-    let rkeyAtomic2SendSide <- mkConnection(
-        toGet(initRecvSide.rkeyPipeOut4Atomic), toPut(sendSideRKeyQ4Atomic)
-    );
-    // rule popRecvSideAtomicRKey;
-    //     let rkey4Atomic = initRecvSide.rkeyPipeOut4Atomic.first;
-    //     initRecvSide.rkeyPipeOut4Atomic.deq;
-    //     sendSideRKeyQ4Atomic.enq(rkey4Atomic);
-    // endrule
-*/
 endmodule
 
 typedef enum {
@@ -263,16 +217,6 @@ module mkInitMetaDataAndConnectQP#(
     Vector#(avgMrPerReqType, Reg#(RKEY)) rkeyVec4Read   <- replicateM(mkRegU);
     Vector#(avgMrPerReqType, Reg#(RKEY)) rkeyVec4Atomic <- replicateM(mkRegU);
 
-    // FIFOF#(LKEY) lkeyQ4Recv   <- mkSizedFIFOF(qpNum);
-    // FIFOF#(LKEY) lkeyQ4Send   <- mkSizedFIFOF(qpNum);
-    // FIFOF#(LKEY) lkeyQ4Write  <- mkSizedFIFOF(qpNum);
-    // FIFOF#(LKEY) lkeyQ4Read   <- mkSizedFIFOF(qpNum);
-    // FIFOF#(LKEY) lkeyQ4Atomic <- mkSizedFIFOF(qpNum);
-    // // FIFOF#(RKEY) rkeyQ4Send   <- mkSizedFIFOF(qpNum);
-    // FIFOF#(RKEY) rkeyQ4Write  <- mkSizedFIFOF(qpNum);
-    // FIFOF#(RKEY) rkeyQ4Read   <- mkSizedFIFOF(qpNum);
-    // FIFOF#(RKEY) rkeyQ4Atomic <- mkSizedFIFOF(qpNum);
-
     let lkeyVecPipeOut4Recv   <- mkVector2PipeOut(readVReg(lkeyVec4Recv), lkeyVecValidReg);
     let lkeyVecPipeOut4Send   <- mkVector2PipeOut(readVReg(lkeyVec4Send), lkeyVecValidReg);
     let lkeyVecPipeOut4Write  <- mkVector2PipeOut(readVReg(lkeyVec4Write), lkeyVecValidReg);
@@ -310,10 +254,6 @@ module mkInitMetaDataAndConnectQP#(
     Count#(Bit#(TLog#(MAX_MR)))          mrRespCnt <- mkCount(fromInteger(mrNum - 1));
     Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) qpReqCnt <- mkCount(fromInteger(qpNum));
     Count#(Bit#(TLog#(MAX_QP)))          qpRespCnt <- mkCount(fromInteger(qpNum - 1));
-    // Count#(Bit#(TLog#(MAX_MR_PER_PD)))  mrReqPerPdCnt <- mkCount(fromInteger(mrPerPD - 1));
-    // Count#(Bit#(TLog#(MAX_MR_PER_PD))) mrRespPerPdCnt <- mkCount(fromInteger(mrPerPD - 1));
-    // Count#(Bit#(TLog#(avgMrPerQP)))    mrRespPerQpCnt <- mkCount(fromInteger(mrPerQP - 1));
-    // Count#(Bit#(TLog#(avgQpPerPD)))        qpPerPdCnt <- mkCount(fromInteger(qpPerPD - 1));
 
     Reg#(InitMetaDataState) initMetaDataStateReg <- mkReg(META_DATA_ALLOC_PD);
 
@@ -481,7 +421,8 @@ module mkInitMetaDataAndConnectQP#(
                     $format(
                         "wc.id=%h should == expectedWorkCompID=%h",
                         wc.id, expectedWorkCompID,
-                        ", when wrOpCode=", fshow(wrOpCode)
+                        ", when wrOpCode=", fshow(wrOpCode),
+                        ", sqpn4SQ=%h", sqpn4SQ
                     )
                 );
 
@@ -493,7 +434,8 @@ module mkInitMetaDataAndConnectQP#(
                     $format(
                         "wc.status=", fshow(wc.status),
                         " should be expectedWorkCompStatus=",
-                        fshow(expectedWorkCompStatus)
+                        fshow(expectedWorkCompStatus),
+                        ", when sqpn4SQ=%h", sqpn4SQ
                     )
                 );
             endrule
@@ -557,13 +499,6 @@ module mkInitMetaDataAndConnectQP#(
     );
         mrReqCnt.decr(1);
 
-        // if (isZero(mrReqPerPdCnt)) begin
-        //     mrReqPerPdCnt <= fromInteger(mrPerPD - 1);
-        // end
-        // else begin
-        //     mrReqPerPdCnt.decr(1);
-        // end
-
         let pdHandler = pdHandlerPipeOut4ReqMR.first;
         pdHandlerPipeOut4ReqMR.deq;
         pdHandlerQ4RespMR.enq(pdHandler);
@@ -600,21 +535,6 @@ module mkInitMetaDataAndConnectQP#(
             mrRespCnt.decr(1);
         end
 
-        // if (isZero(mrRespPerPdCnt)) begin
-        //     mrRespPerPdCnt <= fromInteger(mrPerPD - 1);
-        //     // pdHandlerQ4RespMR.deq;
-        // end
-        // else begin
-        //     mrRespPerPdCnt.decr(1);
-        // end
-
-        // if (isZero(mrRespPerQpCnt)) begin
-        //     mrRespPerQpCnt <= fromInteger(mrPerQP - 1);
-        // end
-        // else begin
-        //     mrRespPerQpCnt.decr(1);
-        // end
-
         let pdHandler = pdHandlerQ4RespMR.first;
         pdHandlerQ4RespMR.deq;
 
@@ -629,7 +549,6 @@ module mkInitMetaDataAndConnectQP#(
                 )
             );
 
-            // let showMR = True;
             Tuple2#(
                 Bit#(TLog#(RDMA_REQ_TYPE_NUM)), Bit#(TSub#(TLog#(MAX_MR), TLog#(RDMA_REQ_TYPE_NUM)))
             ) pair = split(mrRespCnt);
@@ -668,41 +587,7 @@ module mkInitMetaDataAndConnectQP#(
                         rkeyVec4Atomic[vecIdx] <= allocRespMR.rkey;
                     end
                 end
-                // 0: begin
-                //     if (isSendSideQ) begin
-                //         lkeyQ4Send.enq(allocRespMR.lkey);
-                //         // rkeyQ4Send.enq(allocRespMR.rkey);
-                //     end
-                //     else begin
-                //         lkeyQ4Recv.enq(allocRespMR.lkey);
-                //     end
-                // end
-                // 1: begin
-                //     if (isSendSideQ) begin
-                //         lkeyQ4Write.enq(allocRespMR.lkey);
-                //     end
-                //     else begin
-                //         rkeyQ4Write.enq(allocRespMR.rkey);
-                //     end
-                // end
-                // 2: begin
-                //     if (isSendSideQ) begin
-                //         lkeyQ4Read.enq(allocRespMR.lkey);
-                //     end
-                //     else begin
-                //         rkeyQ4Read.enq(allocRespMR.rkey);
-                //     end
-                // end
-                // 3: begin
-                //     if (isSendSideQ) begin
-                //         lkeyQ4Atomic.enq(allocRespMR.lkey);
-                //     end
-                //     else begin
-                //         rkeyQ4Atomic.enq(allocRespMR.rkey);
-                //     end
-                // end
                 default: begin
-                    // showMR = False;
                     immFail(
                         "reqTypeIdx assertion @ mkInitMetaData",
                         $format(
@@ -712,14 +597,12 @@ module mkInitMetaDataAndConnectQP#(
                 end
             endcase
 
-            // if (showMR) begin
             $display(
                 "time=%0d: respAllocMRs", $time,
                 ", pdHandler=%h, allocRespMR.lkey=%h, allocRespMR.rkey=%h, vecIdx=%0d, reqTypeIdx=%0d",
                 pdHandler, allocRespMR.lkey, allocRespMR.rkey, vecIdx, reqTypeIdx,
                 ", isSendSideQ=", fshow(isSendSideQ)
             );
-            // end
         end
         else begin
             immFail(
@@ -739,13 +622,6 @@ module mkInitMetaDataAndConnectQP#(
     );
         qpReqCnt.decr(1);
 
-        // if (isZero(qpPerPdCnt)) begin
-        //     qpPerPdCnt <= fromInteger(qpPerPD - 1);
-        // end
-        // else begin
-        //     qpPerPdCnt.decr(1);
-        // end
-
         let pdHandler = pdHandlerPipeOut4ReqQP.first;
         pdHandlerPipeOut4ReqQP.deq;
         pdHandlerQ4RespQP.enq(pdHandler);
@@ -760,13 +636,13 @@ module mkInitMetaDataAndConnectQP#(
         };
         metaDataSrv.request.put(tagged Req4QP createReqQP);
 
-        if (isSendSideQ) begin
+        // if (isSendSideQ) begin
         $display(
             "time=%0t: reqCreateQPs", $time,
             ", pdHandler=%h, qpReqCnt=%0d", pdHandler, qpReqCnt,
             ", isSendSideQ=", fshow(isSendSideQ)
         );
-        end
+        // end
 
         // $display(
         //     "time=%0t: reqCreateQPs", $time,
@@ -857,14 +733,14 @@ module mkInitMetaDataAndConnectQP#(
                 )
             );
 
-            if (isSendSideQ) begin
-            $display(
-                "time=%0t: createRespQP=", $time, fshow(createRespQP),
-                " should be success, when pdHandler=%h qpn=%h, qpRespCnt=%h",
-                pdHandler, qpn, qpRespCnt,
-                ", isSendSideQ=", fshow(isSendSideQ)
-            );
-            end
+            // if (isSendSideQ) begin
+            // $display(
+            //     "time=%0t: createRespQP=", $time, fshow(createRespQP),
+            //     " should be success, when pdHandler=%h qpn=%h, qpRespCnt=%h",
+            //     pdHandler, qpn, qpRespCnt,
+            //     ", isSendSideQ=", fshow(isSendSideQ)
+            // );
+            // end
         end
         else begin
             immFail(
@@ -948,12 +824,12 @@ module mkInitMetaDataAndConnectQP#(
         end
 
         if (isSendSideQ) begin
-        $display(
-            "time=%0t: respInitQPs", $time,
-            ", qpnQ4RTR.notEmpty=", fshow(qpnQ4RTR.notEmpty),
-            ", dqpnPipeIn.notEmpty=", fshow(dqpnPipeIn.notEmpty),
-            ", isSendSideQ=", fshow(isSendSideQ)
-        );
+        // $display(
+        //     "time=%0t: respInitQPs", $time,
+        //     ", qpnQ4RTR.notEmpty=", fshow(qpnQ4RTR.notEmpty),
+        //     ", dqpnPipeIn.notEmpty=", fshow(dqpnPipeIn.notEmpty),
+        //     ", isSendSideQ=", fshow(isSendSideQ)
+        // );
         end
     endrule
 
@@ -1033,14 +909,14 @@ module mkInitMetaDataAndConnectQP#(
                 sqpnQ4Recv.enq(sqpn);
             end
 
-            if (isSendSideQ) begin
-            $display(
-                "time=%0t: setRtrRespQP=", $time, fshow(setRtrRespQP),
-                " should be success, and sqpn=%h, dqpn=%h, qpRespCnt=%0d",
-                sqpn, dqpn, qpRespCnt,
-                ", isSendSideQ=", fshow(isSendSideQ)
-            );
-            end
+            // if (isSendSideQ) begin
+            // $display(
+            //     "time=%0t: setRtrRespQP=", $time, fshow(setRtrRespQP),
+            //     " should be success, and sqpn=%h, dqpn=%h, qpRespCnt=%0d",
+            //     sqpn, dqpn, qpRespCnt,
+            //     ", isSendSideQ=", fshow(isSendSideQ)
+            // );
+            // end
         end
         else begin
             immFail(
@@ -1101,8 +977,6 @@ module mkInitMetaDataAndConnectQP#(
                     ", setRtsRespQP=", fshow(setRtsRespQP)
                 )
             );
-            // let qpn = setRtsRespQP.qpn;
-            // qpnQ4Destroy.enq(qpn);
 
             if (isSendSideQ) begin
             $display(
@@ -1207,14 +1081,13 @@ module mkInitMetaDataAndConnectQP#(
                 sqpn : sqpn4RQ
             };
 
-            // qpnQ4Destroy.enq(sqpn4RQ);
             transportLayer.recvReqInput.put(rr);
             recvReqIdQ4Cmp.enq(tuple2(sqpn4RQ, rrID));
-            // $display(
-            //     "time=%0t:", $time,
-            //     " issueRecvReq, sqpn4RQ=%h, lkey4Recv=%h",
-            //     sqpn4RQ, lkey4Recv
-            // );
+            $display(
+                "time=%0t:", $time,
+                " issueRecvReq, rr.id=%h, sqpn4RQ=%h, lkey4Recv=%h",
+                rrID, sqpn4RQ, lkey4Recv
+            );
         endrule
 
         rule collectWorkComp4RecvSide if (
@@ -1227,12 +1100,12 @@ module mkInitMetaDataAndConnectQP#(
 
             let qpIndex = getIndexQP(wc.qpn);
             workCompVec4RecvReq[qpIndex] <= wc;
-            // $display(
-            //     "time=%0t: collectWorkComp4RecvSide", $time,
-            //     ", qpIndex=%0d, wc.id=%h, wc.len=%0d", qpIndex, wc.id, wc.len,
-            //     ", wc.opcode=", fshow(wc.opcode),
-            //     ", wc.status=", fshow(wc.status)
-            // );
+            $display(
+                "time=%0t: collectWorkComp4RecvSide", $time,
+                ", qpIndex=%0d, wc.id=%h, wc.len=%0d", qpIndex, wc.id, wc.len,
+                ", wc.opcode=", fshow(wc.opcode),
+                ", wc.status=", fshow(wc.status)
+            );
         endrule
 
         rule compareWorkComp4RecvSide if (
@@ -1410,9 +1283,6 @@ module mkInitMetaDataAndConnectQP#(
         end
     endrule
 
-    // When nomal case, SQ will receive Send WC earlier than RQ,
-    // since normal Send requests will generate ACK before DMA write.
-    // When error case, RQ will receive Send WC earlier than SQ.
     rule loop if (initMetaDataStateReg == META_DATA_NO_OP);
         initMetaDataStateReg <= META_DATA_CREATE_QP;
         countDown.decr;
@@ -1444,8 +1314,4 @@ module mkInitMetaDataAndConnectQP#(
     interface rkeyPipeOut4Write  = rkeyVecPipeOut4Write;
     interface rkeyPipeOut4Read   = rkeyVecPipeOut4Read;
     interface rkeyPipeOut4Atomic = rkeyVecPipeOut4Atomic;
-    // // interface rkeyPipeOut4Send   = toPipeOut(rkeyQ4Send);
-    // interface rkeyPipeOut4Write  = toPipeOut(rkeyQ4Write);
-    // interface rkeyPipeOut4Read   = toPipeOut(rkeyQ4Read);
-    // interface rkeyPipeOut4Atomic = toPipeOut(rkeyQ4Atomic);
 endmodule

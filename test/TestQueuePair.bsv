@@ -61,7 +61,7 @@ module mkSimPermCheckClt(SimPermCheckClt) provisos(
     method Bool done() = isZero(reqCnt) && isZero(respCnt);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestPermCheckCltArbiter(Empty);
     function Bool isCltDone(SimPermCheckClt simPermCheckClt) = simPermCheckClt.done;
     function PermCheckClt getPermCheckClt(SimPermCheckClt simPermCheckClt) = simPermCheckClt.cltPort;
@@ -130,7 +130,7 @@ module mkSimDmaReadClt(SimDmaReadClt) provisos(
     method Bool done() = isZero(reqCnt) && isZero(respCnt);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestDmaReadCltArbiter(Empty);
     function Bool isCltDone(SimDmaReadClt simDmaReadClt) = simDmaReadClt.done;
     function DmaReadClt getDmaReadClt(SimDmaReadClt simDmaReadClt) = simDmaReadClt.cltPort;
@@ -150,7 +150,7 @@ module mkTestDmaReadCltArbiter(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestQueuePairReqErrResetCase(Empty);
     let qpType = IBV_QPT_RC;
     let pmtu = IBV_MTU_256;
@@ -285,13 +285,13 @@ typedef enum {
     TEST_QP_TIMEOUT_ERR_RESET
 } TestErrResetTypeQP deriving(Bits, Eq);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestQueuePairRespErrResetCase(Empty);
     let errType = TEST_QP_RESP_ERR_RESET;
     let result <- mkTestQueuePairResetCase(errType);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestQueuePairTimeOutErrResetCase(Empty);
     let errType = TEST_QP_TIMEOUT_ERR_RESET;
     let result <- mkTestQueuePairResetCase(errType);
@@ -426,7 +426,7 @@ module mkTestQueuePairResetCase#(TestErrResetTypeQP errType)(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestQueuePairTimeOutErrCase(Empty);
     let minPayloadLen = 1;
     let maxPayloadLen = 2048;
@@ -570,7 +570,7 @@ module mkTestQueuePairTimeOutErrCase(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestQueuePairNormalCase(Empty);
     let minPayloadLen = 1;
     let maxPayloadLen = 2048;

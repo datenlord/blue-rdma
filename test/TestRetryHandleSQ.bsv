@@ -39,31 +39,31 @@ typedef enum {
     // TEST_RETRY_CASE_EXC_LIMIT_ERR   // Partial retry
 } TestRetryCase deriving(Bits, Eq, FShow);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleSeqErrCase(Empty);
     let retryCase = TEST_RETRY_CASE_SEQ_ERR;
     let result <- mkTestRetryHandleSQ(retryCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleImplicitRetryCase(Empty);
     let retryCase = TEST_RETRY_CASE_IMPLICIT_RETRY;
     let result <- mkTestRetryHandleSQ(retryCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleRnrCase(Empty);
     let retryCase = TEST_RETRY_CASE_RNR;
     let result <- mkTestRetryHandleSQ(retryCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleTimeOutCase(Empty);
     let retryCase = TEST_RETRY_CASE_TIMEOUT;
     let result <- mkTestRetryHandleSQ(retryCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleNestedRetryCase(Empty);
     let retryCase = TEST_RETRY_CASE_NESTED_RETRY;
     let result <- mkTestRetryHandleSQ(retryCase);
@@ -361,13 +361,13 @@ typedef enum {
     TEST_RETRY_ERR_EXC_RETRY_LIMIT    // Partial retry
 } TestRetryErrCase deriving(Bits, Eq, FShow);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleExcRetryLimitErrCase(Empty);
     let retryErrCase = TEST_RETRY_ERR_EXC_RETRY_LIMIT;
     let result <- mkTestRetryHandleRetryErrCase(retryErrCase);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestRetryHandleExcTimeOutLimitErrCase(Empty);
     let retryErrCase = TEST_RETRY_ERR_EXC_TIMEOUT_LIMIT;
     let result <- mkTestRetryHandleRetryErrCase(retryErrCase);

@@ -1653,3 +1653,22 @@ function Action genDiscardPayloadReq(
         payloadConReqQ.enq(discardReq);
     endaction
 endfunction
+
+module mkConnectionWithAction#(
+    Get#(anytype) getIn,
+    Put#(anytype) putOut,
+    function Action connectAction(anytype connectVal)
+)(Empty) provisos(
+    FShow#(anytype),
+    Bits#(anytype, anysize)
+    // Bits#(DataStream, anysize)
+);
+    Reg#(BTH) bthReg <- mkRegU;
+
+    rule connect;
+        let data <- getIn.get;
+        putOut.put(data);
+        connectAction(data);
+
+    endrule
+endmodule

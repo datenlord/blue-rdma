@@ -1,7 +1,9 @@
 import FIFOF :: *;
+import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
 
+import Controller :: *;
 import DataTypes :: *;
 import Headers :: *;
 import PrimUtils :: *;
@@ -18,6 +20,7 @@ interface HeaderDataStreamAndMetaDataPipeOut;
 endinterface
 
 module mkHeader2DataStream#(
+    Bool clearAll,
     PipeOut#(RdmaHeader) headerPipeIn
 )(HeaderDataStreamAndMetaDataPipeOut);
     FIFOF#(DataStream)   headerDataStreamOutQ <- mkFIFOF;
@@ -36,7 +39,15 @@ module mkHeader2DataStream#(
         );
     endrule
 */
-    rule outputHeader;
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule resetAndClear if (clearAll);
+        headerDataStreamOutQ.clear;
+        headerMetaDataOutQ.clear;
+
+        headerValidReg <= False;
+    endrule
+
+    rule outputHeader if (!clearAll);
         let curHeader = headerValidReg ? rdmaHeaderReg : headerPipeIn.first;
         if (!headerValidReg) begin
             headerMetaDataOutQ.enq(curHeader.headerMetaData);
@@ -60,22 +71,22 @@ module mkHeader2DataStream#(
             headerValidReg <= True;
 
             rdmaHeaderReg <= RdmaHeader {
-                headerData: leftShiftHeaderData,
-                headerByteEn: leftShiftHeaderByteEn,
+                headerData    : leftShiftHeaderData,
+                headerByteEn  : leftShiftHeaderByteEn,
                 headerMetaData: HeaderMetaData {
-                    headerLen: remainingHeaderLen,
-                    headerFragNum: remainingHeaderFragNum,
+                    headerLen           : remainingHeaderLen,
+                    headerFragNum       : remainingHeaderFragNum,
                     lastFragValidByteNum: curHeader.headerMetaData.lastFragValidByteNum,
-                    hasPayload: curHeader.headerMetaData.hasPayload
+                    hasPayload          : curHeader.headerMetaData.hasPayload
                 }
             };
         end
 
         let dataStream = DataStream {
-            data: truncateLSB(curHeader.headerData),
-            byteEn: truncateLSB(curHeader.headerByteEn),
+            data   : truncateLSB(curHeader.headerData),
+            byteEn : truncateLSB(curHeader.headerByteEn),
             isFirst: isFirst,
-            isLast: isLast
+            isLast : isLast
         };
         // $display(
         //     "time=%0t: dataStream.data=%h, dataStream.byteEn=%h, leftShiftHeaderData=%h, leftShiftHeaderByteEn=%h",
@@ -89,6 +100,13 @@ module mkHeader2DataStream#(
         //     );
         // end
         headerDataStreamOutQ.enq(dataStream);
+        // let bth = extractBTH(curHeader.headerData);
+        // $display(
+        //     "time=%0t: outputHeader, start output packet", $time,
+        //     ", bth.dqpn=%h", bth.dqpn,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn
+        // );
     endrule
 
     interface headerDataStream = toPipeOut(headerDataStreamOutQ);
@@ -209,17 +227,12 @@ typedef enum {
     EXTRA_LAST_FRAG_OUTPUT
 } ExtractOrPrependHeaderStage deriving(Bits, Eq, FShow);
 
-// typedef enum {
-//     HEADER_META_DATA_POP,
-//     HEADER_OUTPUT,
-//     DATA_OUTPUT,
-//     EXTRA_LAST_FRAG_OUTPUT
-// } PrependHeader2PipeOutStage deriving(Bits, Eq);
-
 // Neither headerPipeIn nor dataPipeIn can be empty, otherwise deadlock.
 // headerLen cannot be zero, but dataPipeIn can have empty DataStream.
 // If header has no payload, then it will not dequeue dataPipeIn.
 module mkPrependHeader2PipeOut#(
+    // CntrlStatus cntrlStatus,
+    Bool clearAll,
     DataStreamPipeOut headerPipeIn,
     PipeOut#(HeaderMetaData) headerMetaDataPipeIn,
     DataStreamPipeOut dataPipeIn
@@ -238,15 +251,26 @@ module mkPrependHeader2PipeOut#(
     Reg#(Bool)          isFirstReg <- mkRegU;
 
     Reg#(ExtractOrPrependHeaderStage) stageReg <- mkReg(HEADER_META_DATA_POP);
-/*
-    rule debug if (!dataStreamOutQ.notFull);
-        $display(
-            "time=%0t: mkPrependHeader2PipeOut debug", $time,
-            ", dataStreamOutQ.notFull=", fshow(dataStreamOutQ.notFull)
-        );
+
+    // rule debug if (!dataStreamOutQ.notFull);
+    //     $display(
+    //         "time=%0t: mkPrependHeader2PipeOut debug", $time,
+    //         ", dataStreamOutQ.notFull=", fshow(dataStreamOutQ.notFull)
+    //     );
+    // endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule resetAndClear if (clearAll);
+        dataStreamOutQ.clear;
+        stageReg <= HEADER_META_DATA_POP;
+
+        // $display(
+        //     "time=%0t: mkPrependHeader2PipeOut, resetAndClear", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN
+        // );
     endrule
-*/
-    rule popHeaderMetaData if (stageReg == HEADER_META_DATA_POP);
+
+    rule popHeaderMetaData if (!clearAll && stageReg == HEADER_META_DATA_POP);
         let headerMetaData = headerMetaDataPipeIn.first;
         headerMetaDataPipeIn.deq;
         // $display("time=%0t: headerMetaData=", $time, fshow(headerMetaData));
@@ -275,7 +299,7 @@ module mkPrependHeader2PipeOut#(
         stageReg   <= HEADER_OUTPUT;
     endrule
 
-    rule outputHeader if (stageReg == HEADER_OUTPUT);
+    rule outputHeader if (!clearAll && stageReg == HEADER_OUTPUT);
         let curHeaderDataStreamFrag = headerPipeIn.first;
         headerPipeIn.deq;
         // $display("time=%0t:", $time, " headerDataStream=", fshow(curHeaderDataStreamFrag));
@@ -330,7 +354,7 @@ module mkPrependHeader2PipeOut#(
         end
     endrule
 
-    rule outputData if (stageReg == DATA_OUTPUT);
+    rule outputData if (!clearAll && stageReg == DATA_OUTPUT);
         let curDataStreamFrag = dataPipeIn.first;
         dataPipeIn.deq;
 
@@ -372,7 +396,7 @@ module mkPrependHeader2PipeOut#(
         end
     endrule
 
-    rule extraLastFrag if (stageReg == EXTRA_LAST_FRAG_OUTPUT);
+    rule extraLastFrag if (!clearAll && stageReg == EXTRA_LAST_FRAG_OUTPUT);
         DATA leftShiftData = truncate(preDataStreamReg.data << headerLastFragInvalidBitNumReg);
         ByteEn leftShiftByteEn = truncate(preDataStreamReg.byteEn << headerLastFragInvalidByteNumReg);
         let extraLastDataStream = DataStream {
@@ -612,4 +636,87 @@ module mkExtractHeaderFromDataStreamPipeOut#(
 
     interface header = toPipeOut(headerDataStreamOutQ);
     interface payload = toPipeOut(payloadDataStreamOutQ);
+endmodule
+
+module mkCombineHeaderAndPayload#(
+    // Bool clearAll,
+    CntrlStatus cntrlStatus,
+    PipeOut#(RdmaHeader) headerPipeIn,
+    PipeOut#(PSN) psnPipeIn,
+    DataStreamPipeOut payloadPipeIn
+)(DataStreamPipeOut);
+    FIFOF#(DataStream) outputQ <- mkFIFOF;
+
+    let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
+        cntrlStatus.comm.isReset, headerPipeIn
+    );
+    let rdmaDataStreamPipeOut <- mkPrependHeader2PipeOut(
+        // cntrlStatus,
+        cntrlStatus.comm.isReset,
+        headerDataStreamAndMetaDataPipeOut.headerDataStream,
+        headerDataStreamAndMetaDataPipeOut.headerMetaData,
+        payloadPipeIn
+    );
+/*
+    rule debug if (!(
+        rdmaDataStreamPipeOut.notEmpty &&
+        psnPipeIn.notEmpty
+    ));
+        $display(
+            "time=%0t: mkCombineHeaderAndPayload debug", $time,
+            ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
+            ", rdmaDataStreamPipeOut.notEmpty=", fshow(rdmaDataStreamPipeOut.notEmpty),
+            ", psnPipeIn.notEmpty=", fshow(psnPipeIn.notEmpty)
+        );
+    endrule
+*/
+    rule connect; // if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
+        let dataStream = rdmaDataStreamPipeOut.first;
+        rdmaDataStreamPipeOut.deq;
+        outputQ.enq(dataStream);
+
+        let curPSN = psnPipeIn.first;
+        $display(
+            "time=%0t: connect", $time,
+            ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            ", curPSN=%h", curPSN,
+            ", dataStream=", fshow(dataStream)
+        );
+        if (dataStream.isFirst) begin
+           let bth = extractBTH(zeroExtendLSB(dataStream.data));
+            immAssert(
+                bth.psn == curPSN,
+                "curPSN assertion @ mkCombineHeaderAndPayload",
+                $format(
+                    "bth.psn=%h should == curPSN=%h",
+                    bth.psn, curPSN,
+                    " when bth.opcode=", fshow(bth.opcode)
+                )
+            );
+            // psnPipeIn.deq;
+        end
+        if (dataStream.isLast) begin
+            psnPipeIn.deq;
+            $display(
+                "time=%0t: connect, finished output packet", $time,
+                ", sqpn=%h", cntrlStatus.comm.getSQPN,
+                ", curPSN=%h", curPSN
+            );
+        end
+    endrule
+
+    // function Action deqActionFunc(DataStream dataStream);
+    //     action
+    //         if (dataStream.isLast) begin
+    //             psnPipeIn.deq;
+    //         end
+    //     endaction
+    // endfunction
+
+    // mkConnectionWithAction(
+    //     toGet(rdmaDataStreamPipeOut), toPut(outputQ), deqActionFunc
+    // );
+
+    return toPipeOut(outputQ);
 endmodule

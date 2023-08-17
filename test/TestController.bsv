@@ -8,7 +8,7 @@ import Settings :: *;
 import PrimUtils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCntrlInVec(Empty);
     let qpType = IBV_QPT_XRC_RECV;
     let pmtu = IBV_MTU_1024;

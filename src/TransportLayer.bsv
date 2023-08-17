@@ -5,6 +5,7 @@ import PAClib :: *;
 import Vector :: *;
 
 import Arbitration :: *;
+import Controller :: *;
 import DataTypes :: *;
 import ExtractAndPrependPipeOut :: *;
 import Headers :: *;
@@ -105,10 +106,25 @@ module mkSimExtractNormalReqResp#(
         let qpIndex   = getIndexQP(dqpn);
 
         let maybeHandlerPD = qpMetaData.getPD(dqpn);
+        let qp = qpMetaData.getQueuePairByQPN(dqpn);
+        let isResp = isRespPkt || isCNP;
+        let cntrlStatus = isResp ? qp.statusSQ : qp.statusRQ;
+        let isValidStateQP = cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR;
         $display(
-            "time=%0t: extractHeader, maybeHandlerPD=", $time, fshow(maybeHandlerPD),
+            "time=%0t: extractHeader", $time,
+            ", maybeHandlerPD=", fshow(maybeHandlerPD),
+            ", isValidStateQP=", fshow(isValidStateQP),
             " should be valid, when dqpn=%h, bth.psn=%h, bth.opcode=",
             dqpn, bth.psn, fshow(bth.opcode)
+        );
+        immAssert(
+            isValidStateQP,
+            "isValidStateQP assertion @ mkSimExtractNormalReqResp",
+            $format(
+                "isValidStateQP=", fshow(isValidStateQP),
+                " should be valid, when bth.trans=", fshow(bth.trans),
+                " and dqpn=%h", dqpn
+            )
         );
         // immAssert(
         //     isValid(maybeHandlerPD),
@@ -179,7 +195,16 @@ module mkSimExtractNormalReqResp#(
             pktValid,
             "pktValid assertion @ mkSimExtractNormalReqResp",
             $format(
-                "pktValid=", fshow(pktValid), " should be valid"
+                "pktValid=", fshow(pktValid),
+                " should be valid, when payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+                ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+                ", isFirstOrMidPkt=", fshow(isFirstOrMidPkt),
+                ", isLastPkt=", fshow(isLastPkt),
+                ", isByteEnNonZero=", fshow(isByteEnNonZero),
+                ", isByteEnAllOne=", fshow(isByteEnAllOne),
+                ", pktValidReg=", fshow(pktValidReg),
+                ", bth.opcode=", fshow(bth.opcode),
+                ", bth.psn=%h", bth.psn
             )
         );
 
@@ -326,15 +351,15 @@ module mkTransportLayer(TransportLayer) provisos(
         toPipeOut(inputWorkReqQ), toPipeOut(inputRecvReqQ)
     );
 
-    let pktMetaDataAndPayloadPipeOutVec <- mkSimExtractNormalReqResp(
-        qpMetaData, rdmaReqRespPipeIn
+    // let pktMetaDataAndPayloadPipeOutVec <- mkSimExtractNormalReqResp(
+    //     qpMetaData, rdmaReqRespPipeIn
+    // );
+    let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
+        rdmaReqRespPipeIn
     );
-    // let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
-    //     rdmaReqRespPipeIn
-    // );
-    // let pktMetaDataAndPayloadPipeOutVec <- mkInputRdmaPktBufAndHeaderValidation(
-    //     headerAndMetaDataAndPayloadPipeOut, qpMetaData
-    // );
+    let pktMetaDataAndPayloadPipeOutVec <- mkInputRdmaPktBufAndHeaderValidation(
+        headerAndMetaDataAndPayloadPipeOut, qpMetaData
+    );
 
     // Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
@@ -368,12 +393,12 @@ module mkTransportLayer(TransportLayer) provisos(
         let rightIdx = 2 * idx + 1;
         qpDataStreamPipeOutVec[leftIdx]  = qp.rdmaRespPipeOut;
         qpDataStreamPipeOutVec[rightIdx] = qp.rdmaReqPipeOut;
-        permCheckCltVec[leftIdx]  = qp.permCheckClt4RQ;
-        permCheckCltVec[rightIdx] = qp.permCheckClt4SQ;
-        dmaReadCltVec[leftIdx]    = qp.dmaReadClt4RQ;
-        dmaReadCltVec[rightIdx]   = qp.dmaReadClt4SQ;
-        dmaWriteCltVec[leftIdx]   = qp.dmaWriteClt4RQ;
-        dmaWriteCltVec[rightIdx]  = qp.dmaWriteClt4SQ;
+        permCheckCltVec[leftIdx]         = qp.permCheckClt4RQ;
+        permCheckCltVec[rightIdx]        = qp.permCheckClt4SQ;
+        dmaReadCltVec[leftIdx]           = qp.dmaReadClt4RQ;
+        dmaReadCltVec[rightIdx]          = qp.dmaReadClt4SQ;
+        dmaWriteCltVec[leftIdx]          = qp.dmaWriteClt4RQ;
+        dmaWriteCltVec[rightIdx]         = qp.dmaWriteClt4SQ;
 
         // TODO: support CNP
         let addNoErrWorkCompOutRule <- addRules(genEmptyPipeOutRule(

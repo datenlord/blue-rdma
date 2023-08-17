@@ -791,16 +791,16 @@ module mkGenNormalOrDupWorkReq#(
             if (normalOrDupReqReg) begin
                 pendingWorkReqPipeIn.deq;
                 dupWorkReqReg <= pendingWorkReqPipeIn.first;
-                // $display(
-                //     "time=%0t:", $time,
-                //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
-                // );
+                $display(
+                    "time=%0t:", $time,
+                    " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
+                );
             end
             else begin
-                // $display(
-                //     "time=%0t:", $time,
-                //     " duplicate pendingWR=", fshow(dupWorkReqReg)
-                // );
+                $display(
+                    "time=%0t:", $time,
+                    " duplicate pendingWR=", fshow(dupWorkReqReg)
+                );
             end
 
             if (!normalOrDupReq) begin
@@ -1599,12 +1599,12 @@ module mkVector2PipeOut#(
         else begin
             idxCnt.decr(1);
         end
-        $display(
-            "time=%0t: mkVector2PipeOut deq", $time,
-            ", vSz=%0d, idxCnt=%0d", valueOf(vSz), idxCnt,
-            ", isVecValid=", fshow(isVecValid),
-            ", first=", fshow(inVec[idxCnt])
-        );
+        // $display(
+        //     "time=%0t: mkVector2PipeOut deq", $time,
+        //     ", vSz=%0d, idxCnt=%0d", valueOf(vSz), idxCnt,
+        //     ", isVecValid=", fshow(isVecValid),
+        //     ", first=", fshow(inVec[idxCnt])
+        // );
     endmethod
 endmodule
 
@@ -1650,6 +1650,7 @@ module mkDebugConnection#(
             bthReg <= bth;
             $display(
                 "time=%0t: mkDebugConnection debug", $time,
+                ", bth.dqpn=%h", bth.dqpn,
                 ", bth=", fshow(bth),
                 ", data=", fshow(data)
             );
@@ -1657,6 +1658,15 @@ module mkDebugConnection#(
         else if (dataStream.isLast) begin
             $display(
                 "time=%0t: mkDebugConnection debug", $time,
+                ", bth.dqpn=%h", bthReg.dqpn,
+                ", bth=", fshow(bthReg),
+                ", data=", fshow(data)
+            );
+        end
+        else begin
+            $display(
+                "time=%0t: mkDebugConnection debug", $time,
+                ", bth.dqpn=%h", bthReg.dqpn,
                 ", bth=", fshow(bthReg),
                 ", data=", fshow(data)
             );

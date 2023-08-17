@@ -14,14 +14,14 @@ import SimDma :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestReqGenNormalCase(Empty);
     let minDmaLength = 1;
     let maxDmaLength = 10241;
     let result <- mkTestReqGenNormalAndZeroLenCase(minDmaLength, maxDmaLength);
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestReqGenZeroLenCase(Empty);
     let minDmaLength = 0;
     let maxDmaLength = 0;
@@ -55,7 +55,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
     let pendingWorkReqBufNotEmpty = True;
-    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv.dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus,
         dmaReadCntrl
@@ -288,7 +288,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestReqGenDmaReadErrCase(Empty);
     let minDmaLength = 1024;
     let maxDmaLength = 2048;
@@ -320,10 +320,9 @@ module mkTestReqGenDmaReadErrCase(Empty);
     );
 
     let pendingWorkReqBufNotEmpty = True;
-    let dmaReadCntrl <- mkDmaReadCntrl(simDmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
     let payloadGenerator <- mkPayloadGenerator(
-        cntrlStatus,
-        dmaReadCntrl
+        cntrlStatus, dmaReadCntrl
     );
     // DUT
     let reqGenSQ <- mkReqGenSQ(
@@ -334,6 +333,8 @@ module mkTestReqGenDmaReadErrCase(Empty);
     );
     let pendingWorkReqPipeOut4Comp = reqGenSQ.pendingWorkReqPipeOut;
     let rdmaReqPipeOut = reqGenSQ.rdmaReqDataStreamPipeOut;
+    mkSink(rdmaReqPipeOut);
+
     // Error WC
     let errWorkCompGenReqPipeOut = reqGenSQ.workCompGenReqPipeOut;
 
@@ -367,8 +368,12 @@ module mkTestReqGenDmaReadErrCase(Empty);
                     " should be IBV_WC_LOC_QP_OP_ERR"
                 )
             );
+
+            $display(
+                "time=%0t: checkErrWorkComp", $time,
+                ", error WC request=", fshow(errWorkCompReq)
+            );
         end
-        // $display("time=%0t: error WC request=", $time, fshow(errWorkCompReq));
     endrule
 
     rule compareWorkReq;
@@ -414,10 +419,10 @@ module mkTestReqGenDmaReadErrCase(Empty);
                 )
             );
         end
-        // $display(
-        //     "time=%0t:", $time,
-        //     " genErrWorkCompReg[1]=", genErrWorkCompReg[1],
-        //     ", pendingWR=", fshow(pendingWR)
-        // );
+        $display(
+            "time=%0t: compareWorkReq", $time,
+            ", genErrWorkCompReg[1]=", genErrWorkCompReg[1],
+            ", pendingWR=", fshow(pendingWR)
+        );
     endrule
 endmodule

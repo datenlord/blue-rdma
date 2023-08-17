@@ -16,7 +16,7 @@ import SimExtractRdmaHeaderPayload :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestReceiveCNP(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_256;
@@ -116,7 +116,7 @@ module mkTestReceiveCNP(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCalculateRandomPktLen(Empty);
     let qpType = IBV_QPT_RC;
     let pmtu = IBV_MTU_4096;
@@ -128,7 +128,7 @@ module mkTestCalculateRandomPktLen(Empty);
     );
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCalculatePktLenEqPMTU(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_4096;
@@ -140,7 +140,7 @@ module mkTestCalculatePktLenEqPMTU(Empty);
     );
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCalculateZeroPktLen(Empty);
     let qpType = IBV_QPT_XRC_SEND;
     let pmtu = IBV_MTU_4096;

@@ -19,7 +19,7 @@ typedef enum {
     TEST_SCAN_Q_SCAN_POP
 } ScanFifoTestState deriving(Bits, Eq, FShow);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestScanFIFOF(Empty);
     ScanFIFOF#(MAX_QP_WR, ItemType) scanQ <- mkScanFIFOF;
     PipeOut#(ItemType) qElemPipeOut <- mkGenericRandomPipeOut;
@@ -171,7 +171,7 @@ typedef enum {
     TEST_Q_POP
 } FifoTestState deriving(Bits, Eq);
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestSearchFIFOF(Empty);
     SearchFIFOF#(MAX_QP_RD_ATOM, ItemType) searchQ <- mkSearchFIFOF;
     Count#(Bit#(TLog#(MAX_QP_RD_ATOM))) itemCnt <- mkCount(0);
@@ -272,7 +272,7 @@ module mkTestSearchFIFOF(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestCacheFIFO2(Empty);
     function Tuple2#(Bool, ItemType) compareFunc(ItemType item4Search, ItemType itemInQ);
         return tuple2(item4Search == itemInQ, itemInQ);
@@ -350,7 +350,7 @@ module mkTestCacheFIFO2(Empty);
     endrule
 endmodule
 
-(* synthesize *)
+(* doc = "testcase" *)
 module mkTestVectorSearch(Empty);
     Vector#(MAX_QP_RD_ATOM, Reg#(ItemType)) searchVec <- replicateM(mkRegU);
     Vector#(MAX_QP_RD_ATOM, Reg#(Bool)) tagVec <- replicateM(mkReg(False));
