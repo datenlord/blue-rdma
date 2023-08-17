@@ -677,14 +677,14 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     // mkSink(dut.workCompGenReqPipeOut);
     // mkSink(payloadConsumer.respPipeOut);
     // PipeOut need to compare:
-    mkSink(sendWriteReqPayloadPipeOut4Ref);
-    mkSink(sendWriteReqPayloadPipeOut);
-    mkSink(normalOrDupReqSelPipeOut4WorkComp);
-    mkSink(normalOrDupPendingWorkReqPipeOut4WorkComp);
-    mkSink(workCompPipeOut4WorkReq);
-    mkSink(normalOrDupPendingWorkReqPipeOut4Resp);
-    mkSink(dut.rdmaRespDataStreamPipeOut);
-    mkSink(normalOrDupReqSelPipeOut4Resp);
+    // mkSink(sendWriteReqPayloadPipeOut4Ref);
+    // mkSink(sendWriteReqPayloadPipeOut);
+    // mkSink(normalOrDupReqSelPipeOut4WorkComp);
+    // mkSink(normalOrDupPendingWorkReqPipeOut4WorkComp);
+    // mkSink(workCompPipeOut4WorkReq);
+    // mkSink(normalOrDupPendingWorkReqPipeOut4Resp);
+    // mkSink(dut.rdmaRespDataStreamPipeOut);
+    // mkSink(normalOrDupReqSelPipeOut4Resp);
 
     // rule show;
     //     let sendWritePayloadDataStreamRef = sendWriteReqPayloadPipeOut.first;
@@ -726,7 +726,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     //         )
     //     );
     // endrule
-/*
+
     rule compareSendWriteReqPayload;
         let sendWritePayloadDataStreamRef = sendWriteReqPayloadPipeOut4Ref.first;
         sendWriteReqPayloadPipeOut4Ref.deq;
@@ -914,7 +914,6 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
             end
         end
     endrule
-*/
 endmodule
 
 typedef enum {

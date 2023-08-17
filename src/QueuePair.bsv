@@ -572,7 +572,7 @@ module mkQP(QueuePair);
         cntrl.setStateErr;
     endrule
 
-    // (* no_implicit_conditions, fire_when_enabled *)
+    (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadRQ if (
         cntrl.contextSQ.statusSQ.comm.isERR &&
         !rq.respHeaderOutNotEmpty           &&
@@ -581,15 +581,15 @@ module mkQP(QueuePair);
         dmaReadCntrl4RQ.dmaCntrl.cancel;
         rqDmaReadCancelReg <= True;
 
-        $display(
-            "time=%0t: cancelDmaReadRQ", $time,
-            ", dqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
-            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
-            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
-        );
+        // $display(
+        //     "time=%0t: cancelDmaReadRQ", $time,
+        //     ", dqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+        //     ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+        //     ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        // );
     endrule
 
-    // (* no_implicit_conditions, fire_when_enabled *)
+    (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadSQ if (
         cntrl.contextSQ.statusSQ.comm.isERR &&
         !sq.reqHeaderOutNotEmpty            &&
@@ -598,12 +598,12 @@ module mkQP(QueuePair);
         dmaReadCntrl4SQ.dmaCntrl.cancel;
         sqDmaReadCancelReg <= True;
 
-        $display(
-            "time=%0t: cancelDmaReadSQ", $time,
-            ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
-            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
-            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
-        );
+        // $display(
+        //     "time=%0t: cancelDmaReadSQ", $time,
+        //     ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+        //     ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+        //     ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        // );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -638,14 +638,14 @@ module mkQP(QueuePair);
     );
         // Notify controller when graceful stop
         cntrl.errFlushDone;
-        $display(
-            "time=%0t: waitGracefulStop", $time,
-            ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
-            ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
-            ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
-        );
+        // $display(
+        //     "time=%0t: waitGracefulStop", $time,
+        //     ", sqpn=%h", cntrl.contextSQ.statusSQ.comm.getSQPN,
+        //     ", workReqQ.notEmpty=", fshow(workReqQ.notEmpty),
+        //     ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
+        // );
     endrule
-
+/*
     rule debug if (
         cntrl.contextRQ.statusRQ.comm.isERR &&
         cntrl.contextSQ.statusSQ.comm.isERR &&
@@ -685,7 +685,7 @@ module mkQP(QueuePair);
             ", dmaWriteCntrl4SQ.dmaCntrl.isIdle=", fshow(dmaWriteCntrl4SQ.dmaCntrl.isIdle)
         );
     endrule
-
+*/
     interface srvPortQP       = cntrl.srvPort;
     interface recvReqIn       = toPut(recvReqQ);
     interface workReqIn       = toPut(workReqQ);

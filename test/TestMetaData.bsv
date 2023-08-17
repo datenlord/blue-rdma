@@ -387,18 +387,20 @@ module mkTestMetaDataMRs(Empty);
 endmodule
 
 typedef enum {
-    TEST_QP_META_DATA_CREATE,
-    TEST_QP_META_DATA_INIT,
-    TEST_QP_META_DATA_RTR,
-    TEST_QP_META_DATA_ERR,
-    TEST_QP_META_DATA_CHECK,
-    TEST_QP_META_DATA_DESTROY
-} TestMetaDataState deriving(Bits, Eq);
+    TEST_META_DATA_PD_ALLOC,
+    TEST_META_DATA_PD_DEALLOC,
+    TEST_META_DATA_QP_CREATE,
+    TEST_META_DATA_QP_INIT,
+    TEST_META_DATA_QP_RTR,
+    TEST_META_DATA_QP_ERR,
+    TEST_META_DATA_QP_CHECK,
+    TEST_META_DATA_QP_DESTROY
+} TestMetaDataSrvState deriving(Bits, Eq);
 
 (* doc = "testcase" *)
 module mkTestMetaDataQPs(Empty) provisos(
     NumAlias#(TLog#(MAX_QP), qpNumWidth),
-    Add#(TAdd#(qpNumWidth, 1), 0, TLog#(TAdd#(1, MAX_QP))) // MAX_QP must be power of 2
+    Add#(TLog#(MAX_QP), 1, TLog#(TAdd#(1, MAX_QP))) // MAX_QP must be power of 2
 );
     let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
     let pmtu = IBV_MTU_512;
@@ -428,7 +430,7 @@ module mkTestMetaDataQPs(Empty) provisos(
     FIFOF#(QPN) qpnQ4Search  <- mkSizedFIFOF(valueOf(MAX_QP));
     FIFOF#(QPN) qpnQ4Destroy <- mkSizedFIFOF(valueOf(MAX_QP));
 
-    Reg#(TestMetaDataState) qpTestStateReg <- mkReg(TEST_QP_META_DATA_CREATE);
+    Reg#(TestMetaDataSrvState) qpTestStateReg <- mkReg(TEST_META_DATA_QP_CREATE);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -439,7 +441,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         return tuple2(truncate(pdHandler), truncate(qpn));
     endfunction
 
-    rule createQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_QP_META_DATA_CREATE);
+    rule reqCreateQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_META_DATA_QP_CREATE);
         qpReqCnt.decr(1);
 
         let curPdHandler = pdHandlerPipeOut4InsertReq.first;
@@ -456,11 +458,11 @@ module mkTestMetaDataQPs(Empty) provisos(
         qpMetaDataDUT.srvPort.request.put(createReq);
     endrule
 
-    rule createResp if (qpTestStateReg == TEST_QP_META_DATA_CREATE);
+    rule respCreateQPs if (qpTestStateReg == TEST_META_DATA_QP_CREATE);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_INIT;
+            qpTestStateReg <= TEST_META_DATA_QP_INIT;
         end
         else begin
             qpRespCnt.decr(1);
@@ -505,7 +507,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         // );
     endrule
 
-    rule initQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_QP_META_DATA_INIT);
+    rule reqInitQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_META_DATA_QP_INIT);
         qpReqCnt.decr(1);
 
         let qpn = qpnQ4Init.first;
@@ -524,11 +526,11 @@ module mkTestMetaDataQPs(Empty) provisos(
         qpMetaDataDUT.srvPort.request.put(initReqQP);
     endrule
 
-    rule initResp if (qpTestStateReg == TEST_QP_META_DATA_INIT);
+    rule respInitQPs if (qpTestStateReg == TEST_META_DATA_QP_INIT);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_RTR;
+            qpTestStateReg <= TEST_META_DATA_QP_RTR;
         end
         else begin
             qpRespCnt.decr(1);
@@ -545,7 +547,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         );
     endrule
 
-    rule rtrQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_QP_META_DATA_RTR);
+    rule reqRtrQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_META_DATA_QP_RTR);
         qpReqCnt.decr(1);
 
         let qpn = qpnQ4RTR.first;
@@ -565,11 +567,11 @@ module mkTestMetaDataQPs(Empty) provisos(
         qpMetaDataDUT.srvPort.request.put(setRtrReqQP);
     endrule
 
-    rule rtrResp if (qpTestStateReg == TEST_QP_META_DATA_RTR);
+    rule respRtrQPs if (qpTestStateReg == TEST_META_DATA_QP_RTR);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_ERR;
+            qpTestStateReg <= TEST_META_DATA_QP_ERR;
         end
         else begin
             qpRespCnt.decr(1);
@@ -586,7 +588,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         );
     endrule
 
-    rule errQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_QP_META_DATA_ERR);
+    rule reqErrQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_META_DATA_QP_ERR);
         qpReqCnt.decr(1);
 
         let qpn = qpnQ4ERR.first;
@@ -594,7 +596,7 @@ module mkTestMetaDataQPs(Empty) provisos(
 
         let qpAttr = qpAttrPipeOut.first;
         qpAttr.qpState = IBV_QPS_ERR;
-        let setErrReqQP = ReqQP {
+        let reqErrQP = ReqQP {
             qpReqType : REQ_QP_MODIFY,
             pdHandler : dontCareValue,
             qpn       : qpn,
@@ -602,14 +604,14 @@ module mkTestMetaDataQPs(Empty) provisos(
             qpAttr    : qpAttr,
             qpInitAttr: dontCareValue
         };
-        qpMetaDataDUT.srvPort.request.put(setErrReqQP);
+        qpMetaDataDUT.srvPort.request.put(reqErrQP);
     endrule
 
-    rule errResp if (qpTestStateReg == TEST_QP_META_DATA_ERR);
+    rule respErrQPs if (qpTestStateReg == TEST_META_DATA_QP_ERR);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_CHECK;
+            qpTestStateReg <= TEST_META_DATA_QP_CHECK;
         end
         else begin
             qpRespCnt.decr(1);
@@ -626,11 +628,11 @@ module mkTestMetaDataQPs(Empty) provisos(
         );
     endrule
 
-    rule compareSearch if (qpTestStateReg == TEST_QP_META_DATA_CHECK);
+    rule compareSearch if (qpTestStateReg == TEST_META_DATA_QP_CHECK);
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_DESTROY;
+            qpTestStateReg <= TEST_META_DATA_QP_DESTROY;
         end
         else begin
             qpRespCnt.decr(1);
@@ -690,7 +692,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         // );
     endrule
 
-    rule destroyQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_QP_META_DATA_DESTROY);
+    rule reqDestroyQPs if (!isZero(qpReqCnt) && qpTestStateReg == TEST_META_DATA_QP_DESTROY);
         qpReqCnt.decr(1);
 
         let qpn2Destroy = qpnQ4Destroy.first;
@@ -707,13 +709,13 @@ module mkTestMetaDataQPs(Empty) provisos(
         qpMetaDataDUT.srvPort.request.put(destroyReq);
     endrule
 
-    rule destroyResp if (qpTestStateReg == TEST_QP_META_DATA_DESTROY);
+    rule respDestroyQPs if (qpTestStateReg == TEST_META_DATA_QP_DESTROY);
         countDown.decr;
 
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(valueOf(MAX_QP));
             qpRespCnt <= fromInteger(valueOf(MAX_QP) - 1);
-            qpTestStateReg <= TEST_QP_META_DATA_CREATE;
+            qpTestStateReg <= TEST_META_DATA_QP_CREATE;
         end
         else begin
             qpRespCnt.decr(1);
@@ -749,7 +751,7 @@ module mkTestMetaDataQPs(Empty) provisos(
         // );
     endrule
 endmodule
-
+/*
 module mkTestMetaDataQPs2(Empty);
     let qpMetaDataDUT <- mkMetaDataQPs;
     Count#(Bit#(TLog#(TAdd#(1, MAX_QP)))) qpReqCnt <- mkCount(0);
@@ -889,17 +891,7 @@ module mkTestMetaDataQPs2(Empty);
                 " should be true"
             )
         );
-/*
-        let qpCntrl = qpMetaDataDUT.getCntrlByQPN(qpn2Search);
-        immAssert(
-            qpCntrl.isReset,
-            "qpCntrl assertion @ mkTestMetaDataQPs",
-            $format(
-                "qpCntrl.isReset=", fshow(qpCntrl.isReset),
-                " should be true"
-            )
-        );
-*/
+
         // $display(
         //     "time=%0t: isValidQP=", $time, fshow(isValidQP),
         //     " should be valid when qpn2Search=%h and qpCnt=%0d",
@@ -967,7 +959,7 @@ module mkTestMetaDataQPs2(Empty);
         // );
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
 module mkTestPermCheckSrv(Empty);
     let pdMetaData  <- mkMetaDataPDs;
@@ -1287,7 +1279,481 @@ module mkTestPermCheckSrv(Empty);
 endmodule
 
 (* doc = "testcase" *)
-module mkTestMetaDataSrv(Empty);
+module mkTestMetaDataSrv(Empty) provisos(
+    NumAlias#(TDiv#(MAX_QP, MAX_PD), qpPerPD),
+    Add#(TMul#(MAX_PD, qpPerPD), 0, MAX_QP) // MAX_QP can be divided by MAX_PD
+);
+    let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
+    let pmtu = IBV_MTU_512;
+    let qpInitAttr = QpInitAttr {
+        qpType  : qpType,
+        sqSigAll: False
+    };
+    let setExpectedPsnAsNextPSN = True;
+    let setZero2ExpectedPsnAndNextPSN = True;
+    let qpAttrPipeOut <- mkSimQpAttrPipeOut(
+        pmtu, setExpectedPsnAsNextPSN, setZero2ExpectedPsnAndNextPSN
+    );
+
+    let pdMetaData  <- mkMetaDataPDs;
+    let qpMetaData  <- mkMetaDataQPs;
+    let metaDataSrv <- mkMetaDataSrv(pdMetaData, qpMetaData);
+
+    let pdNum = valueOf(MAX_PD);
+    let qpNum = valueOf(MAX_QP);
+    // let qpPerPD = valueOf(TDiv#(MAX_QP, MAX_PD));
+
+    PipeOut#(KeyPD) pdKeyPipeOut <- mkGenericRandomPipeOut;
+
+    FIFOF#(HandlerPD) pdHandlerQ4Fill <- mkSizedFIFOF(pdNum);
+    FIFOF#(HandlerPD) pdHandlerQ4Pop  <- mkSizedFIFOF(pdNum);
+
+    FIFOF#(QPN)    qpnQ4Init <- mkSizedFIFOF(qpNum);
+    FIFOF#(QPN)     qpnQ4RTR <- mkSizedFIFOF(qpNum);
+    FIFOF#(QPN)     qpnQ4ERR <- mkSizedFIFOF(qpNum);
+    FIFOF#(QPN) qpnQ4Destroy <- mkSizedFIFOF(qpNum);
+
+    Count#(Bit#(TLog#(TAdd#(1, MAX_PD))))  pdReqCnt <- mkCount(fromInteger(pdNum));
+    Count#(Bit#(TLog#(MAX_PD)))           pdRespCnt <- mkCount(fromInteger(pdNum - 1));
+    Count#(Bit#(TLog#(TAdd#(1, MAX_QP))))  qpReqCnt <- mkCount(fromInteger(qpNum));
+    Count#(Bit#(TLog#(MAX_QP)))           qpRespCnt <- mkCount(fromInteger(qpNum - 1));
+    Count#(Bit#(TLog#(qpPerPD)))         qpPerPdCnt <- mkCount(fromInteger(valueOf(qpPerPD) - 1));
+
+    Reg#(TestMetaDataSrvState) srvCheckStateReg <- mkReg(TEST_META_DATA_PD_ALLOC);
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule reqAllocPDs if (
+        !isZero(pdReqCnt) && srvCheckStateReg == TEST_META_DATA_PD_ALLOC
+    );
+        pdReqCnt.decr(1);
+
+        let pdKey = pdKeyPipeOut.first;
+        pdKeyPipeOut.deq;
+
+        let allocReqPD = ReqPD {
+            allocOrNot: True,
+            pdKey     : pdKey,
+            pdHandler : dontCareValue
+        };
+        metaDataSrv.request.put(tagged Req4PD allocReqPD);
+        // $display("time=%0t: pdKey=%h", $time, pdKey);
+    endrule
+
+    rule respAllocPDs if (srvCheckStateReg == TEST_META_DATA_PD_ALLOC);
+        if (isZero(pdRespCnt)) begin
+            pdReqCnt  <= fromInteger(pdNum);
+            pdRespCnt <= fromInteger(pdNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_QP_CREATE;
+        end
+        else begin
+            pdRespCnt.decr(1);
+        end
+
+        let maybeAllocRespPD <- metaDataSrv.response.get;
+        if (maybeAllocRespPD matches tagged Resp4PD .allocRespPD) begin
+            immAssert(
+                allocRespPD.successOrNot,
+                "allocRespPD.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "allocRespPD.successOrNot=", fshow(allocRespPD.successOrNot),
+                    " should be true when pdRespCnt=%0d", pdRespCnt
+                )
+            );
+            pdHandlerQ4Fill.enq(allocRespPD.pdHandler);
+            pdHandlerQ4Pop.enq(allocRespPD.pdHandler);
+        end
+        else begin
+            immFail(
+                "maybeAllocRespPD assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeAllocRespPD=", fshow(maybeAllocRespPD),
+                    " should be Resp4PD"
+                )
+            );
+        end
+    endrule
+
+    rule reqCreateQPs if (
+        !isZero(qpReqCnt) && srvCheckStateReg == TEST_META_DATA_QP_CREATE
+    );
+        if (isZero(qpPerPdCnt)) begin
+            qpPerPdCnt <= fromInteger(valueOf(qpPerPD) - 1);
+            pdHandlerQ4Fill.deq;
+        end
+        else begin
+            qpPerPdCnt.decr(1);
+        end
+        qpReqCnt.incr(1);
+
+        let pdHandler = pdHandlerQ4Fill.first;
+
+        let createReqQP = ReqQP {
+            qpReqType   : REQ_QP_CREATE,
+            pdHandler   : pdHandler,
+            qpn         : dontCareValue,
+            qpAttrMask  : dontCareValue,
+            qpAttr      : dontCareValue,
+            qpInitAttr  : qpInitAttr
+        };
+        metaDataSrv.request.put(tagged Req4QP createReqQP);
+    endrule
+
+    rule respCreateQPs if (srvCheckStateReg == TEST_META_DATA_QP_CREATE);
+        if (isZero(qpRespCnt)) begin
+            qpReqCnt  <= fromInteger(qpNum);
+            qpRespCnt <= fromInteger(qpNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_QP_INIT;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+
+        let maybeCreateRespQP <- metaDataSrv.response.get;
+        if (maybeCreateRespQP matches tagged Resp4QP .createRespQP) begin
+            immAssert(
+                createRespQP.successOrNot,
+                "createRespQP.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "createRespQP.successOrNot=", fshow(createRespQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt
+                )
+            );
+
+            let qpn = createRespQP.qpn;
+            qpnQ4Init.enq(qpn);
+            qpnQ4RTR.enq(qpn);
+            qpnQ4ERR.enq(qpn);
+            qpnQ4Destroy.enq(qpn);
+            // $display(
+            //     "time=%0t: createRespQP=", $time, fshow(createRespQP),
+            //     " should be success, and qpn=%h, qpRespCnt=%h",
+            //     qpn, qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeCreateRespQP assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeCreateRespQP=", fshow(maybeCreateRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+    endrule
+
+    rule reqInitQPs if (
+        !isZero(qpReqCnt) && srvCheckStateReg == TEST_META_DATA_QP_INIT
+    );
+        qpReqCnt.decr(1);
+
+        let qpn = qpnQ4Init.first;
+        qpnQ4Init.deq;
+
+        let qpAttr = qpAttrPipeOut.first;
+        qpAttr.qpState = IBV_QPS_INIT;
+        let initReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : qpn,
+            qpAttrMask: getReset2InitRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        metaDataSrv.request.put(tagged Req4QP initReqQP);
+        // $display(
+        //     "time=%0t: reqInitQPs", $time,
+        //     ", qpReqCnt=%0d", qpReqCnt
+        // );
+    endrule
+
+    rule respInitQPs if (srvCheckStateReg == TEST_META_DATA_QP_INIT);
+        if (isZero(qpRespCnt)) begin
+            qpReqCnt  <= fromInteger(qpNum);
+            qpRespCnt <= fromInteger(qpNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_QP_RTR;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+        let maybeInitRespQP <- metaDataSrv.response.get;
+        if (maybeInitRespQP matches tagged Resp4QP .initRespQP) begin
+            immAssert(
+                initRespQP.successOrNot,
+                "initRespQP.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "initRespQP.successOrNot=", fshow(initRespQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt
+                )
+            );
+
+            // let qpn = initRespQP.qpn;
+            // $display(
+            //     "time=%0t: initRespQP=", $time, fshow(initRespQP),
+            //     " should be success, and qpn=%h, qpRespCnt=%h", qpn, qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeInitRespQP assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeInitRespQP=", fshow(maybeInitRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+
+        // $display(
+        //     "time=%0t: respInitQPs", $time,
+        //     ", qpnQ4RTR.notEmpty=", fshow(qpnQ4RTR.notEmpty),
+        //     ", dqpnPipeIn.notEmpty=", fshow(dqpnPipeIn.notEmpty)
+        // );
+    endrule
+
+    rule reqRtrQPs if (
+        !isZero(qpReqCnt) && srvCheckStateReg == TEST_META_DATA_QP_RTR
+    );
+        qpReqCnt.decr(1);
+
+        let qpn = qpnQ4RTR.first;
+        qpnQ4RTR.deq;
+
+        let qpAttr = qpAttrPipeOut.first;
+
+        qpAttr.dqpn = qpn;
+        qpAttr.qpState = IBV_QPS_RTR;
+        let setRtrReqQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : qpn,
+            qpAttrMask: getInit2RtrRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        metaDataSrv.request.put(tagged Req4QP setRtrReqQP);
+
+        $display(
+            "time=%0t: reqRtrQPs", $time,
+            ", qpReqCnt=%0d", qpReqCnt
+        );
+    endrule
+
+    rule respRtrQPs if (srvCheckStateReg == TEST_META_DATA_QP_RTR);
+        if (isZero(qpRespCnt)) begin
+            qpReqCnt  <= fromInteger(qpNum);
+            qpRespCnt <= fromInteger(qpNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_QP_ERR;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+        let maybeModifyRespQP <- metaDataSrv.response.get;
+        if (maybeModifyRespQP matches tagged Resp4QP .setRtrRespQP) begin
+            immAssert(
+                setRtrRespQP.successOrNot,
+                "setRtrRespQP.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "setRtrRespQP.successOrNot=", fshow(setRtrRespQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt,
+                    ", setRtrRespQP=", fshow(setRtrRespQP)
+                )
+            );
+
+            // let sqpn = setRtrRespQP.qpn;
+            // let dqpn = setRtrRespQP.qpAttr.dqpn;
+
+            // $display(
+            //     "time=%0t: setRtrRespQP=", $time, fshow(setRtrRespQP),
+            //     " should be success, and sqpn=%h, dqpn=%h, qpRespCnt=%0d",
+            //     sqpn, dqpn, qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeModifyRespQP assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeModifyRespQP=", fshow(maybeModifyRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+    endrule
+
+    rule reqErrQPs if (
+        !isZero(qpReqCnt) && srvCheckStateReg == TEST_META_DATA_QP_ERR
+    );
+        qpReqCnt.decr(1);
+
+        let qpn = qpnQ4ERR.first;
+        qpnQ4ERR.deq;
+
+        let qpAttr = qpAttrPipeOut.first;
+
+        qpAttr.qpState = IBV_QPS_ERR;
+        let reqErrQP = ReqQP {
+            qpReqType : REQ_QP_MODIFY,
+            pdHandler : dontCareValue,
+            qpn       : qpn,
+            qpAttrMask: getOnlyStateRequiredAttr,
+            qpAttr    : qpAttr,
+            qpInitAttr: qpInitAttr
+        };
+        metaDataSrv.request.put(tagged Req4QP reqErrQP);
+
+        // $display("time=%0t: reqRtsQPs, qpReqCnt=%0d", $time, qpReqCnt);
+    endrule
+
+    rule respErrQPs if (srvCheckStateReg == TEST_META_DATA_QP_ERR);
+        if (isZero(qpRespCnt)) begin
+            qpReqCnt  <= fromInteger(qpNum);
+            qpRespCnt <= fromInteger(qpNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_QP_DESTROY;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+        let maybeModifyRespQP <- metaDataSrv.response.get;
+        if (maybeModifyRespQP matches tagged Resp4QP .respErrQP) begin
+            immAssert(
+                respErrQP.successOrNot,
+                "respErrQP.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "respErrQP.successOrNot=", fshow(respErrQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt,
+                    ", respErrQP=", fshow(respErrQP)
+                )
+            );
+
+            // $display(
+            //     "time=%0t: respErrQP=", $time, fshow(respErrQP),
+            //     " should be success, and respErrQP.qpn=%h, qpRespCnt=%h",
+            //     respErrQP.qpn, qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeModifyRespQP assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeModifyRespQP=", fshow(maybeModifyRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+    endrule
+
+    rule reqDestroyQPs if (!isZero(qpReqCnt) && srvCheckStateReg == TEST_META_DATA_QP_DESTROY);
+        qpReqCnt.decr(1);
+
+        let qpn2Destroy = qpnQ4Destroy.first;
+        qpnQ4Destroy.deq;
+
+        let destroyReqQP = ReqQP {
+            qpReqType : REQ_QP_DESTROY,
+            pdHandler : dontCareValue,
+            qpn       : qpn2Destroy,
+            qpAttrMask: dontCareValue,
+            qpAttr    : dontCareValue,
+            qpInitAttr: dontCareValue
+        };
+        metaDataSrv.request.put(tagged Req4QP destroyReqQP);
+        // $display("time=%0t: qpn2Destroy=%h", $time, qpn2Destroy);
+    endrule
+
+    rule respDestroyQPs if (srvCheckStateReg == TEST_META_DATA_QP_DESTROY);
+        if (isZero(qpRespCnt)) begin
+            qpReqCnt  <= fromInteger(qpNum);
+            qpRespCnt <= fromInteger(qpNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_PD_DEALLOC;
+        end
+        else begin
+            qpRespCnt.decr(1);
+        end
+
+        countDown.decr;
+
+        let maybeDestroyRespQP <- metaDataSrv.response.get;
+        if (maybeDestroyRespQP matches tagged Resp4QP .destroyRespQP) begin
+            immAssert(
+                destroyRespQP.successOrNot,
+                "destroyRespQP.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "destroyResp.successOrNot=", fshow(destroyRespQP.successOrNot),
+                    " should be true when qpRespCnt=%0d", qpRespCnt
+                )
+            );
+            // $display(
+            //     "time=%0t: destroyRespQP=", $time, fshow(destroyRespQP),
+            //     " should be success when qpRespCnt=%0d", qpRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeDestroyRespQP assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeDestroyRespQP=", fshow(maybeDestroyRespQP),
+                    " should be Resp4QP"
+                )
+            );
+        end
+    endrule
+
+    rule reqDeallocPDs if (
+        !isZero(pdReqCnt) && srvCheckStateReg == TEST_META_DATA_PD_DEALLOC
+    );
+        pdReqCnt.decr(1);
+
+        let pdHandler2Remove = pdHandlerQ4Pop.first;
+        pdHandlerQ4Pop.deq;
+
+        let deAllocReqPD = ReqPD {
+            allocOrNot: False,
+            pdKey     : dontCareValue,
+            pdHandler : pdHandler2Remove
+        };
+        metaDataSrv.request.put(tagged Req4PD deAllocReqPD);
+    endrule
+
+    rule respDeallocPDs if (srvCheckStateReg == TEST_META_DATA_PD_DEALLOC);
+        if (isZero(pdRespCnt)) begin
+            pdReqCnt  <= fromInteger(pdNum);
+            pdRespCnt <= fromInteger(pdNum - 1);
+            srvCheckStateReg <= TEST_META_DATA_PD_ALLOC;
+        end
+        else begin
+            pdRespCnt.decr(1);
+        end
+
+        let maybeDeAllocRespPD <- metaDataSrv.response.get;
+        if (maybeDeAllocRespPD matches tagged Resp4PD .deAllocRespPD) begin
+            immAssert(
+                deAllocRespPD.successOrNot,
+                "deAllocRespPD.successOrNot assertion @ mkTestMetaDataSrv",
+                $format(
+                    "deAllocRespPD.successOrNot=", fshow(deAllocRespPD.successOrNot),
+                    " should be true when pdRespCnt=%0d", pdRespCnt
+                )
+            );
+            // $display(
+            //     "time=%0t: deAllocRespPD=", $time, fshow(deAllocRespPD),
+            //     " should be success when pdRespCnt=%0d", pdRespCnt
+            // );
+        end
+        else begin
+            immFail(
+                "maybeDeAllocRespPD assertion @ mkTestMetaDataSrv",
+                $format(
+                    "maybeDeAllocRespPD=", fshow(maybeDeAllocRespPD),
+                    " should be Resp4PD"
+                )
+            );
+        end
+    endrule
+endmodule
+/*
+module mkTestMetaDataSrv2(Empty);
     let pdMetaData  <- mkMetaDataPDs;
     let qpMetaData  <- mkMetaDataQPs;
     let metaDataSrv <- mkMetaDataSrv(pdMetaData, qpMetaData);
@@ -1596,7 +2062,7 @@ module mkTestMetaDataSrv(Empty);
         end
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
 module mkTestBramCache(Empty);
     let dut <- mkBramCache;
