@@ -515,11 +515,11 @@ module mkWorkCompGenRQ#(
         };
 
         dmaWaitingQ.enq(pendingWorkCompRQ);
-        $display(
-            "time=%0t: recvWorkCompReqRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
-            ", maybeWorkComp=", fshow(maybeWorkComp),
-            ", needWaitDmaWriteResp=", fshow(needWaitDmaWriteResp)
-        );
+        // $display(
+        //     "time=%0t: recvWorkCompReqRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
+        //     ", maybeWorkComp=", fshow(maybeWorkComp),
+        //     ", needWaitDmaWriteResp=", fshow(needWaitDmaWriteResp)
+        // );
     endrule
 
     rule waitDmaDoneRQ if (inNormalState);
@@ -567,11 +567,11 @@ module mkWorkCompGenRQ#(
             wcStatusQ4SQ.enq(wcGenReqRQ.wcStatus);
             genWorkCompQ.enq(pendingWorkCompRQ);
         end
-        $display(
-            "time=%0t: waitDmaDoneRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
-            ", isWorkCompSuccess=", fshow(isWorkCompSuccess),
-            ", needWaitDmaWriteResp=", fshow(needWaitDmaWriteResp)
-        );
+        // $display(
+        //     "time=%0t: waitDmaDoneRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
+        //     ", isWorkCompSuccess=", fshow(isWorkCompSuccess),
+        //     ", needWaitDmaWriteResp=", fshow(needWaitDmaWriteResp)
+        // );
     endrule
 
     rule genWorkCompRQ if (inNormalState);
@@ -616,19 +616,18 @@ module mkWorkCompGenRQ#(
                 // end
             end
             // $display(
-            //     "time=%0t:", $time,
-            //     " set mkWorkCompGenRQ to error state, wcStatus=",
-            //     fshow(wcGenReqRQ.wcStatus),
+            //     "time=%0t: set mkWorkCompGenRQ to error state", $time,
+            //     ", wcStatus=", fshow(wcGenReqRQ.wcStatus),
             //     ", isWorkCompSuccess=", fshow(isWorkCompSuccess),
             //     ", wcGenReqRQ=", fshow(wcGenReqRQ)
             // );
         end
 
-        $display(
-            "time=%0t: genWorkCompRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
-            ", maybeWorkComp=", fshow(maybeWorkComp),
-            ", isWorkCompSuccess=", fshow(isWorkCompSuccess)
-        );
+        // $display(
+        //     "time=%0t: genWorkCompRQ, wcGenReqRQ=", $time, fshow(wcGenReqRQ),
+        //     ", maybeWorkComp=", fshow(maybeWorkComp),
+        //     ", isWorkCompSuccess=", fshow(isWorkCompSuccess)
+        // );
     endrule
 
     rule noDmaWaitRQ if (inErrorState);
@@ -677,11 +676,11 @@ module mkWorkCompGenRQ#(
             end
         end
 
-        $display(
-            "time=%0t: errFlushRQ", $time,
-            ", wcGenReqRQ=", fshow(wcGenReqRQ),
-            ", maybeErrFlushWC=", fshow(maybeErrFlushWC)
-        );
+        // $display(
+        //     "time=%0t: errFlushRQ", $time,
+        //     ", wcGenReqRQ=", fshow(wcGenReqRQ),
+        //     ", maybeErrFlushWC=", fshow(maybeErrFlushWC)
+        // );
     endrule
 
     rule discardPayloadConRespRQ if (inErrorState);

@@ -110,13 +110,13 @@ module mkSimExtractNormalReqResp#(
         let isResp = isRespPkt || isCNP;
         let cntrlStatus = isResp ? qp.statusSQ : qp.statusRQ;
         let isValidStateQP = cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR;
-        $display(
-            "time=%0t: extractHeader", $time,
-            ", maybeHandlerPD=", fshow(maybeHandlerPD),
-            ", isValidStateQP=", fshow(isValidStateQP),
-            " should be valid, when dqpn=%h, bth.psn=%h, bth.opcode=",
-            dqpn, bth.psn, fshow(bth.opcode)
-        );
+        // $display(
+        //     "time=%0t: extractHeader", $time,
+        //     ", maybeHandlerPD=", fshow(maybeHandlerPD),
+        //     ", isValidStateQP=", fshow(isValidStateQP),
+        //     " should be valid, when dqpn=%h, bth.psn=%h, bth.opcode=",
+        //     dqpn, bth.psn, fshow(bth.opcode)
+        // );
         immAssert(
             isValidStateQP,
             "isValidStateQP assertion @ mkSimExtractNormalReqResp",
@@ -280,18 +280,18 @@ module mkSimExtractNormalReqResp#(
                 )
             );
         end
-        $display(
-            "time=%0t: mkSimExtractNormalReqResp recvPktFrag", $time,
-            ", bth.opcode=", fshow(bth.opcode),
-            ", bth.psn=%h, dqpn=%h, pktFragNum=%0d, pktLen=%0d",
-            bth.psn, dqpn, pktFragNum, pktLen
-            // ", bthPadCnt=%0d", bthPadCnt,
-            // ", fragLen=%0d", fragLen,
-            // ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
-            // ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
-            // ", fragLenWithOutPad=%0d", fragLenWithOutPad,
-            // ", rdmaHeader=", fshow(rdmaHeader)
-        );
+        // $display(
+        //     "time=%0t: mkSimExtractNormalReqResp recvPktFrag", $time,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", bth.psn=%h, dqpn=%h, pktFragNum=%0d, pktLen=%0d",
+        //     bth.psn, dqpn, pktFragNum, pktLen
+        //     // ", bthPadCnt=%0d", bthPadCnt,
+        //     // ", fragLen=%0d", fragLen,
+        //     // ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+        //     // ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+        //     // ", fragLenWithOutPad=%0d", fragLenWithOutPad,
+        //     // ", rdmaHeader=", fshow(rdmaHeader)
+        // );
     endrule
 
     function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);

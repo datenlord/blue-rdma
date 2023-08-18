@@ -272,11 +272,11 @@ module mkTestQueuePairReqErrResetCase(Empty);
 
         // testStateReg <= TEST_RESET_DELETE_QP;
         countDown.decr;
-        $display(
-            "time=%0t: checkErrResp", $time,
-            ", rdmaOpCode=", fshow(rdmaOpCode),
-            ", aeth.code=", fshow(aeth.code)
-        );
+        // $display(
+        //     "time=%0t: checkErrResp", $time,
+        //     ", rdmaOpCode=", fshow(rdmaOpCode),
+        //     ", aeth.code=", fshow(aeth.code)
+        // );
     endrule
 endmodule
 

@@ -369,10 +369,10 @@ module mkTestReqGenDmaReadErrCase(Empty);
                 )
             );
 
-            $display(
-                "time=%0t: checkErrWorkComp", $time,
-                ", error WC request=", fshow(errWorkCompReq)
-            );
+            // $display(
+            //     "time=%0t: checkErrWorkComp", $time,
+            //     ", error WC request=", fshow(errWorkCompReq)
+            // );
         end
     endrule
 
@@ -419,10 +419,10 @@ module mkTestReqGenDmaReadErrCase(Empty);
                 )
             );
         end
-        $display(
-            "time=%0t: compareWorkReq", $time,
-            ", genErrWorkCompReg[1]=", genErrWorkCompReg[1],
-            ", pendingWR=", fshow(pendingWR)
-        );
+        // $display(
+        //     "time=%0t: compareWorkReq", $time,
+        //     ", genErrWorkCompReg[1]=", genErrWorkCompReg[1],
+        //     ", pendingWR=", fshow(pendingWR)
+        // );
     endrule
 endmodule

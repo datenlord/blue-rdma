@@ -98,11 +98,11 @@ module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
         sendSideTransportLayer.dmaWriteClt, simDmaWriteSrv4SendSide
     );
 
-    let req2RecvSide <- mkDebugConnection(
+    let req2RecvSide <- mkConnection(
         toGet(sendSideTransportLayer.rdmaDataStreamPipeOut),
         recvSideTransportLayer.rdmaDataStreamInput
     );
-    let resp2SendSide <- mkDebugConnection(
+    let resp2SendSide <- mkConnection(
         toGet(recvSideTransportLayer.rdmaDataStreamPipeOut),
         sendSideTransportLayer.rdmaDataStreamInput
     );
@@ -790,13 +790,13 @@ module mkInitMetaDataAndConnectQP#(
             let qpn = initRespQP.qpn;
             // qpnQ4RTR.enq(qpn);
 
-            if (isSendSideQ) begin
-            $display(
-                "time=%0t: initRespQP=", $time, fshow(initRespQP),
-                " should be success, and qpn=%h, qpRespCnt=%h", qpn, qpRespCnt,
-                ", isSendSideQ=", fshow(isSendSideQ)
-            );
-            end
+            // if (isSendSideQ) begin
+            // $display(
+            //     "time=%0t: initRespQP=", $time, fshow(initRespQP),
+            //     " should be success, and qpn=%h, qpRespCnt=%h", qpn, qpRespCnt,
+            //     ", isSendSideQ=", fshow(isSendSideQ)
+            // );
+            // end
         end
         else begin
             immFail(

@@ -9,13 +9,12 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-mkdir -p tmp
-
 TEST_DIR=`realpath ./test`
 LOG_DIR=`realpath ./tmp`
 ALL_LOG=$TEST_DIR/run.log
 
-#cd test
+mkdir -p $LOG_DIR
+#cd $TEST_DIR
 # echo "" > $ALL_LOG
 
 # make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestFixedLenSimDataStreamPipeOut 2>&1 | tee -a $ALL_LOG

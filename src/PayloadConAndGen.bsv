@@ -56,31 +56,31 @@ module mkDmaReadCntrl#(
 
     rule discardResp if (cancelReg[1] && busyReg);
         let dmaResp <- dmaReadSrv.response.get;
-        $display(
-            "time=%0t: DmaReadCntrl discard read response", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ)
-        );
+        // $display(
+        //     "time=%0t: DmaReadCntrl discard read response", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ)
+        // );
 
         if (dmaResp.dataStream.isLast) begin
             busyReg <= False;
             cancelReg[1] <= False;
 
-            $display(
-                "time=%0t: DmaReadCntrl cancel read done", $time,
-                ", sqpn=%h", cntrlStatus.comm.getSQPN,
-                ", isSQ=", fshow(cntrlStatus.isSQ)
-            );
+            // $display(
+            //     "time=%0t: DmaReadCntrl cancel read done", $time,
+            //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            //     ", isSQ=", fshow(cntrlStatus.isSQ)
+            // );
         end
     endrule
 
     rule clearCancel if (cancelReg[1] && !busyReg);
         cancelReg[1] <= False;
-        $display(
-            "time=%0t: DmaReadCntrl no read to cancel", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ)
-        );
+        // $display(
+        //     "time=%0t: DmaReadCntrl no read to cancel", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ)
+        // );
     endrule
 
     rule clearQ if (cancelReg[1]);

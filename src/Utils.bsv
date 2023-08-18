@@ -1515,15 +1515,15 @@ module mkPipeOutMux#(
     Bool sel, PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) pipeMuxOutQ <- mkFIFOF;
-
-    // rule debug if (pipeIn1.notEmpty);
-    //     $display(
-    //         "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
-    //         ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
-    //         ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
-    //     );
-    // endrule
-
+/*
+    rule debug if (pipeIn1.notEmpty);
+        $display(
+            "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
+            ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
+            ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
+        );
+    endrule
+*/
     rule outputPipeIn1 if (sel);
         pipeMuxOutQ.enq(pipeIn1.first);
         pipeIn1.deq;

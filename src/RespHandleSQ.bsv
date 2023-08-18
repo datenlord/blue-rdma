@@ -1546,18 +1546,18 @@ module mkRespHandleSQ#(
         incomingRespQ.enq(tuple6(
             pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         ));
-        $display(
-            "time=%0t: 1st error flush WR stage", $time,
-            ", pendingWR=", fshow(pendingWR),
-            // ", rdmaRespType=", fshow(rdmaRespType),
-            // ", retryReason=", fshow(retryReason),
-            // ", respAction=", fshow(respAction),
-            ", wrAckType=", fshow(wrAckType),
-            ", wcReqType=", fshow(wcReqType),
-            // ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
-            // ", respHandleStateReg=", fshow(respHandleStateReg)
-            ", inErrStateAlt=", fshow(inErrStateAlt)
-        );
+        // $display(
+        //     "time=%0t: 1st error flush WR stage", $time,
+        //     ", pendingWR=", fshow(pendingWR),
+        //     // ", rdmaRespType=", fshow(rdmaRespType),
+        //     // ", retryReason=", fshow(retryReason),
+        //     // ", respAction=", fshow(respAction),
+        //     ", wrAckType=", fshow(wrAckType),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     // ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
+        //     // ", respHandleStateReg=", fshow(respHandleStateReg)
+        //     ", inErrStateAlt=", fshow(inErrStateAlt)
+        // );
     endrule
 
     (* fire_when_enabled *)
@@ -1594,16 +1594,16 @@ module mkRespHandleSQ#(
         incomingRespQ.enq(tuple6(
             emptyPendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         ));
-        $display(
-            "time=%0t: 1st error flush incoming response stage", $time,
-            ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode),
-            // ", rdmaRespType=", fshow(rdmaRespType),
-            // ", retryReason=", fshow(retryReason),
-            // ", respAction=", fshow(respAction),
-            ", wrAckType=", fshow(wrAckType),
-            ", wcReqType=", fshow(wcReqType),
-            ", inErrStateAlt=", fshow(inErrStateAlt)
-        );
+        // $display(
+        //     "time=%0t: 1st error flush incoming response stage", $time,
+        //     ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode),
+        //     // ", rdmaRespType=", fshow(rdmaRespType),
+        //     // ", retryReason=", fshow(retryReason),
+        //     // ", respAction=", fshow(respAction),
+        //     ", wrAckType=", fshow(wrAckType),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     ", inErrStateAlt=", fshow(inErrStateAlt)
+        // );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -1625,11 +1625,11 @@ module mkRespHandleSQ#(
             recvRetryRespReg <= False;
             // respHandleStateReg <= SQ_HANDLE_RESP_HEADER;
 
-            $display(
-                "time=%0t:", $time,
-                " retry flush done, pendingWorkReqPipeIn.notEmpty=",
-                fshow(pendingWorkReqPipeIn.notEmpty)
-            );
+            // $display(
+            //     "time=%0t:", $time,
+            //     " retry flush done, pendingWorkReqPipeIn.notEmpty=",
+            //     fshow(pendingWorkReqPipeIn.notEmpty)
+            // );
         end
     endrule
 
@@ -1667,19 +1667,16 @@ module mkRespHandleSQ#(
             incomingRespQ.enq(tuple6(
                 pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
             ));
-            // pendingRespQ.enq(tuple6(
-            //     pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
-            // ));
-            $display(
-                "time=%0t: 1st retry flush stage, bth.psn=%h", $time, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                // ", wr.id=%h", pendingWR.wr.id,
-                // ", rdmaRespType=", fshow(rdmaRespType),
-                // ", retryReason=", fshow(retryReason),
-                // ", respAction=", fshow(respAction),
-                ", wrAckType=", fshow(wrAckType),
-                ", wcReqType=", fshow(wcReqType)
-            );
+            // $display(
+            //     "time=%0t: 1st retry flush stage, bth.psn=%h", $time, bth.psn,
+            //     ", bth.opcode=", fshow(bth.opcode),
+            //     // ", wr.id=%h", pendingWR.wr.id,
+            //     // ", rdmaRespType=", fshow(rdmaRespType),
+            //     // ", retryReason=", fshow(retryReason),
+            //     // ", respAction=", fshow(respAction),
+            //     ", wrAckType=", fshow(wrAckType),
+            //     ", wcReqType=", fshow(wcReqType)
+            // );
         end
         // $display("time=%0t: retryFlushPktMetaDataAndPayload", $time);
     endrule

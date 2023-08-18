@@ -13,7 +13,7 @@ TEST_LOG=tmp.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
-FILES=`ls TestMetaData.bsv`
+FILES=`ls TestTransportLayer.bsv`
 for FILE in $FILES; do
     # echo $FILE
     TESTCASES=`grep -Phzo 'doc.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`
