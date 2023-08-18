@@ -204,7 +204,7 @@ module mkTestQueuePairReqErrResetCase(Empty);
         pendingWorkReqPipeOut4Req, qpType, pmtu
     );
     let rdmaReqPipeOut = simReqGen.rdmaReqDataStreamPipeOut;
-    let newPendingWorkReqSink <- mkSink(simReqGen.pendingWorkReqPipeOut);
+    mkSink(simReqGen.pendingWorkReqPipeOut);
 
     // Extract RDMA request metadata and payload
     let reqPktMetaDataAndPayloadPipeOut <- mkSimExtractNormalHeaderPayload(rdmaReqPipeOut);
@@ -272,11 +272,11 @@ module mkTestQueuePairReqErrResetCase(Empty);
 
         // testStateReg <= TEST_RESET_DELETE_QP;
         countDown.decr;
-        $display(
-            "time=%0t: checkErrResp", $time,
-            ", rdmaOpCode=", fshow(rdmaOpCode),
-            ", aeth.code=", fshow(aeth.code)
-        );
+        // $display(
+        //     "time=%0t: checkErrResp", $time,
+        //     ", rdmaOpCode=", fshow(rdmaOpCode),
+        //     ", aeth.code=", fshow(aeth.code)
+        // );
     endrule
 endmodule
 
@@ -354,7 +354,7 @@ module mkTestQueuePairResetCase#(TestErrResetTypeQP errType)(Empty);
     ));
     mkConnection(permCheckClt, simPermCheckSrv);
 
-    mkDebugSink(sendSideQP.rdmaReqPipeOut);
+    mkSink(sendSideQP.rdmaReqPipeOut);
     let sendSideNoRespOutRule <- addRules(genEmptyPipeOutRule(
         sendSideQP.rdmaRespPipeOut,
         "sendSideQP.rdmaRespPipeOut empty assertion @ mkTestQueuePairResetCase"
@@ -485,9 +485,9 @@ module mkTestQueuePairTimeOutErrCase(Empty);
         sendSideQP.rdmaRespPipeOut,
         "sendSideQP.rdmaRespPipeOut empty assertion @ mkTestQueuePairTimeOutCase"
     ));
-    let reqPayloadSink <- mkSink(reqPktMetaDataAndPayloadPipeOut.payload);
+    mkSink(reqPktMetaDataAndPayloadPipeOut.payload);
     let reqPktMetaDataPipeOut = reqPktMetaDataAndPayloadPipeOut.pktMetaData;
-    let reqPktMetaDataSink <- mkSink(reqPktMetaDataPipeOut);
+    mkSink(reqPktMetaDataPipeOut);
 
     // Empty pipe check
     let sendSideNoWorkCompOutRule4RQ <- addRules(genEmptyPipeOutRule(

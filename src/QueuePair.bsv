@@ -174,6 +174,13 @@ module mkSQ#(
     // let payloadGenerator <- mkPayloadGenerator(
     //     contextSQ.statusSQ, dmaReadCntrl
     // );
+    let payloadConsumer <- mkPayloadConsumer(
+        contextSQ.statusSQ,
+        dmaWriteCntrl,
+        respPktPipeOut.payload
+        // respHandleSQ.payloadConReqPipeOut
+    );
+
     let reqGenSQ <- mkReqGenSQ(
         contextSQ,
         payloadGenerator,
@@ -189,19 +196,14 @@ module mkSQ#(
         retryHandler,
         permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        respPktPipeOut.pktMetaData
-    );
-
-    let payloadConsumer <- mkPayloadConsumer(
-        contextSQ.statusSQ,
-        respPktPipeOut.payload,
-        dmaWriteCntrl,
-        respHandleSQ.payloadConReqPipeOut
+        respPktPipeOut.pktMetaData,
+        payloadConsumer.request
     );
 
     let workCompGenSQ <- mkWorkCompGenSQ(
         contextSQ.statusSQ,
-        payloadConsumer.respPipeOut,
+        payloadConsumer.response,
+        // payloadConsumer.respPipeOut,
         reqGenSQ.workCompGenReqPipeOut,
         respHandleSQ.workCompGenReqPipeOut
         // workCompStatusPipeInFromRQ
@@ -260,25 +262,27 @@ module mkRQ#(
     // let payloadGenerator <- mkPayloadGenerator(
     //     contextRQ.statusRQ, dmaReadCntrl
     // );
+    let payloadConsumer <- mkPayloadConsumer(
+        contextRQ.statusRQ,
+        dmaWriteCntrl,
+        reqPktPipeIn.payload
+        // reqHandlerRQ.payloadConReqPipeOut
+    );
+
     let reqHandlerRQ <- mkReqHandleRQ(
         contextRQ,
         payloadGenerator,
         permCheckSrv,
         dupReadAtomicCache,
         recvReqBuf,
-        reqPktPipeIn.pktMetaData
-    );
-
-    let payloadConsumer <- mkPayloadConsumer(
-        contextRQ.statusRQ,
-        reqPktPipeIn.payload,
-        dmaWriteCntrl,
-        reqHandlerRQ.payloadConReqPipeOut
+        reqPktPipeIn.pktMetaData,
+        payloadConsumer.request
     );
 
     let workCompGenRQ <- mkWorkCompGenRQ(
         contextRQ.statusRQ,
-        payloadConsumer.respPipeOut,
+        // payloadConsumer.respPipeOut,
+        payloadConsumer.response,
         reqHandlerRQ.workCompGenReqPipeOut
     );
 

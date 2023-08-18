@@ -202,7 +202,7 @@ endinterface
 
 module mkSimDmaReadSrvAndDataStreamPipeOut(DmaReadSrvAndDataStreamPipeOut);
     let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
-    let dmaReadReqSink <- mkSink(simDmaReadSrv.dmaReadReq);
+    mkSink(simDmaReadSrv.dmaReadReq);
     DataStreamPipeOut dataStreamPipeOut <- mkFunc2Pipe(
         getDmaReadRespData, simDmaReadSrv.dmaReadResp
     );
@@ -212,18 +212,18 @@ module mkSimDmaReadSrvAndDataStreamPipeOut(DmaReadSrvAndDataStreamPipeOut);
 endmodule
 
 module mkSimDmaReadSrv(DmaReadSrv);
-    let simDmaReadSrv   <- mkSimDmaReadSrvAndReqRespPipeOut;
-    let dmaReadReqSink  <- mkSink(simDmaReadSrv.dmaReadReq);
-    let dmaReadRespSink <- mkSink(simDmaReadSrv.dmaReadResp);
+    let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
+    mkSink(simDmaReadSrv.dmaReadReq);
+    mkSink(simDmaReadSrv.dmaReadResp);
     return simDmaReadSrv.dmaReadSrv;
 endmodule
 
 module mkSimDmaReadSrvWithErr#(
     Bool hasRespErr, Length minErrLen, Length maxErrLen
 )(DmaReadSrv);
-    let simDmaReadSrv   <- mkSimDmaReadSrvAndReqRespPipeOut;
-    let dmaReadReqSink  <- mkSink(simDmaReadSrv.dmaReadReq);
-    let dmaReadRespSink <- mkSink(simDmaReadSrv.dmaReadResp);
+    let simDmaReadSrv <- mkSimDmaReadSrvAndReqRespPipeOut;
+    mkSink(simDmaReadSrv.dmaReadReq);
+    mkSink(simDmaReadSrv.dmaReadResp);
 
     let errLenPipeOut <- mkRandomLenPipeOut(minErrLen, maxErrLen);
     FIFOF#(DmaReadResp) dmaReadRespQ <- mkFIFOF;
@@ -344,7 +344,7 @@ endinterface
 
 module mkSimDmaWriteSrvAndDataStreamPipeOut(DmaWriteSrvAndDataStreamPipeOut);
     let simDmaWriteSrv <- mkSimDmaWriteSrvAndReqRespPipeOut;
-    let dmaWriteRespSink <- mkSink(simDmaWriteSrv.dmaWriteResp);
+    mkSink(simDmaWriteSrv.dmaWriteResp);
     DataStreamPipeOut dataStreamPipeOut <- mkFunc2Pipe(
         getDmaWriteReqData, simDmaWriteSrv.dmaWriteReq
     );
@@ -354,9 +354,9 @@ module mkSimDmaWriteSrvAndDataStreamPipeOut(DmaWriteSrvAndDataStreamPipeOut);
 endmodule
 
 module mkSimDmaWriteSrv(DmaWriteSrv);
-    let simDmaWriteSrv   <- mkSimDmaWriteSrvAndReqRespPipeOut;
-    let dmaWriteReqSink  <- mkSink(simDmaWriteSrv.dmaWriteReq);
-    let dmaWriteRespSink <- mkSink(simDmaWriteSrv.dmaWriteResp);
+    let simDmaWriteSrv <- mkSimDmaWriteSrvAndReqRespPipeOut;
+    mkSink(simDmaWriteSrv.dmaWriteReq);
+    mkSink(simDmaWriteSrv.dmaWriteResp);
     return simDmaWriteSrv.dmaWriteSrv;
 endmodule
 

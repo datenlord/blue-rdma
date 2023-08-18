@@ -1115,10 +1115,10 @@ module mkReqGenSQ#(
                     workCompGenReqOutQ.enq(errWorkCompGenReq);
                     isNormalStateReg <= False;
 
-                    $display(
-                        "time=%0t: recvPayloadGenRespAndGenErrWorkComp", $time,
-                        ", payloadGenResp.isRespErr=", fshow(payloadGenResp.isRespErr)
-                    );
+                    // $display(
+                    //     "time=%0t: recvPayloadGenRespAndGenErrWorkComp", $time,
+                    //     ", payloadGenResp.isRespErr=", fshow(payloadGenResp.isRespErr)
+                    // );
                 end
                 else begin
                     reqHeaderOutQ.enq(reqHeader);
@@ -1155,9 +1155,9 @@ module mkReqGenSQ#(
         // Only for RC and XRC output new WR as pending WR to generate WC
         if (isNewWorkReq && isReliableConnection) begin
             pendingWorkReqOutQ.enq(curPendingWR);
-            $display(
-                "time=%0t: errFlushWR", $time, ", wr.id=%h", curPendingWR.wr.id
-            );
+            // $display(
+            //     "time=%0t: errFlushWR", $time, ", wr.id=%h", curPendingWR.wr.id
+            // );
         end
     endrule
 

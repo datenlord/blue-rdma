@@ -1515,15 +1515,15 @@ module mkPipeOutMux#(
     Bool sel, PipeOut#(anytype) pipeIn1, PipeOut#(anytype) pipeIn2
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) pipeMuxOutQ <- mkFIFOF;
-
-    // rule debug if (pipeIn1.notEmpty);
-    //     $display(
-    //         "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
-    //         ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
-    //         ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
-    //     );
-    // endrule
-
+/*
+    rule debug if (pipeIn1.notEmpty);
+        $display(
+            "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
+            ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
+            ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
+        );
+    endrule
+*/
     rule outputPipeIn1 if (sel);
         pipeMuxOutQ.enq(pipeIn1.first);
         pipeIn1.deq;
@@ -1625,6 +1625,34 @@ endfunction
 
 // TODO: check discard duplicate or ghost reponses has
 // no response from PayloadConsumer will not incur bugs.
+function ActionValue#(PayloadConReq) genDiscardPayloadReq(
+    PmtuFragNum fragNum,
+    DmaReqSrcType initiator,
+    QPN sqpn,
+    ADDR startAddr,
+    PktLen len,
+    PSN psn
+);
+    actionvalue
+        immAssert(
+            !isZero(fragNum),
+            "fragNum non-zero assertion @ genDiscardPayloadReq()",
+            $format("fragNum=%0d", fragNum, " should be non-zero")
+        );
+        let discardReq = PayloadConReq {
+            fragNum    : fragNum,
+            consumeInfo: tagged DiscardPayloadInfo DmaWriteMetaData {
+                initiator: initiator,
+                sqpn     : sqpn,
+                startAddr: startAddr,
+                len      : len,
+                psn      : psn
+            }
+        };
+        return discardReq;
+    endactionvalue
+endfunction
+/*
 function Action genDiscardPayloadReq(
     PmtuFragNum fragNum,
     DmaReqSrcType initiator,
@@ -1653,7 +1681,7 @@ function Action genDiscardPayloadReq(
         payloadConReqQ.enq(discardReq);
     endaction
 endfunction
-
+*/
 module mkConnectionWithAction#(
     Get#(anytype) getIn,
     Put#(anytype) putOut,

@@ -535,13 +535,13 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     isResp
                 );
             end
-            $display(
-                "time=%0t: checkMetaDataQP", $time,
-                ", dqpn=%h, pdHandler=%h, bth.psn=%h",
-                headerValidateInfo.dqpn, pdHandler, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
-            );
+            // $display(
+            //     "time=%0t: checkMetaDataQP", $time,
+            //     ", dqpn=%h, pdHandler=%h, bth.psn=%h",
+            //     headerValidateInfo.dqpn, pdHandler, bth.psn,
+            //     ", bth.opcode=", fshow(bth.opcode),
+            //     ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
+            // );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
             // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;

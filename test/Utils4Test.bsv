@@ -791,17 +791,17 @@ module mkGenNormalOrDupWorkReq#(
             if (normalOrDupReqReg) begin
                 pendingWorkReqPipeIn.deq;
                 dupWorkReqReg <= pendingWorkReqPipeIn.first;
-                $display(
-                    "time=%0t:", $time,
-                    " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
-                );
+                // $display(
+                //     "time=%0t:", $time,
+                //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
+                // );
             end
-            else begin
-                $display(
-                    "time=%0t:", $time,
-                    " duplicate pendingWR=", fshow(dupWorkReqReg)
-                );
-            end
+            // else begin
+            //     $display(
+            //         "time=%0t:", $time,
+            //         " duplicate pendingWR=", fshow(dupWorkReqReg)
+            //     );
+            // end
 
             if (!normalOrDupReq) begin
                 normalOrDupReqReg <= !normalOrDupReqReg;

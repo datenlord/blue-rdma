@@ -156,7 +156,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     let pmtu = IBV_MTU_4096;
 
     // FIFOF#(PayloadGenReq) payloadGenReqQ <- mkFIFOF;
-    FIFOF#(PayloadConReq) payloadConReqQ <- mkFIFOF;
+    // FIFOF#(PayloadConReq) payloadConReqQ <- mkFIFOF;
     FIFOF#(PSN) payloadConReqPsnQ <- mkFIFOF;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
@@ -184,9 +184,9 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
         cntrlStatus,
-        payloadGenerator.payloadDataStreamPipeOut,
         dmaWriteCntrl,
-        toPipeOut(payloadConReqQ)
+        payloadGenerator.payloadDataStreamPipeOut
+        // toPipeOut(payloadConReqQ)
     );
 
     // Reg#(PSN) npsnReg <- mkReg(0);
@@ -262,13 +262,15 @@ module mkTestPayloadConAndGenNormalCase(Empty);
                 psn      : startPktSeqNum
             }
         };
-        payloadConReqQ.enq(payloadConReq);
+        // payloadConReqQ.enq(payloadConReq);
+        payloadConsumer.request.put(payloadConReq);
         payloadConReqPsnQ.enq(startPktSeqNum);
     endrule
 
     rule comparePayloadConResp;
-        let payloadConResp = payloadConsumer.respPipeOut.first;
-        payloadConsumer.respPipeOut.deq;
+        let payloadConResp <- payloadConsumer.response.get;
+        // let payloadConResp = payloadConsumer.respPipeOut.first;
+        // payloadConsumer.respPipeOut.deq;
 
         let expectedPSN = payloadConReqPsnQ.first;
         payloadConReqPsnQ.deq;
@@ -346,7 +348,6 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
 
     // PipeOut need to handle:
     // - pktLenPipeOut4Gen
-    // - payloadGenerator.respPipeOut
     // - payloadGenerator.payloadDataStreamPipeOut
     // - segmentedPayloadPipeOut4Ref
 

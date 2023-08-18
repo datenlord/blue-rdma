@@ -1,4 +1,5 @@
 import FIFOF :: *;
+import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
 
@@ -68,7 +69,7 @@ module mkTestWorkCompGenSQ#(Bool isNormalCase)(Empty);
     // DUT
     let dut <- mkWorkCompGenSQ(
         cntrlStatus,
-        toPipeOut(payloadConRespQ),
+        toGet(payloadConRespQ),
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         toPipeOut(wcGenReqQ4RespHandleInSQ)
         // toPipeOut(workCompStatusQFromRQ)
@@ -229,7 +230,7 @@ module mkTestWorkCompGenRQ#(Bool isNormalCase)(Empty);
     // DUT
     let dut <- mkWorkCompGenRQ(
         cntrlStatus,
-        toPipeOut(payloadConRespQ),
+        toGet(payloadConRespQ),
         toPipeOut(workCompGenReqQ4RQ)
     );
     // let workCompPipeOut = dut.workCompPipeOut;

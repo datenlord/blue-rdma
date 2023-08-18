@@ -1,3 +1,4 @@
+import ClientServer :: *;
 import Connectable :: *;
 import FIFOF :: *;
 import GetPut :: *;
@@ -219,24 +220,25 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     let mrCheckPassOrFail = True;
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
-    // DUT
-    let dut <- mkRespHandleSQ(
-        cntrl.contextSQ,
-        retryHandler,
-        permCheckSrv,
-        toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataPipeOut4RespHandle
-    );
-
     // PayloadConsumer
     let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
     let readAtomicRespPayloadPipeOut = simDmaWriteSrv.dataStream;
     let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
     let payloadConsumer <- mkPayloadConsumer(
         cntrlStatus,
-        pktMetaDataAndPayloadPipeOut.payload,
         dmaWriteCntrl,
-        dut.payloadConReqPipeOut
+        pktMetaDataAndPayloadPipeOut.payload
+        // dut.payloadConReqPipeOut
+    );
+
+    // DUT
+    let dut <- mkRespHandleSQ(
+        cntrl.contextSQ,
+        retryHandler,
+        permCheckSrv,
+        toPipeOut(pendingWorkReqBuf.fifof),
+        pktMetaDataPipeOut4RespHandle,
+        payloadConsumer.request
     );
 
     // WorkCompGenSQ
@@ -244,7 +246,8 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.respPipeOut,
+        payloadConsumer.response,
+        // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut
         // toPipeOut(workCompStatusQFromRQ)
@@ -407,7 +410,7 @@ module mkPipeConnector#(Bool passOrDiscard, PipeOut#(anytype) pipeIn)(
     let resultPipeOut <- mkPipeFilter(filterFunc, pipeIn);
     return resultPipeOut;
     // FIFOF#(anytype) emptyQ <- mkFIFOF;
-    // let sink <- mkSink(passOrDiscard ? toPipeOut(emptyQ) : pipeIn);
+    // mkSink(passOrDiscard ? toPipeOut(emptyQ) : pipeIn);
     // return passOrDiscard ? pipeIn : toPipeOut(emptyQ);
 endmodule
 
@@ -468,23 +471,24 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     let mrCheckPassOrFail = !(respType == TEST_RESP_HANDLE_PERM_CHECK_FAIL);
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
+    // PayloadConsumer
+    let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
+    let payloadConsumer <- mkPayloadConsumer(
+        cntrlStatus,
+        dmaWriteCntrl,
+        payloadOrEmptyPipeOut
+        // dut.payloadConReqPipeOut
+    );
+
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl.contextSQ,
         retryHandler,
         permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataOrEmptyPipeOut
-    );
-
-    // PayloadConsumer
-    let simDmaWriteSrv <- mkSimDmaWriteSrv;
-    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
-    let payloadConsumer <- mkPayloadConsumer(
-        cntrlStatus,
-        payloadOrEmptyPipeOut,
-        dmaWriteCntrl,
-        dut.payloadConReqPipeOut
+        pktMetaDataOrEmptyPipeOut,
+        payloadConsumer.request
     );
 
     // WorkCompGenSQ
@@ -498,7 +502,8 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     // let cntrl4WorkComp <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.respPipeOut,
+        payloadConsumer.response,
+        // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut
         // toPipeOut(workCompStatusQFromRQ)
@@ -509,17 +514,17 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    // let sinkPendingWR4PendingQ <- mkSink(pendingWorkReqPipeOut4PendingQ);
-    // let sinkPendingWorkReqBuf <- mkSink(toPipeOut(pendingWorkReqBuf.fifof));
-    // let sinkRdmaResp <- mkSink(rdmaRespDataStreamPipeOut);
-    // let sinkPktMetaData <- mkSink(pktMetaDataOrEmptyPipeOut);
-    // let sinkPayload <- mkSink(payloadOrEmptyPipeOut);
-    // let sinkPayloadConReq <- mkSink(dut.payloadConReqPipeOut);
-    // let sinkWorkCompGenReq <- mkSink(dut.workCompGenReqPipeOut);
-    // let sinkPayloadConResp <- mkSink(payloadConsumer.respPipeOut);
-    // let sinkSleect <- mkSink(selectPipeOut4WorkComp);
-    // let sinkPendingWR4WorkComp <- mkSink(pendingWorkReqPipeOut4WorkComp);
-    // let sinkWorkComp <- mkSink(workCompPipeOut);
+    // mkSink(pendingWorkReqPipeOut4PendingQ);
+    // mkSink(toPipeOut(pendingWorkReqBuf.fifof));
+    // mkSink(rdmaRespDataStreamPipeOut);
+    // mkSink(pktMetaDataOrEmptyPipeOut);
+    // mkSink(payloadOrEmptyPipeOut);
+    // mkSink(dut.payloadConReqPipeOut);
+    // mkSink(dut.workCompGenReqPipeOut);
+    // mkSink(payloadConsumer.respPipeOut);
+    // mkSink(selectPipeOut4WorkComp);
+    // mkSink(pendingWorkReqPipeOut4WorkComp);
+    // mkSink(workCompPipeOut);
 
     rule compareWorkReqAndWorkComp;
         let pendingWR = pendingWorkReqPipeOut4WorkComp.first;
@@ -663,23 +668,24 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     let mrCheckPassOrFail = True;
     let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
 
+    // PayloadConsumer
+    let simDmaWriteSrv <- mkSimDmaWriteSrv;
+    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
+    let payloadConsumer <- mkPayloadConsumer(
+        cntrlStatus,
+        dmaWriteCntrl,
+        pktMetaDataAndPayloadPipeOut.payload
+        // dut.payloadConReqPipeOut
+    );
+
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl.contextSQ,
         retryHandler,
         permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataAndPayloadPipeOut.pktMetaData
-    );
-
-    // PayloadConsumer
-    let simDmaWriteSrv <- mkSimDmaWriteSrv;
-    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
-    let payloadConsumer <- mkPayloadConsumer(
-        cntrlStatus,
-        pktMetaDataAndPayloadPipeOut.payload,
-        dmaWriteCntrl,
-        dut.payloadConReqPipeOut
+        pktMetaDataAndPayloadPipeOut.pktMetaData,
+        payloadConsumer.request
     );
 
     // WorkCompGenSQ
@@ -687,7 +693,8 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.respPipeOut,
+        payloadConsumer.response,
+        // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut
         // toPipeOut(workCompStatusQFromRQ)
@@ -702,17 +709,17 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    // let sinkPendingWR4PendingQ <- mkSink(pendingWorkReqPipeOut4PendingQ);
-    // let sinkPendingWorkReqBuf <- mkSink(toPipeOut(pendingWorkReqBuf.fifof));
-    // let sinkRdmaResp <- mkSink(rdmaRespDataStreamPipeOut);
-    // let sinkPktMetaData <- mkSink(pktMetaDataAndPayloadPipeOut.pktMetaData);
-    // let sinkPayload <- mkSink(pktMetaDataAndPayloadPipeOut.payload);
-    // let sinkPayloadConReq <- mkSink(dut.payloadConReqPipeOut);
-    // let sinkWorkCompGenReq <- mkSink(dut.workCompGenReqPipeOut);
-    // let sinkPayloadConResp <- mkSink(payloadConsumer.respPipeOut);
-    // let sinkSleect <- mkSink(selectPipeOut4WorkComp);
-    // let sinkPendingWR4WorkComp <- mkSink(pendingWorkReqPipeOut4WorkComp);
-    // let sinkWorkComp <- mkSink(workCompPipeOut);
+    // mkSink(pendingWorkReqPipeOut4PendingQ);
+    // mkSink(toPipeOut(pendingWorkReqBuf.fifof));
+    // mkSink(rdmaRespDataStreamPipeOut);
+    // mkSink(pktMetaDataAndPayloadPipeOut.pktMetaData);
+    // mkSink(pktMetaDataAndPayloadPipeOut.payload);
+    // mkSink(dut.payloadConReqPipeOut);
+    // mkSink(dut.workCompGenReqPipeOut);
+    // mkSink(payloadConsumer.respPipeOut);
+    // mkSink(selectPipeOut4WorkComp);
+    // mkSink(pendingWorkReqPipeOut4WorkComp);
+    // mkSink(workCompPipeOut);
 
     function Action genRetryResp4WR(PendingWorkReq pendingWR);
         action

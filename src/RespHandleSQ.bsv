@@ -112,7 +112,7 @@ typedef struct {
 } RespLenCheckResult deriving(Bits);
 
 interface RespHandleSQ;
-    interface PipeOut#(PayloadConReq) payloadConReqPipeOut;
+    // interface PipeOut#(PayloadConReq) payloadConReqPipeOut;
     interface PipeOut#(WorkCompGenReqSQ) workCompGenReqPipeOut;
 endinterface
 
@@ -121,10 +121,11 @@ module mkRespHandleSQ#(
     RetryHandleSQ retryHandler,
     PermCheckSrv permCheckSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn,
-    PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn
+    PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn,
+    Put#(PayloadConReq) payloadConReqPort
 )(RespHandleSQ);
     // Output FIFO for PipeOut
-    FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
+    // FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqSQ) workCompGenReqOutQ <- mkFIFOF;
 
     // Pipeline FiFO
@@ -169,7 +170,7 @@ module mkRespHandleSQ#(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (cntrlStatus.comm.isReset);
-        payloadConReqOutQ.clear;
+        // payloadConReqOutQ.clear;
         workCompGenReqOutQ.clear;
 
         incomingRespQ.clear;
@@ -1273,7 +1274,8 @@ module mkRespHandleSQ#(
                             psn      : bth.psn
                         }
                     };
-                    payloadConReqOutQ.enq(payloadConReq);
+                    // payloadConReqOutQ.enq(payloadConReq);
+                    payloadConReqPort.put(payloadConReq);
                     wcWaitDmaResp = True;
                     // $display(
                     //     "time=%0t: 11th stage read response, bth.psn=%h", $time, bth.psn,
@@ -1301,18 +1303,20 @@ module mkRespHandleSQ#(
                             atomicRespPayload: atomicAckAeth.orig
                         }
                     };
-                    payloadConReqOutQ.enq(atomicWriteReq);
+                    // payloadConReqOutQ.enq(atomicWriteReq);
+                    payloadConReqPort.put(atomicWriteReq);
                     wcWaitDmaResp = True;
                 end
             end
         end
         else if ((shouldDiscard || inErrState) && !isZeroPayloadLen) begin
             let initiator = DMA_SRC_SQ_DISCARD;
-            genDiscardPayloadReq(
+            let payloadDiscardReq <- genDiscardPayloadReq(
                 pktMetaData.pktFragNum, initiator, cntrlStatus.comm.getSQPN,
-                nextReadRespWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
-                payloadConReqOutQ
+                nextReadRespWriteAddr, pktMetaData.pktPayloadLen, bth.psn
             );
+            // payloadConReqOutQ.enq(payloadDiscardReq);
+            payloadConReqPort.put(payloadDiscardReq);
         end
 
         immAssert(
@@ -1546,18 +1550,18 @@ module mkRespHandleSQ#(
         incomingRespQ.enq(tuple6(
             pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         ));
-        $display(
-            "time=%0t: 1st error flush WR stage", $time,
-            ", pendingWR=", fshow(pendingWR),
-            // ", rdmaRespType=", fshow(rdmaRespType),
-            // ", retryReason=", fshow(retryReason),
-            // ", respAction=", fshow(respAction),
-            ", wrAckType=", fshow(wrAckType),
-            ", wcReqType=", fshow(wcReqType),
-            // ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
-            // ", respHandleStateReg=", fshow(respHandleStateReg)
-            ", inErrStateAlt=", fshow(inErrStateAlt)
-        );
+        // $display(
+        //     "time=%0t: 1st error flush WR stage", $time,
+        //     ", pendingWR=", fshow(pendingWR),
+        //     // ", rdmaRespType=", fshow(rdmaRespType),
+        //     // ", retryReason=", fshow(retryReason),
+        //     // ", respAction=", fshow(respAction),
+        //     ", wrAckType=", fshow(wrAckType),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     // ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
+        //     // ", respHandleStateReg=", fshow(respHandleStateReg)
+        //     ", inErrStateAlt=", fshow(inErrStateAlt)
+        // );
     endrule
 
     (* fire_when_enabled *)
@@ -1594,16 +1598,16 @@ module mkRespHandleSQ#(
         incomingRespQ.enq(tuple6(
             emptyPendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
         ));
-        $display(
-            "time=%0t: 1st error flush incoming response stage", $time,
-            ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode),
-            // ", rdmaRespType=", fshow(rdmaRespType),
-            // ", retryReason=", fshow(retryReason),
-            // ", respAction=", fshow(respAction),
-            ", wrAckType=", fshow(wrAckType),
-            ", wcReqType=", fshow(wcReqType),
-            ", inErrStateAlt=", fshow(inErrStateAlt)
-        );
+        // $display(
+        //     "time=%0t: 1st error flush incoming response stage", $time,
+        //     ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode),
+        //     // ", rdmaRespType=", fshow(rdmaRespType),
+        //     // ", retryReason=", fshow(retryReason),
+        //     // ", respAction=", fshow(respAction),
+        //     ", wrAckType=", fshow(wrAckType),
+        //     ", wcReqType=", fshow(wcReqType),
+        //     ", inErrStateAlt=", fshow(inErrStateAlt)
+        // );
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -1625,11 +1629,11 @@ module mkRespHandleSQ#(
             recvRetryRespReg <= False;
             // respHandleStateReg <= SQ_HANDLE_RESP_HEADER;
 
-            $display(
-                "time=%0t:", $time,
-                " retry flush done, pendingWorkReqPipeIn.notEmpty=",
-                fshow(pendingWorkReqPipeIn.notEmpty)
-            );
+            // $display(
+            //     "time=%0t:", $time,
+            //     " retry flush done, pendingWorkReqPipeIn.notEmpty=",
+            //     fshow(pendingWorkReqPipeIn.notEmpty)
+            // );
         end
     endrule
 
@@ -1667,23 +1671,20 @@ module mkRespHandleSQ#(
             incomingRespQ.enq(tuple6(
                 pendingWR, pktMetaData, respPktInfo, retryResetReq, wcReqType, wrAckType
             ));
-            // pendingRespQ.enq(tuple6(
-            //     pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, wrAckType
-            // ));
-            $display(
-                "time=%0t: 1st retry flush stage, bth.psn=%h", $time, bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                // ", wr.id=%h", pendingWR.wr.id,
-                // ", rdmaRespType=", fshow(rdmaRespType),
-                // ", retryReason=", fshow(retryReason),
-                // ", respAction=", fshow(respAction),
-                ", wrAckType=", fshow(wrAckType),
-                ", wcReqType=", fshow(wcReqType)
-            );
+            // $display(
+            //     "time=%0t: 1st retry flush stage, bth.psn=%h", $time, bth.psn,
+            //     ", bth.opcode=", fshow(bth.opcode),
+            //     // ", wr.id=%h", pendingWR.wr.id,
+            //     // ", rdmaRespType=", fshow(rdmaRespType),
+            //     // ", retryReason=", fshow(retryReason),
+            //     // ", respAction=", fshow(respAction),
+            //     ", wrAckType=", fshow(wrAckType),
+            //     ", wcReqType=", fshow(wcReqType)
+            // );
         end
         // $display("time=%0t: retryFlushPktMetaDataAndPayload", $time);
     endrule
 
-    interface payloadConReqPipeOut  = toPipeOut(payloadConReqOutQ);
+    // interface payloadConReqPipeOut  = toPipeOut(payloadConReqOutQ);
     interface workCompGenReqPipeOut = toPipeOut(workCompGenReqOutQ);
 endmodule

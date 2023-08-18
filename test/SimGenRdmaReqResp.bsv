@@ -78,7 +78,7 @@ module mkSimGenRdmaReq#(
     let simReqGen <- mkSimGenRdmaReqAndSendWritePayloadPipeOut(
         pendingWorkReqPipeIn, qpType, pmtu
     );
-    let sinkSendWritePayload <- mkSink(simReqGen.sendWriteReqPayloadPipeOut);
+    mkSink(simReqGen.sendWriteReqPayloadPipeOut);
 
     interface pendingWorkReqPipeOut    = simReqGen.pendingWorkReqPipeOut;
     interface rdmaReqDataStreamPipeOut = simReqGen.rdmaReqDataStreamPipeOut;
@@ -465,7 +465,7 @@ module mkSimGenRdmaRespDataStream#(
     let simGenRdmaResp <- mkSimGenRdmaRespHeaderAndDataStream(
         cntrlStatus, dmaReadSrv, pendingWorkReqPipeIn
     );
-    let sinkRespHeader <- mkSink(simGenRdmaResp.respHeader);
+    mkSink(simGenRdmaResp.respHeader);
     return simGenRdmaResp.rdmaResp;
 endmodule
 
@@ -487,9 +487,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
         cntrlStatus.comm.isReset,
         toPipeOut(headerQ)
     );
-    let sinkHeaderMetaData <- mkSink(
-        headerDataStreamAndMetaDataPipeOut.headerMetaData
-    );
+    mkSink(headerDataStreamAndMetaDataPipeOut.headerMetaData);
 
     rule genRespAck;
         let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);

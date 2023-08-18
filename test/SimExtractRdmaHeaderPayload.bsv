@@ -195,7 +195,7 @@ module mkTestSimExtractNormalHeaderPayload(Empty);
     let reqGenSQ <- mkSimGenRdmaReq(
         newPendingWorkReqPipeOut, qpType, pmtu
     );
-    let discardPendingWR <- mkSink(reqGenSQ.pendingWorkReqPipeOut);
+    mkSink(reqGenSQ.pendingWorkReqPipeOut);
     Vector#(2, DataStreamPipeOut) rdmaReqPipeOutVec <-
         mkForkVector(reqGenSQ.rdmaReqDataStreamPipeOut);
     let rdmaReqPipeOut4InputPktBuf <- mkBufferN(8, rdmaReqPipeOutVec[0]);

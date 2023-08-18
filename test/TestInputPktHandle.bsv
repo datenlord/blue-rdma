@@ -181,7 +181,7 @@ module mkTestCalculatePktLen#(
     let pktMetaDataPipeOut = dut.pktMetaData;
 
     // // Payload sink
-    let payloadSink <- mkSink(dut.payload);
+    mkSink(dut.payload);
     Reg#(Length) pktLenSumReg <- mkRegU;
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
