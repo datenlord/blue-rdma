@@ -615,7 +615,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
         normalOrDupPendingWorkReqPipeOut4SendWriteReq,
         simReqGen.sendWriteReqPayloadPipeOut
     );
-    let sendWriteReqPayloadPipeOutBuf <- mkBufferN(1024, normalSendWriteReqPayloadPipeOut);
+    let sendWriteReqPayloadPipeOutBuf <- mkBufferN(32, normalSendWriteReqPayloadPipeOut);
     let pmtuPipeOut4SendWriteReq <- mkConstantPipeOut(pmtu);
     let sendWriteReqPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
         sendWriteReqPayloadPipeOutBuf, pmtuPipeOut4SendWriteReq
@@ -639,9 +639,9 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     let dupReadAtomicCache <- mkDupReadAtomicCache(cntrlStatus.comm.getPMTU);
 
     // RecvReq
-    Vector#(1, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
+    Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqBuf = recvReqBufVec[0];
-    // let recvReqBuf4Ref <- mkBufferN(1024, recvReqBufVec[1]);
+    let recvReqBuf4Ref <- mkBufferN(8, recvReqBufVec[1]);
 
     // PayloadGenerator
     let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
@@ -679,7 +679,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
         // payloadConsumer.respPipeOut,
         dut.workCompGenReqPipeOut
     );
-    let workCompPipeOut4WorkReq = workCompGenRQ.workCompPipeOut;
+    let workCompPipeOut4RecvReq = workCompGenRQ.workCompPipeOut;
 
     Count#(MSN)                 msnCnt <- mkCount(0);
     Reg#(Long) normalAtomicRespOrigReg <- mkRegU;
@@ -699,7 +699,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     // mkSink(sendWriteReqPayloadPipeOut);
     // mkSink(normalOrDupReqSelPipeOut4WorkComp);
     // mkSink(normalOrDupPendingWorkReqPipeOut4WorkComp);
-    // mkSink(workCompPipeOut4WorkReq);
+    // mkSink(workCompPipeOut4RecvReq);
     // mkSink(normalOrDupPendingWorkReqPipeOut4Resp);
     // mkSink(dut.rdmaRespDataStreamPipeOut);
     // mkSink(normalOrDupReqSelPipeOut4Resp);
@@ -715,33 +715,6 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
     //         fshow(sendWritePayloadDataStreamRef.isLast),
     //         ", sendWritePayloadDataStreamRef.byteEn=%h",
     //         sendWritePayloadDataStreamRef.byteEn
-    //     );
-    // endrule
-
-    // TODO: compare RR and WC
-    // rule compareWorkCompWithRecvReq;
-    //     let rr = recvReqBuf4Ref.first;
-    //     recvReqBuf4Ref.deq;
-
-    //     let wc = workCompPipeOut4RecvReq.first;
-    //     workCompPipeOut4RecvReq.deq;
-
-    //     immAssert(
-    //         wc.id == rr.id,
-    //         "WC ID assertion @ mkTestReqHandleNormalCase",
-    //         $format(
-    //             "wc.id=%h should == rr.id=%h",
-    //             wc.id, rr.id
-    //         )
-    //     );
-
-    //     immAssert(
-    //         wc.status == IBV_WC_SUCCESS,
-    //         "WC status assertion @ mkTestReqHandleNormalCase",
-    //         $format(
-    //             "wc.status=", fshow(wc.status),
-    //             " should be success"
-    //         )
     //     );
     // endrule
 
@@ -781,8 +754,20 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
         // $display("time=%0t: pendingWR=", $time, fshow(pendingWR));
 
         if (isNormalReq && workReqNeedRecvReq(pendingWR.wr.opcode)) begin
-            let wc = workCompPipeOut4WorkReq.first;
-            workCompPipeOut4WorkReq.deq;
+            let wc = workCompPipeOut4RecvReq.first;
+            workCompPipeOut4RecvReq.deq;
+
+            let rr = recvReqBuf4Ref.first;
+            recvReqBuf4Ref.deq;
+
+            immAssert(
+                wc.id == rr.id,
+                "WC ID assertion @ mkTestReqHandleNormalCase",
+                $format(
+                    "wc.id=%h should == rr.id=%h",
+                    wc.id, rr.id
+                )
+            );
 
             immAssert(
                 workCompMatchWorkReqInRQ(wc, pendingWR.wr),
@@ -895,19 +880,19 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
                         )
                     );
                 end
-                $display(
-                    "time=%0t:", $time,
-                    ", response bth=", fshow(bth),
-                    ", aeth=", fshow(aeth)
-                );
+                // $display(
+                //     "time=%0t: response", $time,
+                //     ", bth=", fshow(bth),
+                //     ", aeth=", fshow(aeth)
+                // );
             end
-            else begin
-                $display(
-                    "time=%0t:", $time,
-                    ", response bth=", fshow(bth),
-                    ", pendingWR=", fshow(pendingWR)
-                );
-            end
+            // else begin
+            //     $display(
+            //         "time=%0t: response", $time,
+            //         ", bth=", fshow(bth),
+            //         ", pendingWR=", fshow(pendingWR)
+            //     );
+            // end
 
             if (isAtomicWR) begin
                 let atomicAckEth = extractAtomicAckEth(zeroExtendLSB(rdmaRespDataStream.data));
@@ -923,11 +908,11 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
                             " should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
                         )
                     );
-                    $display(
-                        "time=%0t:", $time,
-                        ", atomicAckEth.orig=%h", atomicAckEth.orig,
-                        ", should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
-                    );
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     ", atomicAckEth.orig=%h", atomicAckEth.orig,
+                    //     ", should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
+                    // );
                 end
             end
         end
