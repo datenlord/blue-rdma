@@ -1624,10 +1624,10 @@ module mkConnectionWhen#(
     rule connect if (condition);
         let data <- getIn.get;
         putOut.put(data);
-        $display(
-            "time=%0t: mkConnectionWhen connect", $time,
-            ", condition=", fshow(condition)
-        );
+        // $display(
+        //     "time=%0t: mkConnectionWhen connect", $time,
+        //     ", condition=", fshow(condition)
+        // );
     endrule
 endmodule
 

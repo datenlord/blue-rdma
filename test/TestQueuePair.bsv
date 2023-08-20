@@ -327,12 +327,12 @@ module mkTestQueuePairResetCase#(TestErrResetTypeQP errType)(Empty);
 
     // WorkReq
     let illegalAtomicWorkReqPipeOut <- mkGenIllegalAtomicWorkReq;
-    // mkConnection(toGet(illegalAtomicWorkReqPipeOut), sendSideQP.workReqIn);
     mkConnectionWhen(
         toGet(illegalAtomicWorkReqPipeOut),
         sendSideQP.workReqIn,
         sendSideQP.statusSQ.comm.isNonErr
     );
+    // mkConnection(toGet(illegalAtomicWorkReqPipeOut), sendSideQP.workReqIn);
 
     // RecvReq
     FIFOF#(RecvReq) emptyRecvReqQ <- mkFIFOF;
@@ -449,7 +449,12 @@ module mkTestQueuePairTimeOutErrCase(Empty);
         mkRandomWorkReq(minPayloadLen, maxPayloadLen);
     let workReqPipeOut = workReqPipeOutVec[0];
     let workReqPipeOut4Ref <- mkBufferN(valueOf(MAX_QP_WR), workReqPipeOutVec[1]);
-    mkConnection(toGet(workReqPipeOut), sendSideQP.workReqIn);
+    mkConnectionWhen(
+        toGet(workReqPipeOut),
+        sendSideQP.workReqIn,
+        sendSideQP.statusSQ.comm.isNonErr
+    );
+    // mkConnection(toGet(workReqPipeOut), sendSideQP.workReqIn);
 
     // RecvReq
     FIFOF#(RecvReq) emptyRecvReqQ <- mkFIFOF;
@@ -601,7 +606,12 @@ module mkTestQueuePairNormalCase(Empty);
         mkRandomWorkReq(minPayloadLen, maxPayloadLen);
     let workReqPipeOut = workReqPipeOutVec[0];
     let workReqPipeOut4Ref <- mkBufferN(8, workReqPipeOutVec[1]);
-    mkConnection(toGet(workReqPipeOut), sendSideQP.workReqIn);
+    mkConnectionWhen(
+        toGet(workReqPipeOut),
+        sendSideQP.workReqIn,
+        sendSideQP.statusSQ.comm.isNonErr
+    );
+    // mkConnection(toGet(workReqPipeOut), sendSideQP.workReqIn);
     FIFOF#(WorkReq) emptyWorkReqQ <- mkFIFOF;
     mkConnection(toGet(emptyWorkReqQ), recvSideQP.workReqIn);
 
@@ -609,7 +619,12 @@ module mkTestQueuePairNormalCase(Empty);
     Vector#(2, PipeOut#(RecvReq)) recvReqBufVec <- mkSimGenRecvReq;
     let recvReqPipeOut = recvReqBufVec[0];
     let recvReqPipeOut4Ref <- mkBufferN(valueOf(MAX_QP_WR), recvReqBufVec[1]);
-    mkConnection(toGet(recvReqPipeOut), recvSideQP.recvReqIn);
+    mkConnectionWhen(
+        toGet(recvReqPipeOut),
+        recvSideQP.recvReqIn,
+        sendSideQP.statusRQ.comm.isNonErr
+    );
+    // mkConnection(toGet(recvReqPipeOut), recvSideQP.recvReqIn);
     FIFOF#(RecvReq) emptyRecvReqQ <- mkFIFOF;
     mkConnection(toGet(emptyRecvReqQ), sendSideQP.recvReqIn);
 

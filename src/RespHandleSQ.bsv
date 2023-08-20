@@ -555,7 +555,10 @@ module mkRespHandleSQ#(
         } = incomingRespQ.first;
         incomingRespQ.deq;
 
-        retryHandler.resetRetryCntAndTimeOutBySQ(retryResetReq);
+        if (cntrlStatus.comm.isStableRTS) begin
+            // Only reset retry and timeout counter when isStableRTS
+            retryHandler.resetRetryCntAndTimeOutBySQ(retryResetReq);
+        end
 
         let respAction = SQ_ACT_UNKNOWN;
         case (wrAckType)

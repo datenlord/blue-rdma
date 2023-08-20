@@ -581,31 +581,28 @@ module mkReqGenSQ#(
         workCompGenReqOutQ.notFull // &&
         // payloadGenerator.payloadDataStreamPipeOut.notEmpty
     ));
-        let curTS <- $time;
-        if (curTS < 17600) begin
-            $display(
-                "time=%0t: mkReqGenSQ debug", $time,
-                ", sqpn=%h", cntrlStatus.comm.getSQPN,
-                ", cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
-                ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
-                ", pendingWorkReqPipeIn.notEmpty=", fshow(pendingWorkReqPipeIn.notEmpty),
-                ", workReqPayloadGenQ.notFull=", fshow(workReqPayloadGenQ.notFull),
-                ", workReqPktNumQ.notFull=", fshow(workReqPktNumQ.notFull),
-                ", workReqPsnQ.notFull=", fshow(workReqPsnQ.notFull),
-                ", workReqOutQ.notFull=", fshow(workReqOutQ.notFull),
-                ", workReqCheckQ.notFull=", fshow(workReqCheckQ.notFull),
-                ", reqCountQ.notFull=", fshow(reqCountQ.notFull),
-                ", reqHeaderPrepareQ.notFull=", fshow(reqHeaderPrepareQ.notFull),
-                ", pendingReqHeaderQ.notFull=", fshow(pendingReqHeaderQ.notFull),
-                ", reqHeaderGenQ.notFull=", fshow(reqHeaderGenQ.notFull),
-                ", reqHeaderOutQ.notFull=", fshow(reqHeaderOutQ.notFull),
-                ", psnReqOutQ.notFull=", fshow(psnReqOutQ.notFull),
-                // ", payloadGenReqOutQ.notFull=", fshow(payloadGenReqOutQ.notFull),
-                ", pendingWorkReqOutQ.notFull=", fshow(pendingWorkReqOutQ.notFull),
-                ", workCompGenReqOutQ.notFull=", fshow(workCompGenReqOutQ.notFull),
-                ", payloadGenerator.payloadDataStreamPipeOut.notEmpty=", fshow(payloadGenerator.payloadDataStreamPipeOut.notEmpty)
-            );
-        end
+        $display(
+            "time=%0t: mkReqGenSQ debug", $time,
+            ", sqpn=%h", cntrlStatus.comm.getSQPN,
+            ", cntrlStatus.comm.isStableRTS=", fshow(cntrlStatus.comm.isStableRTS),
+            ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
+            ", pendingWorkReqPipeIn.notEmpty=", fshow(pendingWorkReqPipeIn.notEmpty),
+            ", workReqPayloadGenQ.notFull=", fshow(workReqPayloadGenQ.notFull),
+            ", workReqPktNumQ.notFull=", fshow(workReqPktNumQ.notFull),
+            ", workReqPsnQ.notFull=", fshow(workReqPsnQ.notFull),
+            ", workReqOutQ.notFull=", fshow(workReqOutQ.notFull),
+            ", workReqCheckQ.notFull=", fshow(workReqCheckQ.notFull),
+            ", reqCountQ.notFull=", fshow(reqCountQ.notFull),
+            ", reqHeaderPrepareQ.notFull=", fshow(reqHeaderPrepareQ.notFull),
+            ", pendingReqHeaderQ.notFull=", fshow(pendingReqHeaderQ.notFull),
+            ", reqHeaderGenQ.notFull=", fshow(reqHeaderGenQ.notFull),
+            ", reqHeaderOutQ.notFull=", fshow(reqHeaderOutQ.notFull),
+            ", psnReqOutQ.notFull=", fshow(psnReqOutQ.notFull),
+            // ", payloadGenReqOutQ.notFull=", fshow(payloadGenReqOutQ.notFull),
+            ", pendingWorkReqOutQ.notFull=", fshow(pendingWorkReqOutQ.notFull),
+            ", workCompGenReqOutQ.notFull=", fshow(workCompGenReqOutQ.notFull),
+            ", payloadGenerator.payloadDataStreamPipeOut.notEmpty=", fshow(payloadGenerator.payloadDataStreamPipeOut.notEmpty)
+        );
     endrule
 
     rule debugNotEmptySQ;
@@ -638,7 +635,7 @@ module mkReqGenSQ#(
                         genReqHeader, \
                         recvPayloadGenRespAndGenErrWorkComp, \
                         errFlushWR" *)
-    rule recvWorkReq if (cntrlStatus.comm.isERR || cntrlStatus.comm.isStableRTS);
+    rule recvWorkReq if (cntrlStatus.comm.isStableRTS || cntrlStatus.comm.isERR);
         let qpType = cntrlStatus.getTypeQP;
         immAssert(
             qpType == IBV_QPT_RC || qpType == IBV_QPT_UC ||
@@ -711,6 +708,8 @@ module mkReqGenSQ#(
                 curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead,
                 isNewWorkReq, isReliableConnection, isUnreliableDatagram
             ));
+
+            // if (cntrlStatus.comm.isERR) begin
             // $display(
             //     "time=%0t: 1st stage recvWorkReq", $time,
             //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
@@ -718,6 +717,7 @@ module mkReqGenSQ#(
             //     ", shouldDeqPendingWR=", fshow(shouldDeqPendingWR)
             //     // ", curPendingWR=", fshow(curPendingWR)
             // );
+            // end
         end
         // $display(
         //     "time=%0t: 1st stage recvWorkReq", $time,

@@ -1516,9 +1516,10 @@ module mkPipeOutMux#(
 )(PipeOut#(anytype)) provisos(Bits#(anytype, tSz));
     FIFOF#(anytype) pipeMuxOutQ <- mkFIFOF;
 /*
-    rule debug if (pipeIn1.notEmpty);
+    rule debug;
         $display(
-            "time=%0t:", $time, " mkPipeOutMux, sel=", fshow(sel),
+            "time=%0t: mkPipeOutMux debug", $time,
+            ", sel=", fshow(sel),
             ", pipeIn1.notEmpty=", fshow(pipeIn1.notEmpty),
             ", pipeIn2.notEmpty=", fshow(pipeIn2.notEmpty)
         );

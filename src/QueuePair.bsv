@@ -92,6 +92,14 @@ module mkNewPendingWorkReqPipeOut#(
         // $display("time=%0t: reset and clear mkNewPendingWorkReqPipeOut", $time);
     endrule
 
+    rule flushWR if (cntrlStatus.comm.isERR);
+        let wr = workReqPipeIn.first;
+        workReqPipeIn.deq;
+
+        let newPendingWR = genNewPendingWorkReq(wr);
+        newPendingWorkReqOutQ.enq(newPendingWR);
+    endrule
+
     rule genPendingWR if (
         cntrlStatus.comm.isRTS &&
         // CountCF has delayed increment and decrement, so less than MAX - 1
@@ -218,14 +226,21 @@ module mkSQ#(
 /*
     rule debug if (
         contextSQ.statusSQ.comm.isERR &&
-        (reqGenSQ.reqHeaderOutNotEmpty || payloadGenerator.notGracefulStop)
+        (
+            reqGenSQ.reqHeaderOutNotEmpty    ||
+            pendingWorkReqBuf.fifof.notEmpty ||
+            workReqPipeIn.notEmpty
+            // payloadGenerator.notGracefulStop
+        )
     );
         $display(
             "time=%0t: mkSQ debug", $time,
             ", qpn=%h", contextSQ.statusSQ.comm.getSQPN,
             ", contextSQ.statusSQ.comm.isERR=", fshow(contextSQ.statusSQ.comm.isERR),
+            ", workReqPipeIn.notEmpty=", fshow(workReqPipeIn.notEmpty),
             ", reqGenSQ.reqHeaderOutNotEmpty=", fshow(reqGenSQ.reqHeaderOutNotEmpty),
-            ", payloadGenerator.notGracefulStop=", fshow(payloadGenerator.notGracefulStop)
+            ", pendingWorkReqBuf.size=%0d", pendingWorkReqBuf.size
+            // ", payloadGenerator.notGracefulStop=", fshow(payloadGenerator.notGracefulStop)
         );
     endrule
 */
@@ -629,8 +644,8 @@ module mkQP(QueuePair);
     rule waitGracefulStop if (
         cntrl.contextSQ.statusSQ.comm.isERR &&
         !recvReqQ.notEmpty                  &&
-        // !workReqQ.notEmpty                  &&
-        // !sq.pendingWorkReqNotEmpty          &&
+        !workReqQ.notEmpty                  &&
+        !sq.pendingWorkReqNotEmpty          &&
         rqDmaReadCancelReg                  &&
         rqDmaWriteCancelReg                 &&
         sqDmaReadCancelReg                  &&

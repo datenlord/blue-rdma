@@ -116,15 +116,12 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
         headerMetaDataInQ.notFull &&
         dataInQ.notFull
     ));
-        let curTS <- $time;
-        if (curTS < 17600) begin
-            $display(
-                "time=%0t: mkExtractHeaderFromRdmaPktPipeOut debug", $time,
-                ", rdmaPktPipeIn.notFull=", fshow(rdmaPktPipeIn.notEmpty),
-                ", headerMetaDataInQ.notFull=", fshow(headerMetaDataInQ.notFull),
-                ", dataInQ.notFull=", fshow(dataInQ.notFull)
-            );
-        end
+        $display(
+            "time=%0t: mkExtractHeaderFromRdmaPktPipeOut debug", $time,
+            ", rdmaPktPipeIn.notFull=", fshow(rdmaPktPipeIn.notEmpty),
+            ", headerMetaDataInQ.notFull=", fshow(headerMetaDataInQ.notFull),
+            ", dataInQ.notFull=", fshow(dataInQ.notFull)
+        );
     endrule
 */
     rule extractHeader;
@@ -308,50 +305,47 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         rdmaHeaderOutputQ.notFull              &&
         payloadOutputQ.notFull
     ));
-        let curTS <- $time;
-        if (curTS < 17600) begin
+        $display(
+            "time=%0t: mkInputRdmaPktBufAndHeaderValidation debug", $time,
+            ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
+            ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
+            // ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
+            // ", reqPayloadOutVec[0].notFull=", fshow(reqPayloadOutVec[0].notFull),
+            // ", reqPktMetaDataOutVec[0].notFull=", fshow(reqPktMetaDataOutVec[0].notFull),
+            // ", respPayloadOutVec[0].notFull=", fshow(respPayloadOutVec[0].notFull),
+            // ", respPktMetaDataOutVec[0].notFull=", fshow(respPktMetaDataOutVec[0].notFull),
+            ", rdmaHeaderRecvQ.notFull=", fshow(rdmaHeaderRecvQ.notFull),
+            ", payloadRecvQ.notFull=", fshow(payloadRecvQ.notFull),
+            ", rdmaHeaderPreCheckQ.notFull=", fshow(rdmaHeaderPreCheckQ.notFull),
+            ", payloadPreCheckQ.notFull=", fshow(payloadPreCheckQ.notFull),
+            ", rdmaHeaderValidationQ.notFull=", fshow(rdmaHeaderValidationQ.notFull),
+            ", payloadValidationQ.notFull=", fshow(payloadValidationQ.notFull),
+            ", rdmaHeaderFilterQ.notFull=", fshow(rdmaHeaderFilterQ.notFull),
+            ", payloadFilterQ.notFull=", fshow(payloadFilterQ.notFull),
+            ", rdmaHeaderFragLenCalcQ.notFull=", fshow(rdmaHeaderFragLenCalcQ.notFull),
+            ", payloadFragLenCalcQ.notFull=", fshow(payloadFragLenCalcQ.notFull),
+            ", rdmaHeaderPktLenCalcQ.notFull=", fshow(rdmaHeaderPktLenCalcQ.notFull),
+            ", payloadPktLenCalcQ.notFull=", fshow(payloadPktLenCalcQ.notFull),
+            ", rdmaHeaderPktLenPreCheckQ.notFull=", fshow(rdmaHeaderPktLenPreCheckQ.notFull),
+            ", payloadPktLenPreCheckQ.notFull=", fshow(payloadPktLenPreCheckQ.notFull),
+            ", rdmaHeaderPktLenCheckQ.notFull=", fshow(rdmaHeaderPktLenCheckQ.notFull),
+            ", payloadPktLenCheckQ.notFull=", fshow(payloadPktLenCheckQ.notFull),
+            ", rdmaHeaderOutputQ.notFull=", fshow(rdmaHeaderOutputQ.notFull),
+            ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
+        );
+        for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
             $display(
-                "time=%0t: mkInputRdmaPktBufAndHeaderValidation debug", $time,
-                ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
-                ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
-                // ", cnpOutVec[0].notFull=", fshow(cnpOutVec[0].notFull),
-                // ", reqPayloadOutVec[0].notFull=", fshow(reqPayloadOutVec[0].notFull),
-                // ", reqPktMetaDataOutVec[0].notFull=", fshow(reqPktMetaDataOutVec[0].notFull),
-                // ", respPayloadOutVec[0].notFull=", fshow(respPayloadOutVec[0].notFull),
-                // ", respPktMetaDataOutVec[0].notFull=", fshow(respPktMetaDataOutVec[0].notFull),
-                ", rdmaHeaderRecvQ.notFull=", fshow(rdmaHeaderRecvQ.notFull),
-                ", payloadRecvQ.notFull=", fshow(payloadRecvQ.notFull),
-                ", rdmaHeaderPreCheckQ.notFull=", fshow(rdmaHeaderPreCheckQ.notFull),
-                ", payloadPreCheckQ.notFull=", fshow(payloadPreCheckQ.notFull),
-                ", rdmaHeaderValidationQ.notFull=", fshow(rdmaHeaderValidationQ.notFull),
-                ", payloadValidationQ.notFull=", fshow(payloadValidationQ.notFull),
-                ", rdmaHeaderFilterQ.notFull=", fshow(rdmaHeaderFilterQ.notFull),
-                ", payloadFilterQ.notFull=", fshow(payloadFilterQ.notFull),
-                ", rdmaHeaderFragLenCalcQ.notFull=", fshow(rdmaHeaderFragLenCalcQ.notFull),
-                ", payloadFragLenCalcQ.notFull=", fshow(payloadFragLenCalcQ.notFull),
-                ", rdmaHeaderPktLenCalcQ.notFull=", fshow(rdmaHeaderPktLenCalcQ.notFull),
-                ", payloadPktLenCalcQ.notFull=", fshow(payloadPktLenCalcQ.notFull),
-                ", rdmaHeaderPktLenPreCheckQ.notFull=", fshow(rdmaHeaderPktLenPreCheckQ.notFull),
-                ", payloadPktLenPreCheckQ.notFull=", fshow(payloadPktLenPreCheckQ.notFull),
-                ", rdmaHeaderPktLenCheckQ.notFull=", fshow(rdmaHeaderPktLenCheckQ.notFull),
-                ", payloadPktLenCheckQ.notFull=", fshow(payloadPktLenCheckQ.notFull),
-                ", rdmaHeaderOutputQ.notFull=", fshow(rdmaHeaderOutputQ.notFull),
-                ", payloadOutputQ.notFull=", fshow(payloadOutputQ.notFull)
+                ", cnpOutVec[%0d].notFull=", idx, fshow(cnpOutVec[idx].notFull),
+                ", reqPayloadOutVec[%0d].notFull=", idx, fshow(reqPayloadOutVec[idx].notFull),
+                ", reqPktMetaDataOutVec[%0d].notFull=", idx, fshow(reqPktMetaDataOutVec[idx].notFull),
+                ", respPayloadOutVec[%0d].notFull=", idx, fshow(respPayloadOutVec[idx].notFull),
+                ", respPktMetaDataOutVec[%0d].notFull=", idx, fshow(respPktMetaDataOutVec[idx].notFull),
+                ", cnpOutVec[%0d].notEmpty=", idx, fshow(cnpOutVec[idx].notEmpty),
+                ", reqPayloadOutVec[%0d].notEmpty=", idx, fshow(reqPayloadOutVec[idx].notEmpty),
+                ", reqPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(reqPktMetaDataOutVec[idx].notEmpty),
+                ", respPayloadOutVec[%0d].notEmpty=", idx, fshow(respPayloadOutVec[idx].notEmpty),
+                ", respPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(respPktMetaDataOutVec[idx].notEmpty)
             );
-            for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
-                $display(
-                    ", cnpOutVec[%0d].notFull=", idx, fshow(cnpOutVec[idx].notFull),
-                    ", reqPayloadOutVec[%0d].notFull=", idx, fshow(reqPayloadOutVec[idx].notFull),
-                    ", reqPktMetaDataOutVec[%0d].notFull=", idx, fshow(reqPktMetaDataOutVec[idx].notFull),
-                    ", respPayloadOutVec[%0d].notFull=", idx, fshow(respPayloadOutVec[idx].notFull),
-                    ", respPktMetaDataOutVec[%0d].notFull=", idx, fshow(respPktMetaDataOutVec[idx].notFull),
-                    ", cnpOutVec[%0d].notEmpty=", idx, fshow(cnpOutVec[idx].notEmpty),
-                    ", reqPayloadOutVec[%0d].notEmpty=", idx, fshow(reqPayloadOutVec[idx].notEmpty),
-                    ", reqPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(reqPktMetaDataOutVec[idx].notEmpty),
-                    ", respPayloadOutVec[%0d].notEmpty=", idx, fshow(respPayloadOutVec[idx].notEmpty),
-                    ", respPktMetaDataOutVec[%0d].notEmpty=", idx, fshow(respPktMetaDataOutVec[idx].notEmpty)
-                );
-            end
         end
     endrule
 */
