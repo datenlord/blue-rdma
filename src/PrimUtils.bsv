@@ -38,6 +38,10 @@ function Bool isOne(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
     return isLessOrEqOne(bits) && unpack(lsb(bits));
 endfunction
 
+function Bool isOneR(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
+    return isLessOrEqOneR(bits) && unpack(lsb(bits));
+endfunction
+
 function Bool isTwo(Bit#(nSz) bits) provisos(Add#(2, anysize, nSz));
     return isZero(bits >> 2) && unpack(bits[1]) && !unpack(lsb(bits));
 endfunction

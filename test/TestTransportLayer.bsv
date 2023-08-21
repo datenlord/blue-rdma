@@ -30,8 +30,8 @@ module mkTestTransportLayerErrorCase(Empty);
 endmodule
 
 module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
-    let minDmaLength = normalOrErrCase ? 1    : 8192; // 524288;
-    let maxDmaLength = normalOrErrCase ? 8192 : 16384; // 1048576;
+    let minDmaLength = normalOrErrCase ? 1    : 8192;  // 65536;  // 524288;
+    let maxDmaLength = normalOrErrCase ? 8192 : 16384; // 131072; // 1048576;
     let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
     let pmtu = IBV_MTU_512;
     let isSendSideQ = True;

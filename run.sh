@@ -49,10 +49,13 @@ mkdir -p $LOG_DIR
 # make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestBramCache 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestMetaData.bsv TOPMODULE=mkTestTLB 2>&1 | tee -a $ALL_LOG
 
-# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
-# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestAddrChunkSrv 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaReadCntrlNormalCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaReadCntrlCancelCase 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaReadCntrl 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestDmaWriteCntrl 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadConAndGenNormalCase 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=TestPayloadConAndGen.bsv TOPMODULE=mkTestPayloadGenSegmentAndPaddingCase 2>&1 | tee -a $ALL_LOG
 
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestPermCheckCltArbiter 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestQueuePair.bsv TOPMODULE=mkTestDmaReadCltArbiter 2>&1 | tee -a $ALL_LOG

@@ -504,9 +504,9 @@ module mkRespHandleSQ#(
         // Do not dequeue when triggering retry in the 2nd stage
         if (deqPendingWorkReq) begin
             pendingWorkReqPipeIn.deq;
-            // $display(
-            //     "time=%0t:", $time, " dequeue wr.id=%h", curPendingWR.wr.id
-            // );
+            $display(
+                "time=%0t:", $time, " dequeue wr.id=%h", curPendingWR.wr.id
+            );
         end
 
         if (
@@ -536,17 +536,19 @@ module mkRespHandleSQ#(
         incomingRespQ.enq(tuple6(
             curPendingWR, curPktMetaData, respPktInfo, retryResetReqReg, wcReqType, wrAckType
         ));
-        // $display(
-        //     "time=%0t: 1st stage deqPktMetaDataOrWorkReq,", $time,
-        //     " preStageStateReg=", fshow(preStageStateReg),
-        //     ", bth.psn=%h", respPktInfo.bth.psn,
-        //     ", bth.opcode=", fshow(respPktInfo.bth.opcode),
-        //     ", aeth.code=", fshow(respPktInfo.aeth.code),
-        //     ", WR opcode=", fshow(curPendingWR.wr.opcode),
-        //     ", rdmaRespType=", fshow(rdmaRespType),
-        //     ", wcReqType=", fshow(wcReqType),
-        //     ", wr.id=%h", curPendingWR.wr.id
-        // );
+        $display(
+            "time=%0t: 1st stage deqPktMetaDataOrWorkReq", $time,
+            ", qpn=%h", contextSQ.statusSQ.comm.getSQPN,
+            ", preStageStateReg=", fshow(preStageStateReg),
+            ", bth.psn=%h", respPktInfo.bth.psn,
+            ", bth.opcode=", fshow(respPktInfo.bth.opcode),
+            ", aeth.code=", fshow(respPktInfo.aeth.code),
+            ", deqPendingWorkReq=", fshow(deqPendingWorkReq),
+            ", wr.id=%h", curPendingWR.wr.id,
+            ", wr.opcode=", fshow(curPendingWR.wr.opcode),
+            ", rdmaRespType=", fshow(rdmaRespType),
+            ", wcReqType=", fshow(wcReqType)
+        );
     endrule
 
     rule recvRespHeader if (cntrlStatus.comm.isRTS || cntrlStatus.comm.isERR); // This rule still runs at retry or error state

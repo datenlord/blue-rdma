@@ -698,14 +698,14 @@ module mkReqGenSQ#(
 
         let isNewWorkReq = !isValid(curPendingWR.isOnlyReqPkt);
         let needDmaRead = workReqNeedDmaReadSQ(curPendingWR.wr);
-        let { totalReqPktNum, pmtuResidue } = truncateLenByPMTU(
+        let { tmpReqPktNum, pmtuResidue } = truncateLenByPMTU(
             curPendingWR.wr.len, cntrlStatus.comm.getPMTU
         );
         if (shouldDeqPendingWR) begin
             pendingWorkReqPipeIn.deq;
 
             workReqPayloadGenQ.enq(tuple7(
-                curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead,
+                curPendingWR, tmpReqPktNum, pmtuResidue, needDmaRead,
                 isNewWorkReq, isReliableConnection, isUnreliableDatagram
             ));
 
@@ -728,7 +728,7 @@ module mkReqGenSQ#(
 
     rule issuePayloadGenReq if (cntrlStatus.comm.isStableRTS && isNormalStateReg);
         let {
-            curPendingWR, totalReqPktNum, pmtuResidue, needDmaRead,
+            curPendingWR, tmpReqPktNum, pmtuResidue, needDmaRead,
             isNewWorkReq, isReliableConnection, isUnreliableDatagram
         } = workReqPayloadGenQ.first;
         workReqPayloadGenQ.deq;
@@ -761,28 +761,30 @@ module mkReqGenSQ#(
             isUnreliableDatagram: isUnreliableDatagram,
             needDmaRead         : needDmaRead
         };
-        workReqPktNumQ.enq(tuple3(curPendingWR, totalReqPktNum, workReqInfo));
+        workReqPktNumQ.enq(tuple3(curPendingWR, tmpReqPktNum, workReqInfo));
         // $display(
         //     "time=%0t: 2nd stage issuePayloadGenReq", $time,
         //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
         //     ", wr.id=%h", curPendingWR.wr.id,
         //     ", curPendingWR.wr.len=%0d", curPendingWR.wr.len,
         //     // ", workReqInfo=", fshow(workReqInfo),
-        //     ", totalReqPktNum=%0d", totalReqPktNum
+        //     ", tmpReqPktNum=%0d", tmpReqPktNum
         // );
     endrule
 
     rule calcPktNum4NewWorkReq if (cntrlStatus.comm.isStableRTS && isNormalStateReg);
-        let { curPendingWR, totalReqPktNum, workReqInfo } = workReqPktNumQ.first;
+        let { curPendingWR, tmpReqPktNum, workReqInfo } = workReqPktNumQ.first;
         workReqPktNumQ.deq;
 
         let isZeroPmtuResidue = workReqInfo.isZeroPmtuResidue;
         let isNewWorkReq      = workReqInfo.isNewWorkReq;
 
         if (isNewWorkReq) begin
-            // let { isOnlyPkt, totalPktNum } = calcPktNumByLength(curPendingWR.wr.len, cntrlStatus.comm.getPMTU);
-            let totalPktNum = isZeroPmtuResidue ? totalReqPktNum : totalReqPktNum + 1;
-            let isOnlyPkt = isLessOrEqOne(totalPktNum);
+            // let { isOnlyPkt, totalPktNum } = calcPktNumByLength(
+            //     curPendingWR.wr.len, cntrlStatus.comm.getPMTU
+            // );
+            let totalPktNum = isZeroPmtuResidue ? tmpReqPktNum : tmpReqPktNum + 1;
+            let isOnlyPkt = isLessOrEqOneR(tmpReqPktNum);
 
             curPendingWR.pktNum = tagged Valid totalPktNum;
             curPendingWR.isOnlyReqPkt = tagged Valid isOnlyPkt;

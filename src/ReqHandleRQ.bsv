@@ -638,9 +638,9 @@ module mkReqHandleRQ#(
         let isExpected   = bth.psn == expectedPSN;
         let isDuplicated = psnInRangeExclusive(bth.psn, oldestPSN, expectedPSN);
 
-        let { totalRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrlStatus.comm.getPMTU);
-        // let totalRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrlStatus.comm.getPMTU);
-        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
+        let { tmpRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let tmpRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let { isOnlyRespPkt, tmpRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         // let reqStatus = pktStatus2ReqStatusRQ(curPktMetaData.pktStatus, bth.trans);
 
         immAssert(
@@ -669,7 +669,7 @@ module mkReqHandleRQ#(
         let reqPktInfo = RdmaReqPktInfo {
             bth             : bth,
             epoch           : epoch,
-            respPktNum      : isReadReq ? totalRespPktNum : 1,
+            respPktNum      : isReadReq ? tmpRespPktNum : 1,
             endPSN          : dontCareValue,
             isSendReq       : isSendReq,
             isWriteReq      : isWriteReq,
@@ -719,7 +719,7 @@ module mkReqHandleRQ#(
 
         // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         let totalRespPktNum = preStageIsZeroPmtuResidueReg ? reqPktInfo.respPktNum : reqPktInfo.respPktNum + 1;
-        let isOnlyRespPkt = isLessOrEqOneR(totalRespPktNum);
+        let isOnlyRespPkt = isLessOrEqOneR(reqPktInfo.respPktNum);
         reqPktInfo.isOnlyRespPkt = reqPktInfo.isReadReq ? isOnlyRespPkt : True;
         reqPktInfo.respPktNum = reqPktInfo.isReadReq ? totalRespPktNum : 1;
 

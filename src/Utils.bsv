@@ -1248,6 +1248,7 @@ function Bool containWorkReqFlag(
     // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
+// The returned PktNum might be zero or one less than actual PktNum
 function Tuple2#(PktNum, PmtuResidue) truncateLenByPMTU(Length len, PMTU pmtu);
     return case (pmtu)
         IBV_MTU_256 : begin
