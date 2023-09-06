@@ -66,22 +66,22 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
     Reg#(DmaReadReq) curReqReg <- mkRegU;
 
     Bool isFragCntZero = isZero(totalFragCntReg);
-/*
-    rule debug if (!(
-        dmaReadReqQ.notFull    &&
-        dmaReadRespQ.notFull   &&
-        dmaReadReqOutQ.notFull &&
-        dmaReadRespOutQ.notFull
-    ));
-        $display(
-            "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
-            ", dmaReadReqQ.notFull=", fshow(dmaReadReqQ.notFull),
-            ", dmaReadRespQ.notFull=", fshow(dmaReadRespQ.notFull),
-            ", dmaReadReqOutQ.notFull=", fshow(dmaReadReqOutQ.notFull),
-            ", dmaReadRespOutQ.notFull=", fshow(dmaReadRespOutQ.notFull)
-        );
-    endrule
-*/
+
+    // rule debug if (!(
+    //     dmaReadReqQ.notFull    &&
+    //     dmaReadRespQ.notFull   &&
+    //     dmaReadReqOutQ.notFull &&
+    //     dmaReadRespOutQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
+    //         ", dmaReadReqQ.notFull=", fshow(dmaReadReqQ.notFull),
+    //         ", dmaReadRespQ.notFull=", fshow(dmaReadRespQ.notFull),
+    //         ", dmaReadReqOutQ.notFull=", fshow(dmaReadReqOutQ.notFull),
+    //         ", dmaReadRespOutQ.notFull=", fshow(dmaReadRespOutQ.notFull)
+    //     );
+    // endrule
+
     rule init if (!dmaReadSrvInitReg);
         randomDataStream.cntrl.init;
 
@@ -108,8 +108,8 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             dmaReadSrvInitReg <= False;
 
             // $display(
-            //     "time=%0t: cancel DMA read", $time,
-            //     ", initiator=", fshow(dmaReadReq.initiator)
+            //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut acceptReq", $time,
+            //     ", cancel DMA read, initiator=", fshow(dmaReadReq.initiator)
             // );
         end
         else begin
@@ -143,8 +143,8 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             isFirstReg <= True;
 
             // $display(
-            //     "time=%0t:", $time,
-            //     " DMA read request, wr.id=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
+            //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut acceptReq", $time,
+            //     ", DMA read request, wr.id=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
             //     dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
             // );
         end
@@ -181,8 +181,8 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
         // $display(
-        //     "time=%0t:", $time,
-        //     " DMA read response, wr.id=%h, totalFragNum=%0d",
+        //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut genResp", $time,
+        //     ", DMA read response, wr.id=%h, totalFragNum=%0d",
         //     curReqReg.wrID, totalFragCntReg,
         //     ", dataStream=", fshow(dataStream)
         //     // ", dataStream.isFirst=", fshow(dataStream.isFirst),

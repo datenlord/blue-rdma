@@ -52,13 +52,17 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let segDataStreamPipeOut <- mkSegmentDataStreamByPmtuAndAddPadCnt(
         simDmaReadSrv.dataStream, pmtuPipeOut
     );
+    // let segDataStreamPipeOut <- mkDataStreamAddPadCnt(
+    //     simDmaReadSrv.dataStream
+    // );
     let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
 
     let pendingWorkReqBufNotEmpty = True;
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, simDmaReadSrv.dmaReadSrv
+    );
     let payloadGenerator <- mkPayloadGenerator(
-        cntrlStatus,
-        dmaReadCntrl
+        cntrlStatus, dmaReadCntrl
     );
     // DUT
     let reqGenSQ <- mkReqGenSQ(
@@ -320,7 +324,9 @@ module mkTestReqGenDmaReadErrCase(Empty);
     );
 
     let pendingWorkReqBufNotEmpty = True;
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, simDmaReadSrv
+    );
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus, dmaReadCntrl
     );

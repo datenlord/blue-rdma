@@ -190,9 +190,12 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     // Only select read response payload for normal WR
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let readRespPayloadPipeOutBuf <- mkBufferN(32, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(cntrlStatus.comm.getPMTU);
-    let readRespPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        readRespPayloadPipeOutBuf, pmtuPipeOut
+    // let pmtuPipeOut <- mkConstantPipeOut(cntrlStatus.comm.getPMTU);
+    // let readRespPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
+    //     readRespPayloadPipeOutBuf, pmtuPipeOut
+    // );
+    let readRespPayloadPipeOut4Ref <- mkDataStreamAddPadCnt(
+        readRespPayloadPipeOutBuf
     );
     // Generate RDMA responses
     let rdmaRespDataStreamPipeOut <- mkSimGenNormalOrErrOrRetryRdmaResp(

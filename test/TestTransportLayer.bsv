@@ -30,10 +30,10 @@ module mkTestTransportLayerErrorCase(Empty);
 endmodule
 
 module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
-    let minDmaLength = normalOrErrCase ? 1    : 8192;  // 65536;  // 524288;
-    let maxDmaLength = normalOrErrCase ? 8192 : 16384; // 131072; // 1048576;
+    let minDmaLength = normalOrErrCase ? 1    : 536870912;  // 512MB // 65536;  //
+    let maxDmaLength = normalOrErrCase ? 8192 : 1073741824; // 1GB   // 131072; //
     let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
-    let pmtu = IBV_MTU_512;
+    let pmtu = normalOrErrCase ? IBV_MTU_256 : IBV_MTU_4096;
     let isSendSideQ = True;
 
     FIFOF#(QPN) dqpnQ4RecvSide <- mkFIFOF;
@@ -372,12 +372,12 @@ module mkInitMetaDataAndConnectQP#(
                 if (needCheckResp) begin
                     workReqIdQ4Cmp.enq(tuple2(sqpn, wr.id));
                 end
-                // $display(
-                //     "time=%0t: issueWorkReq", $time,
-                //     ", wrOpCode=", fshow(wrOpCode),
-                //     ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
-                //     sqpn, dqpn, lkey, rkey, wr.id, wr.len
-                // );
+                $display(
+                    "time=%0t: issueWorkReq", $time,
+                    ", wrOpCode=", fshow(wrOpCode),
+                    ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
+                    sqpn, dqpn, lkey, rkey, wr.id, wr.len
+                );
             endrule
 
             rule collectWorkComp4SendSide if (

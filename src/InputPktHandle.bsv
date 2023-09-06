@@ -192,6 +192,7 @@ typedef struct {
 
 typedef struct {
     HandlerPD pdHandler;
+    QPN  dqpn;
     PMTU pmtu;
     Bool isValidHeader;
     Bool isCNP;
@@ -202,6 +203,11 @@ typedef struct {
 } ValidHeaderInfo deriving(Bits);
 
 typedef struct {
+    TransType   trans;  // TODO: remove this field
+    RdmaOpCode  opcode; // TODO: remove this field
+    PAD         padCnt; // TODO: remove this field
+    PSN         psn;    // TODO: remove this field
+    QPN         dqpn;   // TODO: remvoe this field
     RdmaHeader  rdmaHeader;
     HandlerPD   pdHandler;
     PmtuFragNum pktFragNum;
@@ -529,13 +535,15 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     isResp
                 );
             end
-            // $display(
-            //     "time=%0t: checkMetaDataQP", $time,
-            //     ", dqpn=%h, pdHandler=%h, bth.psn=%h",
-            //     headerValidateInfo.dqpn, pdHandler, bth.psn,
-            //     ", bth.opcode=", fshow(bth.opcode),
-            //     ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
-            // );
+            $display(
+                "time=%0t: checkMetaDataQP", $time,
+                ", pdHandler=%h", pdHandler,
+                ", dqpn=%h", headerValidateInfo.dqpn,
+                ", bth.dqpn=%h", bth.dqpn,
+                ", bth.psn=%h", bth.psn,
+                ", bth.opcode=", fshow(bth.opcode),
+                ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
+            );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
             // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
@@ -557,6 +565,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
             let validHeaderInfo = ValidHeaderInfo {
                 pdHandler      : pdHandler,
+                dqpn           : headerValidateInfo.dqpn,
                 pmtu           : qp.statusSQ.comm.getPMTU,
                 isValidHeader  : isValidHeader,
                 isCNP          : isCNP,
@@ -674,19 +683,11 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
         let pdHandler       = validHeaderInfo.pdHandler;
         let pmtu            = validHeaderInfo.pmtu;
-        let qpIndex         = getIndexQP(bth.dqpn);
+        let qpIndex         = getIndexQP(validHeaderInfo.dqpn);
         let isRespPkt       = validHeaderInfo.isRespPkt;
         let isLastPkt       = validHeaderInfo.isLastPkt;
         let isFirstOrMidPkt = validHeaderInfo.isFirstOrMidPkt;
         let isLastOrOnlyPkt = validHeaderInfo.isLastOrOnlyPkt;
-
-        // $display(
-        //     "time=%0t: payloadFrag.byteEn=%h, payloadFrag.isFirst=",
-        //     $time, payloadFrag.byteEn, fshow(payloadFrag.isFirst),
-        //     ", payloadFrag.isLast=", payloadFrag.isLast, ", bth.psn=%h", bth.psn,
-        //     ", bth.opcode=", fshow(bth.opcode), ", bth.padCnt=%h", bth.padCnt,
-        //     ", payloadFrag.data=%h", payloadFrag.data
-        // );
 
         let pktLen = pktLenReg;
         let pktFragNum = pktFragNumReg;
@@ -727,6 +728,11 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             rdmaHeaderPktLenCalcQ.deq;
 
             let pktLenCheckInfo = PktLenCheckInfo {
+                trans          : bth.trans,
+                opcode         : bth.opcode,
+                padCnt         : bth.padCnt,
+                psn            : bth.psn,
+                dqpn           : validHeaderInfo.dqpn,
                 rdmaHeader     : rdmaHeader,
                 pdHandler      : pdHandler,
                 pktFragNum     : pktFragNum,
@@ -740,15 +746,22 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         end
         payloadPktLenPreCheckQ.enq(tuple3(payloadFrag, qpIndex, isRespPkt));
         // $display(
-        //     "time=%0t: pktLen=%0d, pktFragNum=%0d", $time, pktLen, pktFragNum,
-        //     ", byteEn=%h", payloadFrag.byteEn, ", isByteEnAllOne=", fshow(isByteEnAllOne),
+        //     "time=%0t: 7th stage calcPktLen", $time,
+        //     ", pktLen=%0d, pktFragNum=%0d", pktLen, pktFragNum,
+        //     ", isByteEnAllOne=", fshow(isByteEnAllOne),
         //     ", pktValid=", fshow(pktValid),
         //     // ", payloadOutQ.notFull=", fshow(payloadOutQ.notFull),
         //     // ", pktMetaDataOutQ.notFull=", fshow(pktMetaDataOutQ.notFull),
         //     ", DATA_STREAM_FRAG_BUF_SIZE=%0d", valueOf(DATA_STREAM_FRAG_BUF_SIZE),
-        //     ", PKT_META_DATA_BUF_SIZE=%0d", valueOf(PKT_META_DATA_BUF_SIZE)
+        //     ", PKT_META_DATA_BUF_SIZE=%0d", valueOf(PKT_META_DATA_BUF_SIZE),
+        //     ", payloadFrag.byteEn=%h" , payloadFrag.byteEn,
+        //     ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+        //     ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+        //     ", bth.psn=%h", bth.psn,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", bth.padCnt=%h", bth.padCnt
+        //     // ", payloadFrag.data=%h", payloadFrag.data
         // );
-        // $display("time=%0t: 7th stage calcPktLen", $time);
     endrule
 
     rule preCheckPktLen;
@@ -809,10 +822,22 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             if (pktValid) begin
                 pktValid = (isFirstOrMidPkt && isPktLenEqPMTU) ||
                     (isLastOrOnlyPkt && !isPktLenGtPMTU);
-                // $display(
-                //     "time=%0t: pktLen=%0d", $time, pktLen,
-                //     ", pmtu=", fshow(pmtu), ", pktValid=", fshow(pktValid)
-                // );
+
+                $display(
+                    "time=%0t: checkPktLen", $time,
+                    ", bth.trans=", fshow(pktLenCheckInfo.trans),
+                    ", bth.dqpn=%h", pktLenCheckInfo.dqpn,
+                    ", bth.psn=%h", pktLenCheckInfo.psn,
+                    ", bth.opcode=", fshow(pktLenCheckInfo.opcode),
+                    ", bth.padCnt=%h", pktLenCheckInfo.padCnt,
+                    ", pktLen=%0d", pktLen,
+                    ", pmtu=", fshow(pmtu),
+                    ", isFirstOrMidPkt=", fshow(isFirstOrMidPkt),
+                    ", isPktLenEqPMTU=", fshow(isPktLenEqPMTU),
+                    ", isLastOrOnlyPkt=", fshow(isLastOrOnlyPkt),
+                    ", isPktLenGtPMTU=", fshow(isPktLenGtPMTU),
+                    ", pktValid=", fshow(pktValid)
+                );
             end
 
             let pktStatus = PKT_ST_VALID;

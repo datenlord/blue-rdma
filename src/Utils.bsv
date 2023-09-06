@@ -1303,14 +1303,14 @@ function Bool workReqNeedDmaReadSQ(WorkReq wr);
         IBV_WR_RDMA_WRITE_WITH_IMM,
         IBV_WR_SEND               ,
         IBV_WR_SEND_WITH_IMM      ,
-        IBV_WR_SEND_WITH_INV      : !isZero(wr.len);
+        IBV_WR_SEND_WITH_INV      : !isZeroR(wr.len);
         default                   : False;
     endcase;
 endfunction
 
 function Bool workReqNeedDmaWriteSQ(WorkReq wr);
     return case (wr.opcode)
-        IBV_WR_RDMA_READ           : !isZero(wr.len);
+        IBV_WR_RDMA_READ           : !isZeroR(wr.len);
         IBV_WR_ATOMIC_CMP_AND_SWP  ,
         IBV_WR_ATOMIC_FETCH_AND_ADD: True;
         default                    : False;
@@ -1318,7 +1318,7 @@ function Bool workReqNeedDmaWriteSQ(WorkReq wr);
 endfunction
 
 function Bool workReqHasPayload(WorkReq wr);
-    return !(isZero(wr.len) || isReadOrAtomicWorkReq(wr.opcode));
+    return !(isZeroR(wr.len) || isReadOrAtomicWorkReq(wr.opcode));
 endfunction
 
 function Bool workReqNeedWorkCompSQ(WorkReq wr);

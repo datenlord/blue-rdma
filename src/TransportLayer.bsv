@@ -55,7 +55,7 @@ module mkWorkReqAndRecvReqDispatcher#(
         map(toPipeOut, recvReqOutVec)
     );
 endmodule
-
+/*
 // TODO: remove it
 module mkSimExtractNormalReqResp#(
     MetaDataQPs qpMetaData,
@@ -312,7 +312,7 @@ module mkSimExtractNormalReqResp#(
 
     return map(genInputRdmaPktBuf, genVector);
 endmodule
-
+*/
 interface TransportLayer;
     interface Put#(RecvReq) recvReqInput;
     interface Put#(WorkReq) workReqInput;

@@ -33,7 +33,7 @@ interface AddrChunkSrv;
     method Bool isIdle();
 endinterface
 
-module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
+module mkAddrChunkSrv#(Bool clearAll, Bool isSQ)(AddrChunkSrv);
     FIFOF#(AddrChunkReq)   reqQ <- mkFIFOF;
     FIFOF#(AddrChunkResp) respQ <- mkFIFOF;
 
@@ -50,9 +50,23 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     rule resetAndClear if (clearAll);
         reqQ.clear;
         respQ.clear;
-        busyReg <= False;
+        busyReg    <= False;
         isFirstReg <= False;
     endrule
+
+    // rule debug;
+    //     $display(
+    //         "time=%0t: mkAddrChunkSrv debug", $time,
+    //         ", isSQ=", fshow(isSQ),
+    //         ", reqQ.notEmpty=", fshow(reqQ.notEmpty),
+    //         ", respQ.notFull=", fshow(respQ.notFull),
+    //         ", pktNumReg=%0d", pktNumReg,
+    //         ", fullPktLenReg=%h", fullPktLenReg,
+    //         ", busyReg=", fshow(busyReg),
+    //         ", isFirstReg=", fshow(isFirstReg),
+    //         ", clearAll=", fshow(clearAll)
+    //     );
+    // endrule
 
     rule recvReq if (!clearAll && !busyReg);
         let addrChunkReq = reqQ.first;
@@ -82,12 +96,13 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         busyReg          <= True;
         isFirstReg       <= True;
 
-        // $display(
-        //     "time=%0t: recvReq", $time,
-        //     ", totalPktNum=%0d", totalPktNum,
-        //     ", pmtuResidue=%0d", pmtuResidue,
-        //     ", addrChunkReq=", fshow(addrChunkReq)
-        // );
+        $display(
+            "time=%0t: mkAddrChunkSrv recvReq", $time,
+            ", isSQ=", fshow(isSQ),
+            ", totalPktNum=%0d", totalPktNum,
+            ", pmtuResidue=%h", pmtuResidue,
+            ", addrChunkReq=", fshow(addrChunkReq)
+        );
     endrule
 
     rule genResp if (!clearAll && busyReg);
@@ -107,12 +122,13 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         };
         respQ.enq(addrChunkResp);
 
-        // $display(
-        //     "time=%0t: genResp", $time,
-        //     ", pktNumReg=%0d", pktNumReg,
-        //     ", dmaAddrReg=%h", dmaAddrReg,
-        //     ", addrChunkResp=", fshow(addrChunkResp)
-        // );
+        $display(
+            "time=%0t: mkAddrChunkSrv genResp", $time,
+            ", isSQ=", fshow(isSQ),
+            ", pktNumReg=%0d", pktNumReg,
+            ", dmaAddrReg=%h", dmaAddrReg,
+            ", addrChunkResp=", fshow(addrChunkResp)
+        );
     endrule
 
     interface srvPort = toGPServer(reqQ, respQ);
@@ -137,28 +153,29 @@ interface DmaCntrl;
     method Action cancel();
 endinterface
 
-interface DmaReadCntrl2;
+interface DmaReadCntrl;
     interface DmaCntrlReadSrv srvPort;
     interface DmaCntrl dmaCntrl;
 endinterface
 
-module mkDmaReadCntrl2#(
-    Bool clearAll,
-    // CntrlStatus cntrlStatus,
+module mkDmaReadCntrl#(
+    // Bool clearAll,
+    CntrlStatus cntrlStatus,
     DmaReadSrv dmaReadSrv
-)(DmaReadCntrl2);
+)(DmaReadCntrl);
     FIFOF#(DmaReadCntrlReq)   reqQ <- mkFIFOF;
     FIFOF#(DmaReadCntrlResp) respQ <- mkFIFOF;
 
-    FIFOF#(DmaReadCntrlReq) pendingDmaCntrlReqQ <- mkFIFOF;
-    FIFOF#(DmaReadReq)       pendingDmaReadReqQ <- mkFIFOF;
-    FIFOF#(Bool)              firstDmaReqChunkQ <- mkFIFOF;
-    FIFOF#(Bool)               lastDmaReqChunkQ <- mkFIFOF;
+    FIFOF#(DmaReadCntrlReq)                pendingDmaCntrlReqQ <- mkFIFOF;
+    FIFOF#(Tuple3#(DmaReadReq, Bool, Bool)) pendingDmaReadReqQ <- mkFIFOF;
+    // FIFOF#(Bool)              firstDmaReqChunkQ <- mkFIFOF;
+    // FIFOF#(Bool)               lastDmaReqChunkQ <- mkFIFOF;
 
-    let addrChunkSrv <- mkAddrChunkSrv(clearAll); // cntrlStatus.comm.isReset);
+    let clearAll = cntrlStatus.comm.isReset;
+    let addrChunkSrv <- mkAddrChunkSrv(clearAll, cntrlStatus.isSQ);
 
-    Reg#(Bool) gracefulStopReg <- mkReg(False);
-    Reg#(Bool)       cancelReg <- mkReg(False);
+    Reg#(Bool) gracefulStopReg[2] <- mkCReg(2, False);
+    Reg#(Bool)       cancelReg[2] <- mkCReg(2, False);
 
     rule resetAndClear if (clearAll); // if (cntrlStatus.comm.isReset);
         reqQ.clear;
@@ -166,15 +183,57 @@ module mkDmaReadCntrl2#(
 
         pendingDmaCntrlReqQ.clear;
         pendingDmaReadReqQ.clear;
-        firstDmaReqChunkQ.clear;
-        lastDmaReqChunkQ.clear;
+        // firstDmaReqChunkQ.clear;
+        // lastDmaReqChunkQ.clear;
 
-        cancelReg       <= False;
-        gracefulStopReg <= False;
+        cancelReg[1]       <= False;
+        gracefulStopReg[1] <= False;
     endrule
 
+    // rule debugNotFull if (!(
+    //     reqQ.notFull                &&
+    //     respQ.notFull               &&
+    //     pendingDmaCntrlReqQ.notFull &&
+    //     pendingDmaReadReqQ.notFull
+    //     // firstDmaReqChunkQ.notFull   &&
+    //     // lastDmaReqChunkQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkDmaReadCntrl debugNotFull", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", reqQ.notEmpty=", fshow(reqQ.notEmpty),
+    //         ", respQ.notFull=", fshow(respQ.notFull),
+    //         ", pendingDmaCntrlReqQ.notFull=", fshow(pendingDmaCntrlReqQ.notFull),
+    //         ", pendingDmaReadReqQ.notFull=", fshow(pendingDmaReadReqQ.notFull)
+    //         // ", firstDmaReqChunkQ.notFull=", fshow(firstDmaReqChunkQ.notFull),
+    //         // ", lastDmaReqChunkQ.notFull=", fshow(lastDmaReqChunkQ.notFull)
+    //     );
+    // endrule
+
+    // rule debugNotEmpty if (!(
+    //     reqQ.notEmpty &&
+    //     respQ.notEmpty  &&
+    //     pendingDmaCntrlReqQ.notEmpty &&
+    //     pendingDmaReadReqQ.notEmpty
+    //     // firstDmaReqChunkQ.notEmpty &&
+    //     // lastDmaReqChunkQ.notEmpty
+    // ));
+    //     $display(
+    //         "time=%0t: mkDmaReadCntrl debugNotEmpty", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", reqQ.notEmpty=", fshow(reqQ.notEmpty),
+    //         ", respQ.notEmpty=", fshow(respQ.notEmpty),
+    //         ", pendingDmaCntrlReqQ.notEmpty=", fshow(pendingDmaCntrlReqQ.notEmpty),
+    //         ", pendingDmaReadReqQ.notEmpty=", fshow(pendingDmaReadReqQ.notEmpty)
+    //         // ", firstDmaReqChunkQ.notEmpty=", fshow(firstDmaReqChunkQ.notEmpty),
+    //         // ", lastDmaReqChunkQ.notEmpty=", fshow(lastDmaReqChunkQ.notEmpty)
+    //     );
+    // endrule
+
     rule recvReq if (
-        !clearAll && !cancelReg
+        !clearAll && !cancelReg[1]
         // (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR) && !cancelReg
     );
         let dmaReadCntrlReq = reqQ.first;
@@ -187,10 +246,17 @@ module mkDmaReadCntrl2#(
             pmtu     : dmaReadCntrlReq.pmtu
         };
         addrChunkSrv.srvPort.request.put(addrChunkReq);
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl recvReq", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", dmaReadCntrlReq=", fshow(dmaReadCntrlReq),
+        //     ", addrChunkReq=", fshow(addrChunkReq)
+        // );
     endrule
 
     rule issueDmaReq if (
-        !clearAll && !cancelReg
+        !clearAll && !cancelReg[1]
         // (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR) && !cancelReg
     );
         let addrChunkResp <- addrChunkSrv.srvPort.response.get;
@@ -202,26 +268,38 @@ module mkDmaReadCntrl2#(
         dmaReadReq.len       = zeroExtend(addrChunkResp.dmaLen);
 
         dmaReadSrv.request.put(dmaReadReq);
-        pendingDmaReadReqQ.enq(dmaReadReq);
 
         let isFirstDmaReqChunk = addrChunkResp.isFirst;
-        firstDmaReqChunkQ.enq(isFirstDmaReqChunk);
         let isLastDmaReqChunk = addrChunkResp.isLast;
-        lastDmaReqChunkQ.enq(isLastDmaReqChunk);
+        pendingDmaReadReqQ.enq(tuple3(
+            dmaReadReq, isFirstDmaReqChunk, isLastDmaReqChunk
+        ));
+        // firstDmaReqChunkQ.enq(isFirstDmaReqChunk);
+        // lastDmaReqChunkQ.enq(isLastDmaReqChunk);
+        // pendingDmaReadReqQ.enq(dmaReadReq);
 
         if (isLastDmaReqChunk) begin
             pendingDmaCntrlReqQ.deq;
         end
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl issueDmaReq", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", pendingDmaReadCntrlReq=", fshow(pendingDmaReadCntrlReq),
+        //     ", addrChunkResp=", fshow(addrChunkResp),
+        //     ", dmaReadReq=", fshow(dmaReadReq)
+        // );
     endrule
 
     rule recvDmaResp if (!clearAll); // if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
         let dmaResp <- dmaReadSrv.response.get;
 
-        let isFirstDmaReqChunk = firstDmaReqChunkQ.first;
-        let isOrigFirst = dmaResp.dataStream.isFirst && isFirstDmaReqChunk;
+        let { dmaReadReq, isFirstDmaReqChunk, isLastDmaReqChunk } = pendingDmaReadReqQ.first;
+        // let isFirstDmaReqChunk = firstDmaReqChunkQ.first;
+        // let isLastDmaReqChunk = lastDmaReqChunkQ.first;
 
-        let isLastDmaReqChunk = lastDmaReqChunkQ.first;
-        let isOrigLast = dmaResp.dataStream.isLast && isLastDmaReqChunk;
+        let isOrigFirst = dmaResp.dataStream.isFirst && isFirstDmaReqChunk;
+        let isOrigLast  = dmaResp.dataStream.isLast && isLastDmaReqChunk;
 
         let dmaReadCntrlResp = DmaReadCntrlResp {
             dmaReadResp: dmaResp,
@@ -232,22 +310,34 @@ module mkDmaReadCntrl2#(
 
         if (dmaResp.dataStream.isLast) begin
             pendingDmaReadReqQ.deq;
-            firstDmaReqChunkQ.deq;
-            lastDmaReqChunkQ.deq;
+            // firstDmaReqChunkQ.deq;
+            // lastDmaReqChunkQ.deq;
         end
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl recvDmaResp", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", wrID=%h", dmaResp.wrID,
+        //     ", isFirst=", fshow(dmaResp.dataStream.isFirst),
+        //     ", isLast=", fshow(dmaResp.dataStream.isLast),
+        //     ", isFirstDmaReqChunk=", fshow(isFirstDmaReqChunk),
+        //     ", isLastDmaReqChunk=", fshow(isLastDmaReqChunk),
+        //     ", isOrigFirst=", fshow(isOrigFirst),
+        //     ", isOrigLast=", fshow(isOrigLast)
+        // );
     endrule
 
-    rule wait4GracefulStop if (
-        cancelReg                    &&
-        !gracefulStopReg             &&
+    rule setGracefulStop if (
+        cancelReg[1]                 &&
+        !gracefulStopReg[1]          &&
         !respQ.notEmpty              &&
         !pendingDmaReadReqQ.notEmpty &&
         !clearAll
         // (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR)
     );
-        gracefulStopReg <= True;
+        gracefulStopReg[1] <= True;
         // $display(
-        //     "time=%0t: DmaReadCntrl cancel read done", $time,
+        //     "time=%0t: mkDmaReadCntrl cancel read done", $time,
         //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
         //     ", isSQ=", fshow(cntrlStatus.isSQ)
         // );
@@ -256,15 +346,15 @@ module mkDmaReadCntrl2#(
     interface srvPort = toGPServer(reqQ, respQ);
 
     interface dmaCntrl = interface DmaCntrl;
-        method Action cancel() if (!clearAll); // if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
-            cancelReg       <= True;
-            gracefulStopReg <= False;
+        method Action cancel(); // if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);
+            cancelReg[0]       <= True;
+            gracefulStopReg[0] <= False;
         endmethod
 
-        method Bool isIdle() = gracefulStopReg;
+        method Bool isIdle() = gracefulStopReg[0];
     endinterface;
 endmodule
-
+/*
 interface DmaReadCntrl;
     interface DmaReadSrv srvPort;
     interface DmaCntrl dmaCntrl;
@@ -340,7 +430,7 @@ module mkDmaReadCntrl#(
         method Bool isIdle() = !busyReg && !dmaReqQ.notEmpty && !dmaRespQ.notEmpty;
     endinterface;
 endmodule
-
+*/
 interface DmaWriteCntrl;
     interface DmaWriteSrv srvPort;
     interface DmaCntrl dmaCntrl;
@@ -432,7 +522,7 @@ endmodule
 interface BramPipe#(type anytype);
     interface PipeOut#(anytype) pipeOut;
     method Action clear();
-    // method Bool notEmpty();
+    method Bool notEmpty();
 endinterface
 
 module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
@@ -442,12 +532,11 @@ module mkConnectBramQ2PipeOut#(FIFOF#(anytype) bramQ)(
 
     mkConnection(toPut(postBramQ), toGet(bramQ));
 
-    // return toPipeOut(postBramQ);
     interface pipeOut = toPipeOut(postBramQ);
     method Action clear();
         postBramQ.clear;
     endmethod
-    // method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
+    method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
 endmodule
 
 module mkConnectPipeOut2BramQ#(
@@ -458,12 +547,11 @@ module mkConnectPipeOut2BramQ#(
     mkConnection(toPut(bramQ), toGet(pipeIn));
     mkConnection(toPut(postBramQ), toGet(bramQ));
 
-    // return toPipeOut(postBramQ);
     interface pipeOut = toPipeOut(postBramQ);
     method Action clear();
         postBramQ.clear;
     endmethod
-    // method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
+    method Bool notEmpty() = bramQ.notEmpty && postBramQ.notEmpty;
 endmodule
 
 function Bool isDiscardPayload(PayloadConInfo payloadConInfo);
@@ -483,13 +571,14 @@ typedef enum {
 interface PayloadGenerator;
     interface Server#(PayloadGenReq, PayloadGenResp) srvPort;
     interface DataStreamPipeOut payloadDataStreamPipeOut;
+    method Bool payloadNotEmpty();
 endinterface
 
 // As for segmented payload DataStream, each PayloadGenResp is sent
 // at the last fragment of the segmented payload DataStream.
-module mkPayloadGenerator2#(
+module mkPayloadGenerator#(
     CntrlStatus cntrlStatus,
-    DmaReadCntrl2 dmaReadCntrl
+    DmaReadCntrl dmaReadCntrl
 )(PayloadGenerator);
     FIFOF#(PayloadGenReq)   payloadGenReqQ <- mkFIFOF;
     FIFOF#(PayloadGenResp) payloadGenRespQ <- mkFIFOF;
@@ -530,47 +619,47 @@ module mkPayloadGenerator2#(
         //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
         // );
     endrule
-/*
-    rule debugNotFull if (!(
-        payloadGenRespQ.notFull &&
-        pendingGenReqQ.notFull  &&
-        pendingGenRespQ.notFull &&
-        payloadSegmentQ.notFull &&
-        payloadBufQ.notFull
-    ));
-        $display(
-            "time=%0t: mkPayloadGenerator debugNotFull", $time,
-            ", qpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
-            ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
-            ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
-            ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
-            ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
-        );
-    endrule
 
-    rule debugNotEmpty if (!(
-        payloadGenRespQ.notEmpty &&
-        pendingGenReqQ.notEmpty  &&
-        pendingGenRespQ.notEmpty &&
-        payloadSegmentQ.notEmpty &&
-        payloadBufQ.notEmpty
-    ));
-        $display(
-            "time=%0t: mkPayloadGenerator debugNotEmpty", $time,
-            ", qpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            ", payloadGenRespQ.notEmpty=", fshow(payloadGenRespQ.notEmpty),
-            ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty),
-            ", pendingGenRespQ.notEmpty=", fshow(pendingGenRespQ.notEmpty),
-            ", payloadSegmentQ.notEmpty=", fshow(payloadSegmentQ.notEmpty),
-            ", payloadBufQ.notEmpty=", fshow(payloadBufQ.notEmpty)
-        );
-    endrule
-*/
+    // rule debugNotFull if (!(
+    //     payloadGenRespQ.notFull &&
+    //     pendingGenReqQ.notFull  &&
+    //     // pendingGenRespQ.notFull &&
+    //     // payloadSegmentQ.notFull &&
+    //     payloadBufQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debugNotFull", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+    //         ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+    //         // ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+    //         // ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+    //         ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+    //     );
+    // endrule
+
+    // rule debugNotEmpty if (!(
+    //     payloadGenRespQ.notEmpty &&
+    //     pendingGenReqQ.notEmpty  &&
+    //     // pendingGenRespQ.notEmpty &&
+    //     // payloadSegmentQ.notEmpty &&
+    //     payloadBufQ.notEmpty
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debugNotEmpty", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notEmpty=", fshow(payloadGenRespQ.notEmpty),
+    //         ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty),
+    //         // ", pendingGenRespQ.notEmpty=", fshow(pendingGenRespQ.notEmpty),
+    //         // ", payloadSegmentQ.notEmpty=", fshow(payloadSegmentQ.notEmpty),
+    //         ", payloadBufQ.notEmpty=", fshow(payloadBufQ.notEmpty)
+    //     );
+    // endrule
+
     rule recvPayloadGenReq if (cntrlStatus.comm.isNonErr && isNormalStateReg);
         let payloadGenReq = payloadGenReqQ.first;
         payloadGenReqQ.deq;
@@ -608,7 +697,11 @@ module mkPayloadGenerator2#(
         };
         dmaReadCntrl.srvPort.request.put(dmaReadCntrlReq);
         // $display(
-        //     "time=%0t: recvPayloadGenReq, payloadGenReq=", $time, fshow(payloadGenReq)
+        //     "time=%0t: PayloadGenerator recvPayloadGenReq", $time,
+        //     ", qpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", payloadGenReq=", fshow(payloadGenReq),
+        //     ", dmaReadCntrlReq=", fshow(dmaReadCntrlReq)
         // );
     endrule
 
@@ -643,27 +736,31 @@ module mkPayloadGenerator2#(
             };
 
             payloadGenRespQ.enq(payloadGenResp);
-            // $display("time=%0t: payloadGenResp=", $time, fshow(payloadGenResp));
+            $display(
+                "time=%0t: lastFragAddPadding", $time,
+                ", payloadGenResp=", fshow(payloadGenResp)
+            );
         end
 
         // payloadSegmentQ.enq(tuple3(curData, dmaReadResp.isRespErr, isOrigLastFrag));
         payloadBufQ.enq(curData);
-        // $display(
-        //     "time=%0t: lastFragAddPadding", $time,
-        //     ", qpn=%h", cntrlStatus.comm.getSQPN,
-        //     ", isSQ=", fshow(cntrlStatus.isSQ),
-        //     ", payloadGenReq.addPadding=", fshow(payloadGenReq.addPadding),
-        //     ", isOrigFirstFrag=", fshow(isOrigFirstFrag),
-        //     ", isOrigLastFrag=", fshow(isOrigLastFrag),
-        //     ", hasDmaRespErr=", fshow(hasDmaRespErr),
-        //     ", dmaReadResp=", fshow(dmaReadResp)
-        // );
+        $display(
+            "time=%0t: PayloadGenerator lastFragAddPadding", $time,
+            ", qpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
+            ", payloadGenReq.addPadding=", fshow(payloadGenReq.addPadding),
+            ", isOrigFirstFrag=", fshow(isOrigFirstFrag),
+            ", isOrigLastFrag=", fshow(isOrigLastFrag),
+            ", hasDmaRespErr=", fshow(hasDmaRespErr),
+            ", dmaReadCntrlResp=", fshow(dmaReadCntrlResp)
+        );
     endrule
 
     interface srvPort = toGPServer(payloadGenReqQ, payloadGenRespQ);
     interface payloadDataStreamPipeOut = payloadBufPipeOut;
+    method Bool payloadNotEmpty() = bramQ2PipeOut.notEmpty;
 endmodule
-
+/*
 // If segment payload DataStream, then PayloadGenResp is sent
 // at the last fragment of the segmented payload DataStream.
 // If not segment, then PayloadGenResp is sent at the first
@@ -715,47 +812,47 @@ module mkPayloadGenerator#(
         //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
         // );
     endrule
-/*
-    rule debugNotFull if (!(
-        payloadGenRespQ.notFull &&
-        pendingGenReqQ.notFull  &&
-        pendingGenRespQ.notFull &&
-        payloadSegmentQ.notFull &&
-        payloadBufQ.notFull
-    ));
-        $display(
-            "time=%0t: mkPayloadGenerator debugNotFull", $time,
-            ", qpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
-            ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
-            ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
-            ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
-            ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
-        );
-    endrule
 
-    rule debugNotEmpty if (!(
-        payloadGenRespQ.notEmpty &&
-        pendingGenReqQ.notEmpty  &&
-        pendingGenRespQ.notEmpty &&
-        payloadSegmentQ.notEmpty &&
-        payloadBufQ.notEmpty
-    ));
-        $display(
-            "time=%0t: mkPayloadGenerator debugNotEmpty", $time,
-            ", qpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
-            ", payloadGenRespQ.notEmpty=", fshow(payloadGenRespQ.notEmpty),
-            ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty),
-            ", pendingGenRespQ.notEmpty=", fshow(pendingGenRespQ.notEmpty),
-            ", payloadSegmentQ.notEmpty=", fshow(payloadSegmentQ.notEmpty),
-            ", payloadBufQ.notEmpty=", fshow(payloadBufQ.notEmpty)
-        );
-    endrule
-*/
+    // rule debugNotFull if (!(
+    //     payloadGenRespQ.notFull &&
+    //     pendingGenReqQ.notFull  &&
+    //     pendingGenRespQ.notFull &&
+    //     payloadSegmentQ.notFull &&
+    //     payloadBufQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debugNotFull", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notFull=", fshow(payloadGenRespQ.notFull),
+    //         ", pendingGenReqQ.notFull=", fshow(pendingGenReqQ.notFull),
+    //         ", pendingGenRespQ.notFull=", fshow(pendingGenRespQ.notFull),
+    //         ", payloadSegmentQ.notFull=", fshow(payloadSegmentQ.notFull),
+    //         ", payloadBufQ.notFull=", fshow(payloadBufQ.notFull)
+    //     );
+    // endrule
+
+    // rule debugNotEmpty if (!(
+    //     payloadGenRespQ.notEmpty &&
+    //     pendingGenReqQ.notEmpty  &&
+    //     pendingGenRespQ.notEmpty &&
+    //     payloadSegmentQ.notEmpty &&
+    //     payloadBufQ.notEmpty
+    // ));
+    //     $display(
+    //         "time=%0t: mkPayloadGenerator debugNotEmpty", $time,
+    //         ", qpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", payloadGenReqQ.notEmpty=", fshow(payloadGenReqQ.notEmpty),
+    //         ", payloadGenRespQ.notEmpty=", fshow(payloadGenRespQ.notEmpty),
+    //         ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty),
+    //         ", pendingGenRespQ.notEmpty=", fshow(pendingGenRespQ.notEmpty),
+    //         ", payloadSegmentQ.notEmpty=", fshow(payloadSegmentQ.notEmpty),
+    //         ", payloadBufQ.notEmpty=", fshow(payloadBufQ.notEmpty)
+    //     );
+    // endrule
+
     rule recvPayloadGenReq if (cntrlStatus.comm.isNonErr && isNormalStateReg);
         let payloadGenReq = payloadGenReqQ.first;
         payloadGenReqQ.deq;
@@ -926,7 +1023,7 @@ module mkPayloadGenerator#(
     //     cancelReg[0] <= True;
     // end
 endmodule
-
+*/
 typedef Server#(PayloadConReq, PayloadConResp) PayloadConsumer;
 
 // Flush DMA write responses when error
@@ -1046,12 +1143,12 @@ module mkPayloadConsumer#(
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
         countReqFragQ.enq(tuple3(consumeReq, isFragNumLessOrEqOne, isDiscardReq));
-        // $display(
-        //     "time=%0t: PayloadConsumer recvReq", $time,
-        //     ", qpn=%h", cntrlStatus.comm.getSQPN,
-        //     ", isSQ=", fshow(cntrlStatus.isSQ),
-        //     ", consumeReq=", fshow(consumeReq)
-        // );
+        $display(
+            "time=%0t: PayloadConsumer recvReq", $time,
+            ", qpn=%h", cntrlStatus.comm.getSQPN,
+            ", isSQ=", fshow(cntrlStatus.isSQ),
+            ", consumeReq=", fshow(consumeReq)
+        );
     endrule
 
     rule countReqFrag if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);

@@ -513,19 +513,6 @@ module mkReqHandleRQ#(
     let cntrlStatus = contextRQ.statusRQ;
 
     let atomicSrv <- mkAtomicSrv(cntrlStatus);
-    // let payloadGenerator <- mkPayloadGenerator(
-    //     cntrlStatus, dmaReadSrv, toPipeOut(payloadGenReqOutQ)
-    // );
-    // let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
-    //     cntrlStatus.comm.isReset,
-    //     toPipeOut(respHeaderOutQ)
-    // );
-    // let rdmaRespPipeOut <- mkPrependHeader2PipeOut(
-    //     cntrlStatus.comm.isReset,
-    //     headerDataStreamAndMetaDataPipeOut.headerDataStream,
-    //     headerDataStreamAndMetaDataPipeOut.headerMetaData,
-    //     payloadGenerator.payloadDataStreamPipeOut
-    // );
     let rdmaRespPipeOut <- mkCombineHeaderAndPayload(
         cntrlStatus,
         toPipeOut(respHeaderOutQ),
@@ -693,13 +680,15 @@ module mkReqHandleRQ#(
         preStagePktMetaDataReg <= curPktMetaData;
         preStageReqPktInfoReg  <= reqPktInfo;
         preStageStateReg       <= RQ_PRE_CALC_STAGE;
-        // $display(
-        //     "time=%0t: 0.1st pre-stage preBuildReqInfo", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, ePSN=%h, epoch=%h", bth.psn, bth.dqpn, expectedPSN, epoch,
-        //     // ", reqStatus=", fshow(reqStatus),
-        //     ", preStageStateReg=", fshow(preStageStateReg)
-        // );
+        $display(
+            "time=%0t: 0.1st pre-stage preBuildReqInfo", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.trans=", fshow(bth.trans),
+            ", bth.psn=%h, bth.dqpn=%h, reth.dlen=%0d", bth.psn, bth.dqpn, reth.dlen,
+            ", ePSN=%h, epoch=%h", expectedPSN, epoch,
+            ", curPktMetaData.pktStatus=", fshow(curPktMetaData.pktStatus),
+            ", preStageStateReg=", fshow(preStageStateReg)
+        );
     endrule
 
     rule preCalcReqInfo if (
@@ -719,7 +708,7 @@ module mkReqHandleRQ#(
 
         // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         let totalRespPktNum = preStageIsZeroPmtuResidueReg ? reqPktInfo.respPktNum : reqPktInfo.respPktNum + 1;
-        let isOnlyRespPkt = isLessOrEqOneR(reqPktInfo.respPktNum);
+        let isOnlyRespPkt = isLessOrEqOneR(totalRespPktNum);
         reqPktInfo.isOnlyRespPkt = reqPktInfo.isReadReq ? isOnlyRespPkt : True;
         reqPktInfo.respPktNum = reqPktInfo.isReadReq ? totalRespPktNum : 1;
 
@@ -778,13 +767,15 @@ module mkReqHandleRQ#(
         preStageReqStatusReg  <= reqStatus;
         preStageReqPktInfoReg <= reqPktInfo;
         preStageStateReg      <= RQ_PRE_STAGE_DONE;
-        // $display(
-        //     "time=%0t: 0.2nd pre-stage preCalcReqInfo", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h", bth.psn, bth.dqpn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", preStageStateReg=", fshow(preStageStateReg)
-        // );
+        $display(
+            "time=%0t: 0.2nd pre-stage preCalcReqInfo", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h", bth.psn, bth.dqpn,
+            ", totalRespPktNum=%0d", totalRespPktNum,
+            ", isOnlyRespPkt=", fshow(isOnlyRespPkt),
+            ", reqStatus=", fshow(reqStatus),
+            ", preStageStateReg=", fshow(preStageStateReg)
+        );
     endrule
 
                         // errFlushPipelineQ, \, \
@@ -894,12 +885,15 @@ module mkReqHandleRQ#(
         contextRQ.setEPSN(nextEPSN);
 
         supportedReqOpCodeCheckQ.enq(tuple4(curPktMetaData, reqStatus, reqPktInfo, curEPSN));
-        // $display(
-        //     "time=%0t: 1st stage checkEPSN", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 1st stage checkEPSN", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h", bth.psn, bth.dqpn,
+            ", epoch=%h, nextEPSN=%h", epoch, nextEPSN,
+            ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
+            ", isReadReq=", fshow(isReadReq),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry state
@@ -947,13 +941,13 @@ module mkReqHandleRQ#(
 
         // qpAccPermCheckQ.enq(tuple3(pktMetaData, reqStatus, reqPktInfo));
         reqOpCodeSeqCheckQ.enq(tuple3(pktMetaData, reqStatus, reqPktInfo));
-        // $display(
-        //     "time=%0t: 2nd stage checkSupportedReqOpCode", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
-        //     ", isSupportedReqOpCode=", fshow(isSupportedReqOpCode),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 2nd stage checkSupportedReqOpCode", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
+            ", isSupportedReqOpCode=", fshow(isSupportedReqOpCode),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry state
@@ -994,13 +988,13 @@ module mkReqHandleRQ#(
         end
 
         rnrCheckQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, preOpCode));
-        // $display(
-        //     "time=%0t: 3rd stage checkNormalReqOpCodeSeq", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
-        //     ", preOpCode=", fshow(preOpCode),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 3rd stage checkNormalReqOpCodeSeq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
+            ", preOpCode=", fshow(preOpCode),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry state
@@ -1089,13 +1083,13 @@ module mkReqHandleRQ#(
         rnrTriggerQ.enq(tuple5(
             pktMetaData, reqStatus, reqPktInfo, preOpCode, maybeRecvReq
         ));
-        // $display(
-        //     "time=%0t: 4th stage checkRNR", $time,
-        //     ", maybeRecvReq=", fshow(maybeRecvReq),
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 4th stage checkRNR", $time,
+            ", maybeRecvReq=", fshow(maybeRecvReq),
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1141,12 +1135,12 @@ module mkReqHandleRQ#(
         minRnrTimerReg   <= cntrlStatus.comm.getMinRnrTimer;
         // reqPermInfoBuildQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
         qpAccPermCheckQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
-        // $display(
-        //     "time=%0t: 5th stage triggerRNR", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 5th stage triggerRNR", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1192,14 +1186,14 @@ module mkReqHandleRQ#(
         end
 
         reqPermInfoBuildQ.enq(tuple4(pktMetaData, reqStatus, reqPktInfo, maybeRecvReq));
-        // $display(
-        //     "time=%0t: 6th stage checkQpAccPermAndReadAtomicReqNum", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     // ", isAccCheckPass=", fshow(isAccCheckPass),
-        //     ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 6th stage checkQpAccPermAndReadAtomicReqNum", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            // ", isAccCheckPass=", fshow(isAccCheckPass),
+            ", hasTooManyReadAtomicReqs=", fshow(hasTooManyReadAtomicReqs),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1434,13 +1428,13 @@ module mkReqHandleRQ#(
         reqPermQueryQ.enq(tuple5(
             pktMetaData, reqStatus, curPermCheckReq, reqPktInfo, reth
         ));
-        // $display(
-        //     "time=%0t: 7th stage buildPermCheckReq", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", curPermCheckReq=", fshow(curPermCheckReq)
-        // );
+        $display(
+            "time=%0t: 7th stage buildPermCheckReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", curPermCheckReq=", fshow(curPermCheckReq)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1464,12 +1458,12 @@ module mkReqHandleRQ#(
         reqPermCheckQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth, expectPermCheckResp
         ));
-        // $display(
-        //     "time=%0t: 8th stage queryPerm4NormalReq", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 8th stage queryPerm4NormalReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1537,12 +1531,12 @@ module mkReqHandleRQ#(
         readCacheInsertQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth
         ));
-        // $display(
-        //     "time=%0t: 9th stage checkPerm4NormalReq", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 9th stage checkPerm4NormalReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1571,12 +1565,12 @@ module mkReqHandleRQ#(
         dupReadReqPermQueryQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth
         ));
-        // $display(
-        //     "time=%0t: 10th stage insertIntoReadCache", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 10th stage insertIntoReadCache", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1607,12 +1601,12 @@ module mkReqHandleRQ#(
         dupReadReqPermCheckQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth, expectDupReadCheckResp
         ));
-        // $display(
-        //     "time=%0t: 11th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 11th stage queryPerm4DupReadReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1674,12 +1668,12 @@ module mkReqHandleRQ#(
         reqAddrCalcQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState
         ));
-        // $display(
-        //     "time=%0t: 12th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 12th stage checkPerm4DupReadReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1752,12 +1746,12 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, dupReadReqStartState, curDmaWriteAddr
         ));
-        // $display(
-        //     "time=%0t: 13th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 13th stage calcNormalSendWriteReqDmaAddr", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1825,12 +1819,12 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
             curDmaWriteAddr, remainingDmaWriteLen, contextRQ.getRemainingDmaWriteLen
         ));
-        // $display(
-        //     "time=%0t: 14th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 14th stage calcNormalSendWriteReqDmaRemainingLen", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1881,12 +1875,12 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState,
             curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpaceCheck
         ));
-        // $display(
-        //     "time=%0t: 15th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 15th stage calcNormalSendWriteReqEnoughDmaSpace", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -1965,12 +1959,12 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, reqLenCheckResult, dupReadReqStartState
         ));
-        // $display(
-        //     "time=%0t: 16th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 16th stage calcNormalSendWriteReqDmaTotalLen", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2034,12 +2028,12 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, curDmaWriteAddr, dupReadReqStartState
         ));
-        // $display(
-        //     "time=%0t: 17th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 17th stage checkReqLen", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2116,13 +2110,13 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             hasReqStatusErr, dupReadReqStartState
         ));
-        // $display(
-        //     "time=%0t: 18th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 18th stage issuePayloadConReqOrDiscard", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2157,6 +2151,10 @@ module mkReqHandleRQ#(
 
                 payloadGenerator.srvPort.request.put(payloadGenReq);
                 expectReadRespPayload = True;
+                $display(
+                    "time=%0t: 19th stage issuePayloadGenReq", $time,
+                    ", payloadGenReq=", fshow(payloadGenReq)
+                );
             end
         end
 
@@ -2174,18 +2172,18 @@ module mkReqHandleRQ#(
         issueAtomicReqQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
-        // $display(
-        //     "time=%0t: 19th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", isZeroDmaLen=", fshow(isZeroDmaLen),
-        //     ", expectReadRespPayload=", fshow(expectReadRespPayload),
-        //     // ", expectAtomicRespOrig=", fshow(expectAtomicRespOrig),
-        //     ", hasErrHappened=", fshow(hasErrHappened),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", hasDmaReadRespErrReg=", fshow(hasDmaReadRespErrReg)
-        // );
+        $display(
+            "time=%0t: 19th stage issuePayloadGenReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", isZeroDmaLen=", fshow(isZeroDmaLen),
+            ", expectReadRespPayload=", fshow(expectReadRespPayload),
+            // ", expectAtomicRespOrig=", fshow(expectAtomicRespOrig),
+            ", hasErrHappened=", fshow(hasErrHappened),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", hasDmaReadRespErrReg=", fshow(hasDmaReadRespErrReg)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2224,16 +2222,16 @@ module mkReqHandleRQ#(
         respGenCheck4NormalCaseQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
-        // $display(
-        //     "time=%0t: 20th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", expectAtomicRespOrig=", fshow(expectAtomicRespOrig),
-        //     // ", hasErrHappened=", fshow(hasErrHappened),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", hasDmaReadRespErrReg=", fshow(hasDmaReadRespErrReg)
-        // );
+        $display(
+            "time=%0t: 20th stage issueAtomicReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", expectAtomicRespOrig=", fshow(expectAtomicRespOrig),
+            // ", hasErrHappened=", fshow(hasErrHappened),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", hasDmaReadRespErrReg=", fshow(hasDmaReadRespErrReg)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2324,15 +2322,15 @@ module mkReqHandleRQ#(
         respGenCheck4OtherCasesQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
-        // $display(
-        //     "time=%0t: 21st stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     // ", shouldDiscard=", fshow(shouldDiscard),
-        //     ", shouldGenResp=", fshow(shouldGenResp),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 21st stage shouldGenResp4NormalCase", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            // ", shouldDiscard=", fshow(shouldDiscard),
+            ", shouldGenResp=", fshow(shouldGenResp),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2414,15 +2412,15 @@ module mkReqHandleRQ#(
         respCountQ.enq(tuple5(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
-        // $display(
-        //     "time=%0t: 22nd stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", shouldDiscard=", fshow(shouldDiscard),
-        //     ", shouldGenResp=", fshow(shouldGenResp),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 22nd stage shouldGenResp4OtherCases", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            ", shouldDiscard=", fshow(shouldDiscard),
+            ", shouldGenResp=", fshow(shouldGenResp),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2442,8 +2440,14 @@ module mkReqHandleRQ#(
         // If hasErrRespGenReg, no need to count response packets
         isFirstOrOnlyRespPktReg <= isLastOrOnlyRespPkt || hasErrRespGenReg;
 
-        if (hasErrRespGenReg) begin
+        if (
+            !(reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP) ||
+            hasErrRespGenReg
+        ) begin
             // No responses after error response
+            // Error responses have single packet
+            isFirstOrOnlyRespPkt = True;
+            isLastOrOnlyRespPkt  = True;
             respCountQ.deq;
         end
         else begin
@@ -2474,21 +2478,21 @@ module mkReqHandleRQ#(
         respPsnAndMsnQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktSeqInfo
         ));
-        // $display(
-        //     "time=%0t: 23rd stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-        //     // ", isFirstOrOnlyRespPktReg=", fshow(isFirstOrOnlyRespPktReg),
-        //     ", isFirstOrOnlyRespPkt=", fshow(isFirstOrOnlyRespPkt),
-        //     ", isLastOrOnlyRespPkt=", fshow(isLastOrOnlyRespPkt),
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
-        //     ", remainingRespPktNum=%0d", remainingRespPktNum,
-        //     ", respPktSeqInfo=", fshow(respPktSeqInfo)
-        // );
+        $display(
+            "time=%0t: 23rd stage countPendingResp", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
+            // ", isFirstOrOnlyRespPktReg=", fshow(isFirstOrOnlyRespPktReg),
+            ", isFirstOrOnlyRespPkt=", fshow(isFirstOrOnlyRespPkt),
+            ", isLastOrOnlyRespPkt=", fshow(isLastOrOnlyRespPkt),
+            ", reqStatus=", fshow(reqStatus),
+            ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
+            ", remainingRespPktNum=%0d", remainingRespPktNum,
+            ", respPktSeqInfo=", fshow(respPktSeqInfo)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2545,22 +2549,22 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 24th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPSN,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
-        //     ", isFirstOrOnlyRespPkt=", fshow(isFirstOrOnlyRespPkt),
-        //     ", isLastOrOnlyRespPkt=", fshow(isLastOrOnlyRespPkt),
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
-        //     // ", remainingRespPktNum=%0d", remainingRespPktNum,
-        //     ", respPktHeaderInfo=", fshow(respPktHeaderInfo)
-        // );
+        $display(
+            "time=%0t: 24th stage updateRespPsnAndMsn", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPSN,
+            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", hasErrRespGenReg=", fshow(hasErrRespGenReg),
+            ", isFirstOrOnlyRespPkt=", fshow(isFirstOrOnlyRespPkt),
+            ", isLastOrOnlyRespPkt=", fshow(isLastOrOnlyRespPkt),
+            ", reqStatus=", fshow(reqStatus),
+            ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
+            // ", remainingRespPktNum=%0d", remainingRespPktNum,
+            ", respPktHeaderInfo=", fshow(respPktHeaderInfo)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2606,15 +2610,15 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq,
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 25th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", expectAtomicRespOrig=", fshow(respPktGenInfo.expectAtomicRespOrig),
-        //     ", isAtomicReq=", fshow(isAtomicReq),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 25th stage waitAtomicResp", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", expectAtomicRespOrig=", fshow(respPktGenInfo.expectAtomicRespOrig),
+            ", isAtomicReq=", fshow(isAtomicReq),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2677,13 +2681,13 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, atomicEth
         ));
-        // $display(
-        //     "time=%0t: 26th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 26th stage insertIntoAtomicCache", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2749,8 +2753,6 @@ module mkReqHandleRQ#(
                 );
 
                 let payloadGenResp <- payloadGenerator.srvPort.response.get;
-                // let payloadGenResp = payloadGenerator.respPipeOut.first;
-                // payloadGenerator.respPipeOut.deq;
 
                 if (payloadGenResp.isRespErr) begin
                     hasDmaReadRespErr     = True;
@@ -2771,24 +2773,21 @@ module mkReqHandleRQ#(
         // Set hasDmaReadRespErr when DMA read response error occurred
         respPktGenInfo.hasDmaReadRespErr = hasDmaReadRespErr;
 
-        // hasDmaReadRespErrReg <= hasDmaReadRespErr;
-        // readRespErrNotifyReg <= hasDmaReadRespErr;
-
         dupAtomicReqPermQueryQ.enq(tuple7(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, atomicEth
         ));
-        // $display(
-        //     "time=%0t: 27th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", expectReadRespPayload=", fshow(expectReadRespPayload),
-        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 27th stage checkReadResp", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", expectReadRespPayload=", fshow(expectReadRespPayload),
+            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2819,15 +2818,15 @@ module mkReqHandleRQ#(
         dupAtomicReqPermCheckQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 28th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", expectDupAtomicCheckResp=", fshow(expectDupAtomicCheckResp),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr)
-        // );
+        $display(
+            "time=%0t: 28th stage queryPerm4DupAtomicReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", expectDupAtomicCheckResp=", fshow(expectDupAtomicCheckResp),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2874,15 +2873,15 @@ module mkReqHandleRQ#(
         respHeaderGenQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 29th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", reqStatus=", fshow(reqStatus),
-        //     ", expectDupAtomicCheckResp=", fshow(expectDupAtomicCheckResp),
-        //     ", hasReqStatusErr=", fshow(respPktGenInfo.hasReqStatusErr)
-        // );
+        $display(
+            "time=%0t: 29th stage checkPerm4DupAtomicReq", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", reqStatus=", fshow(reqStatus),
+            ", expectDupAtomicCheckResp=", fshow(expectDupAtomicCheckResp),
+            ", hasReqStatusErr=", fshow(respPktGenInfo.hasReqStatusErr)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -2988,18 +2987,18 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, maybeHeader
         ));
-        // $display(
-        //     "time=%0t: 30th stage", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPktHeaderInfo.psn,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", hasErrRespGen=", fshow(hasErrRespGen),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 30th stage genRespHeader", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPktHeaderInfo.psn,
+            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+            ", hasErrRespGen=", fshow(hasErrRespGen),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -3073,7 +3072,7 @@ module mkReqHandleRQ#(
                         ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
                         ", hasErrRespGen=", fshow(hasErrRespGen),
                         ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                        " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                        ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                     )
                 );
             end
@@ -3111,7 +3110,7 @@ module mkReqHandleRQ#(
                     ", hasErrIncurred=", fshow(hasErrIncurred),
                     ", hasErrRespGen=", fshow(hasErrRespGen),
                     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                    " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                    ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                 )
             );
 
@@ -3124,7 +3123,7 @@ module mkReqHandleRQ#(
                     " must be valid when reqStatus=", fshow(reqStatus),
                     ", hasErrRespGen=", fshow(hasErrRespGen),
                     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                    " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                    ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                 )
             );
 
@@ -3158,19 +3157,19 @@ module mkReqHandleRQ#(
         workCompReqQ.enq(tuple6(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
-        // $display(
-        //     "time=%0t: 31st stage genRespPkt", $time,
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPSN,
-        //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
-        //     ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
-        //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-        //     ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
-        //     ", hasErrRespGen=", fshow(hasErrRespGen),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 31st stage genRespPkt", $time,
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPSN,
+            ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
+            ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
+            ", hasReqStatusErr=", fshow(hasReqStatusErr),
+            ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr),
+            ", hasErrRespGen=", fshow(hasErrRespGen),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     // This rule still runs at retry or error state
@@ -3246,18 +3245,18 @@ module mkReqHandleRQ#(
             // Wait for send/write request DMA write responses and generate WC if needed
             workCompGenReqOutQ.enq(workCompReq);
         end
-        // $display(
-        //     "time=%0t: 32nd stage genWorkCompRQ", $time,
-        //     ", rr.id=", fshow(permCheckReq.wrID),
-        //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h", bth.psn,
-        //     ", bth.ackReq=", fshow(bth.ackReq),
-        //     ", respPSN=%h", respPSN,
-        //     ", immDt=%h, ieth=%h", immDt, ieth,
-        //     ", hasImmDt=", fshow(hasImmDt),
-        //     ", hasIETH=", fshow(hasIETH),
-        //     ", reqStatus=", fshow(reqStatus)
-        // );
+        $display(
+            "time=%0t: 32nd stage genWorkCompRQ", $time,
+            ", rr.id=", fshow(permCheckReq.wrID),
+            ", bth.opcode=", fshow(bth.opcode),
+            ", bth.psn=%h", bth.psn,
+            ", bth.ackReq=", fshow(bth.ackReq),
+            ", respPSN=%h", respPSN,
+            ", immDt=%h, ieth=%h", immDt, ieth,
+            ", hasImmDt=", fshow(hasImmDt),
+            ", hasIETH=", fshow(hasIETH),
+            ", reqStatus=", fshow(reqStatus)
+        );
     endrule
 
     (* fire_when_enabled *)

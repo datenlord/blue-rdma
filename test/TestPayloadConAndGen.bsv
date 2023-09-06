@@ -32,7 +32,8 @@ module mkTestAddrChunkSrv(Empty);
     FIFOF#(Length)    totalLenQ <- mkFIFOF;
     Reg#(Bool) clearReg <- mkReg(True);
 
-    let dut <- mkAddrChunkSrv(clearReg);
+    let isSQ = True;
+    let dut <- mkAddrChunkSrv(clearReg, isSQ);
 
     PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
     let totalLenPipeOut <- mkRandomLenPipeOut(minPktLen, maxPktLen);
@@ -156,9 +157,16 @@ module mkTestDmaReadCntrlCancelCase(Empty);
     let result <- mkTestDmaReadCntrlNormalOrCancelCase(normalOrCancelCase);
 endmodule
 
+typedef enum {
+    TEST_DMA_READ_CNTRL_RESET,
+    TEST_DMA_READ_CNTRL_RUN,
+    TEST_DMA_READ_CNTRL_IDLE
+} TestDmaReadCntrlState deriving(Bits, Eq, FShow);
+
 module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     let minPktLen = 2048;
     let maxPktLen = 8192;
+    let qpType = IBV_QPT_XRC_SEND;
     let pmtuVec = vec(
         IBV_MTU_256,
         IBV_MTU_512,
@@ -166,7 +174,10 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         IBV_MTU_2048,
         IBV_MTU_4096
     );
-    Reg#(Bool) clearReg <- mkReg(True);
+    // Reg#(Bool) clearReg <- mkReg(True);
+    let unusedPMTU = IBV_MTU_256;
+    let cntrl <- mkSimCntrlStateCycle(qpType, unusedPMTU);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
 
     Reg#(Bool) canceledReg <- mkReg(False);
     Reg#(TotalFragNum) remainingFragNumReg <- mkReg(0);
@@ -180,21 +191,25 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
 
     let simDmaReadSrv <- mkSimDmaReadSrv;
-    let dut <- mkDmaReadCntrl2(clearReg, simDmaReadSrv);
+    let dut <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
 
+    Reg#(TestDmaReadCntrlState) stateReg <- mkReg(TEST_DMA_READ_CNTRL_RESET);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule clearAll if (clearReg);
-        clearReg <= False;
+    rule clearAll if (stateReg == TEST_DMA_READ_CNTRL_RESET);
+        // clearReg <= False;
         canceledReg <= False;
         remainingFragNumReg <= 0;
         isFinalRespLastFragReg <= False;
         totalFragNumQ.clear;
 
-        $display("time=%0t: clearAll", $time);
+        if (cntrlStatus.comm.isRTS) begin
+            stateReg <= TEST_DMA_READ_CNTRL_RUN;
+            $display("time=%0t: clearAll", $time);
+        end
     endrule
 
-    rule issueReq if (!clearReg);
+    rule issueReq if (stateReg == TEST_DMA_READ_CNTRL_RUN);
         let startAddr = startAddrPipeOut.first;
         startAddrPipeOut.deq;
 
@@ -211,8 +226,8 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
 
         let dmaReadCntrlReq = DmaReadCntrlReq {
             dmaReadReq   : DmaReadReq {
-                initiator: DMA_SRC_SQ_RD,
-                sqpn     : getDefaultQPN,
+                initiator: DMA_SRC_RQ_RD,
+                sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: startAddr,
                 len      : totalLen,
                 wrID     : dontCareValue
@@ -231,7 +246,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         );
     endrule
 
-    rule checkResp if (!clearReg && !dut.dmaCntrl.isIdle);
+    rule checkResp if (stateReg == TEST_DMA_READ_CNTRL_RUN && !dut.dmaCntrl.isIdle);
         let dmaReadCntrlResp <- dut.srvPort.response.get;
         isFinalRespLastFragReg <= dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
 
@@ -272,6 +287,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
             randomCancelPipeOut.deq;
 
             if (shouldCancel && !canceledReg) begin
+                cntrl.setStateErr;
                 dut.dmaCntrl.cancel;
                 canceledReg <= True;
                 $display("time=%0t: dmaCntrl.cancel", $time);
@@ -279,9 +295,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         end
     endrule
 
-    rule waitGracefulStop if (!clearReg && dut.dmaCntrl.isIdle);
-        clearReg <= True;
-
+    rule waitUntilGracefulStop if (stateReg == TEST_DMA_READ_CNTRL_RUN && dut.dmaCntrl.isIdle);
         immAssert(
             isFinalRespLastFragReg,
             "isFinalRespLastFragReg assertion @ mkTestDmaReadCntrlNormalOrCancelCase",
@@ -290,7 +304,15 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
                 " should be true, when dut.dmaCntrl.isIdle=", fshow(dut.dmaCntrl.isIdle)
             )
         );
+
+        cntrl.errFlushDone;
+        stateReg <= TEST_DMA_READ_CNTRL_IDLE;
         $display("time=%0t: dmaCntrl.isIdle", $time);
+    endrule
+
+    rule loop if (stateReg == TEST_DMA_READ_CNTRL_IDLE);
+        // clearReg <= True;
+        stateReg <= TEST_DMA_READ_CNTRL_RESET;
     endrule
 endmodule
 
@@ -300,8 +322,7 @@ typedef enum {
     TEST_DMA_CNTRL_CANCEL,
     TEST_DMA_CNTRL_WAIT_IDLE
 } TestDmaCntrlState deriving(Bits, Eq, FShow);
-
-(* doc = "testcase" *)
+/*
 module mkTestDmaReadCntrl(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
@@ -350,7 +371,7 @@ module mkTestDmaReadCntrl(Empty);
         countDown.decr;
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
 module mkTestDmaWriteCntrl(Empty);
     let minPktLen = 2048;
@@ -426,8 +447,7 @@ module mkTestDmaWriteCntrl(Empty);
         countDown.decr;
     endrule
 endmodule
-
-(* doc = "testcase" *)
+/*
 module mkTestPayloadConAndGenNormalCase(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
@@ -592,7 +612,6 @@ module mkTestPayloadConAndGenNormalCase(Empty);
     endrule
 endmodule
 
-(* doc = "testcase" *)
 module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
@@ -687,9 +706,9 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         // );
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
-module mkTestPayloadConAndGenNormalCase2(Empty);
+module mkTestPayloadConAndGenNormalCase(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
     let qpType = IBV_QPT_XRC_SEND;
@@ -708,12 +727,11 @@ module mkTestPayloadConAndGenNormalCase2(Empty);
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     let simDmaReadSrvDataStreamPipeOut <- mkBufferN(2, simDmaReadSrv.dataStream);
 
-    let dmaReadCntrl <- mkDmaReadCntrl2(
-        cntrlStatus.comm.isReset, simDmaReadSrv.dmaReadSrv
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, simDmaReadSrv.dmaReadSrv
     );
-    let payloadGenerator <- mkPayloadGenerator2(
-        cntrlStatus,
-        dmaReadCntrl
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
     );
 
     let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
@@ -841,7 +859,7 @@ module mkTestPayloadConAndGenNormalCase2(Empty);
 endmodule
 
 (* doc = "testcase" *)
-module mkTestPayloadGenSegmentAndPaddingCase2(Empty);
+module mkTestPayloadGenSegmentAndPaddingCase(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
     let qpType = IBV_QPT_XRC_SEND;
@@ -861,12 +879,11 @@ module mkTestPayloadGenSegmentAndPaddingCase2(Empty);
         simDmaReadSrvDataStreamPipeOut, pmtuPipeOut
     );
 
-    let dmaReadCntrl <- mkDmaReadCntrl2(
-        cntrlStatus.comm.isReset, simDmaReadSrv.dmaReadSrv
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, simDmaReadSrv.dmaReadSrv
     );
-    let payloadGenerator <- mkPayloadGenerator2(
-        cntrlStatus,
-        dmaReadCntrl
+    let payloadGenerator <- mkPayloadGenerator(
+        cntrlStatus, dmaReadCntrl
     );
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));

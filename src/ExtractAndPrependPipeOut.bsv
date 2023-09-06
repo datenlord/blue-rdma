@@ -28,17 +28,7 @@ module mkHeader2DataStream#(
 
     Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
     Reg#(Bool)      headerValidReg <- mkReg(False);
-/*
-    rule debug if (!(
-        headerDataStreamOutQ.notFull && headerMetaDataOutQ.notFull
-    ));
-        $display(
-            "time=%0t: mkHeader2DataStream debug", $time,
-            ", headerDataStreamOutQ.notFull=", fshow(headerDataStreamOutQ.notFull),
-            ", headerMetaDataOutQ.notFull=", fshow(headerMetaDataOutQ.notFull)
-        );
-    endrule
-*/
+
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (clearAll);
         headerDataStreamOutQ.clear;
@@ -46,6 +36,16 @@ module mkHeader2DataStream#(
 
         headerValidReg <= False;
     endrule
+
+    // rule debug; if (!(
+    //     headerDataStreamOutQ.notFull && headerMetaDataOutQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkHeader2DataStream debug", $time,
+    //         ", headerDataStreamOutQ.notFull=", fshow(headerDataStreamOutQ.notFull),
+    //         ", headerMetaDataOutQ.notFull=", fshow(headerMetaDataOutQ.notFull)
+    //     );
+    // endrule
 
     rule outputHeader if (!clearAll);
         let curHeader = headerValidReg ? rdmaHeaderReg : headerPipeIn.first;
@@ -100,7 +100,7 @@ module mkHeader2DataStream#(
         //     );
         // end
         headerDataStreamOutQ.enq(dataStream);
-        // let bth = extractBTH(curHeader.headerData);
+        let bth = extractBTH(curHeader.headerData);
         // $display(
         //     "time=%0t: outputHeader, start output packet", $time,
         //     ", bth.dqpn=%h", bth.dqpn,
@@ -123,20 +123,20 @@ module mkDataStream2Header#(
     Reg#(HeaderByteNum) headerInvalidFragByteNumReg <- mkRegU;
     Reg#(HeaderBitNum)   headerInvalidFragBitNumReg <- mkRegU;
     Reg#(Bool)                              busyReg <- mkReg(False);
-/*
-    rule debug if (!(
-        dataPipeIn.notEmpty           &&
-        headerMetaDataPipeIn.notEmpty &&
-        headerOutQ.notFull
-    ));
-        $display(
-            "time=%0t: mkDataStream2Header debug", $time,
-            ", dataPipeIn.notEmpty=", fshow(dataPipeIn.notEmpty),
-            ", headerMetaDataPipeIn.notEmpty=", fshow(headerMetaDataPipeIn.notEmpty),
-            ", headerOutQ.notFull=", fshow(headerOutQ.notFull)
-        );
-    endrule
-*/
+
+    // rule debug if (!(
+    //     dataPipeIn.notEmpty           &&
+    //     headerMetaDataPipeIn.notEmpty &&
+    //     headerOutQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkDataStream2Header debug", $time,
+    //         ", dataPipeIn.notEmpty=", fshow(dataPipeIn.notEmpty),
+    //         ", headerMetaDataPipeIn.notEmpty=", fshow(headerMetaDataPipeIn.notEmpty),
+    //         ", headerOutQ.notFull=", fshow(headerOutQ.notFull)
+    //     );
+    // endrule
+
     rule popHeaderMetaData if (!busyReg);
         busyReg <= True;
         let headerMetaData = headerMetaDataPipeIn.first;
@@ -657,20 +657,25 @@ module mkCombineHeaderAndPayload#(
         headerDataStreamAndMetaDataPipeOut.headerMetaData,
         payloadPipeIn
     );
-/*
-    rule debug if (!(
-        rdmaDataStreamPipeOut.notEmpty &&
-        psnPipeIn.notEmpty
-    ));
-        $display(
-            "time=%0t: mkCombineHeaderAndPayload debug", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
-            ", rdmaDataStreamPipeOut.notEmpty=", fshow(rdmaDataStreamPipeOut.notEmpty),
-            ", psnPipeIn.notEmpty=", fshow(psnPipeIn.notEmpty)
-        );
-    endrule
 
+    // rule debug;
+    // // if (!(
+    // //     rdmaDataStreamPipeOut.notEmpty &&
+    // //     psnPipeIn.notEmpty
+    // // ));
+
+    //     $display(
+    //         "time=%0t: mkCombineHeaderAndPayload debug", $time,
+    //         ", cntrlStatus.comm.isERR=", fshow(cntrlStatus.comm.isERR),
+    //         ", sqpn=%h", cntrlStatus.comm.getSQPN,
+    //         ", isSQ=", fshow(cntrlStatus.isSQ),
+    //         ", rdmaDataStreamPipeOut.notEmpty=", fshow(rdmaDataStreamPipeOut.notEmpty),
+    //         ", headerPipeIn.notEmpty=", fshow(headerPipeIn.notEmpty),
+    //         ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
+    //         ", psnPipeIn.notEmpty=", fshow(psnPipeIn.notEmpty)
+    //     );
+    // endrule
+/*
     rule connect;
         let dataStream = rdmaDataStreamPipeOut.first;
         rdmaDataStreamPipeOut.deq;

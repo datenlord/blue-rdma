@@ -13,7 +13,7 @@ TEST_LOG=tmp.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
-FILES=`ls TestPayloadConAndGen.bsv`
+FILES=`ls TestInputPktHandle.bsv`
 for FILE in $FILES; do
     # echo $FILE
     TESTCASES=`grep -Phzo 'doc.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`
@@ -33,3 +33,6 @@ if [ $ERR_NUM -gt 0 ]; then
 else
     echo "PASS"
 fi
+
+# grep -c -w 'RDMA_REQ_ST_NORMAL\|RDMA_REQ_ST_ERR_FLUSH_RR' tmp.log
+# grep -c -w 'RDMA_REQ_ST_SEQ_ERR\|RDMA_REQ_ST_RNR\|RDMA_REQ_ST_INV_REQ\|RDMA_REQ_ST_INV_RD\|RDMA_REQ_ST_RMT_ACC\|RDMA_REQ_ST_RMT_OP\|RDMA_REQ_ST_DUP\|RDMA_REQ_ST_DISCARD\|RDMA_REQ_ST_UNKNOWN' tmp.log

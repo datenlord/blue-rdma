@@ -593,9 +593,9 @@ module mkQP(QueuePair);
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadRQ if (
+        !rqDmaReadCancelReg                 &&
         cntrl.contextSQ.statusSQ.comm.isERR &&
-        !rq.respHeaderOutNotEmpty           &&
-        !rqDmaReadCancelReg
+        !(rq.respHeaderOutNotEmpty && payloadGenerator4RQ.payloadNotEmpty)
     );
         dmaReadCntrl4RQ.dmaCntrl.cancel;
         rqDmaReadCancelReg <= True;
@@ -610,9 +610,9 @@ module mkQP(QueuePair);
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadSQ if (
+        !sqDmaReadCancelReg                 &&
         cntrl.contextSQ.statusSQ.comm.isERR &&
-        !sq.reqHeaderOutNotEmpty            &&
-        !sqDmaReadCancelReg
+        !(sq.reqHeaderOutNotEmpty && payloadGenerator4SQ.payloadNotEmpty)
     );
         dmaReadCntrl4SQ.dmaCntrl.cancel;
         sqDmaReadCancelReg <= True;

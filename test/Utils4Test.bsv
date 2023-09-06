@@ -264,6 +264,28 @@ module mkSegmentDataStreamByPmtuAndAddPadCnt#(
     return resultPipeOut;
 endmodule
 
+module mkDataStreamAddPadCnt#(
+    DataStreamPipeOut dataStreamPipeIn
+)(DataStreamPipeOut);
+    function DataStream addPadding(DataStream inputDataStream);
+        if (inputDataStream.isLast) begin
+            let lastFragByteEnWithPadding = addPadding2LastFragByteEn(
+                inputDataStream.byteEn
+            );
+            // $display(
+            //     "time=%0t: inputDataStream.byteEn=%h, padCnt=%0d",
+            //     $time, inputDataStream.byteEn, padCnt
+            // );
+            inputDataStream.byteEn = lastFragByteEnWithPadding;
+        end
+
+        return inputDataStream;
+    endfunction
+
+    let resultPipeOut <- mkFunc2Pipe(addPadding, dataStreamPipeIn);
+    return resultPipeOut;
+endmodule
+
 // Random PipeOut related
 
 module mkGenericRandomPipeOut(PipeOut#(anytype)) provisos(
@@ -586,7 +608,7 @@ module mkSimGenWorkReqByOpCode#(
         rkey2InvPipeOut.deq;
 
         QPN sqpn = getDefaultQPN;
-        QPN srqn = dontCareValue;
+        QPN srqn = getDefaultQPN; // For XRC
         QPN dqpn = getDefaultQPN;
         QKEY qkey = dontCareValue;
         let workReq = WorkReq {
@@ -789,8 +811,76 @@ module mkGenNormalOrDupWorkReq#(
 
         method Action deq();
             if (normalOrDupReqReg) begin
+                let pendingWR = pendingWorkReqPipeIn.first;
                 pendingWorkReqPipeIn.deq;
-                dupWorkReqReg <= pendingWorkReqPipeIn.first;
+                dupWorkReqReg <= pendingWR;
+
+                immAssert(
+                    isValid(pendingWR.pktNum),
+                    "pendingWR.pktNum assertion @ mkGenNormalOrDupWorkReq",
+                    $format(
+                        "pendingWR.pktNum=", fshow(pendingWR.pktNum),
+                        " should be valid"
+                    )
+                );
+                // $display(
+                //     "time=%0t:", $time,
+                //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
+                // );
+            end
+            // else begin
+            //     $display(
+            //         "time=%0t:", $time,
+            //         " duplicate pendingWR=", fshow(dupWorkReqReg)
+            //     );
+            // end
+
+            if (!normalOrDupReq) begin
+                normalOrDupReqReg <= !normalOrDupReqReg;
+            end
+        endmethod
+
+        method Bool notEmpty();
+            return normalOrDupReqReg ? pendingWorkReqPipeIn.notEmpty : True;
+        endmethod
+    endinterface;
+
+    let resultPipeOut <- mkFork(identityFunc, normalOrDupWorkReqPipeOut);
+    return resultPipeOut;
+endmodule
+/*
+module mkGenNormalOrDupWorkReq2#(
+    Bool normalOrDupReq,
+    PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
+)(Tuple2#(PipeOut#(Tuple2#(Bool, PktNum)), PipeOut#(PendingWorkReq)));
+    Reg#(Bool) normalOrDupReqReg <- mkReg(True);
+    Reg#(PendingWorkReq) dupWorkReqReg <- mkRegU;
+
+    PipeOut#(Tuple2#(Tuple2#(Bool, PktNum), PendingWorkReq)) normalOrDupWorkReqPipeOut = interface PipeOut;
+        method Tuple2#(Tuple2#(Bool, PktNum), PendingWorkReq) first();
+            let pendingWR = pendingWorkReqPipeIn.first;
+            return tuple2(
+                normalOrDupReqReg ?
+                    tuple2(True, unwrapMaybe(pendingWR.pktNum)) :
+                    tuple2(False, unwrapMaybe(dupWorkReqReg.pktNum)),
+                normalOrDupReqReg ? pendingWR : dupWorkReqReg
+            );
+        endmethod
+
+        method Action deq();
+            if (normalOrDupReqReg) begin
+                let pendingWR = pendingWorkReqPipeIn.first;
+                pendingWorkReqPipeIn.deq;
+                dupWorkReqReg <= pendingWR;
+
+                immAssert(
+                    isValid(pendingWR.pktNum),
+                    "pendingWR.pktNum assertion @ mkGenNormalOrDupWorkReq",
+                    $format(
+                        "pendingWR.pktNum=", fshow(pendingWR.pktNum),
+                        " should be valid"
+                    )
+                );
                 // $display(
                 //     "time=%0t:", $time,
                 //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
@@ -817,6 +907,43 @@ module mkGenNormalOrDupWorkReq#(
     return resultPipeOut;
 endmodule
 
+// PktNum must be larger than zero
+module mkExpandAggregatedPipeOut#(
+    PipeOut#(Tuple2#(anytype, PktNum)) aggregatedPipeIn
+)(PipeOut#(Tuple2#(anytype, PktNum)));
+    Count#(PktNum) remainingCnt <- mkCount(0);
+
+    PipeOut#(Tuple2#(anytype, PktNum)) expandedPipeOut = interface PipeOut;
+        method Tuple2#(anytype, PktNum) first();
+            let { inputVal, inputCnt } = aggregatedPipeIn.first;
+            return isOne(inputCnt) ? aggregatedPipeIn.first : tuple2(inputVal, remainingCnt);
+        endmethod
+
+        method Action deq();
+            let { inputVal, inputCnt } = aggregatedPipeIn.first;
+            if (isOne(inputCnt) || isOne(remainingCnt)) begin
+                aggregatedPipeIn.deq;
+                remainingCnt <= 0;
+            end
+            else begin
+                remainingCnt <= inputCnt - 1;
+            end
+
+            immAssert(
+                !isZero(inputCnt),
+                "inputCnt assertion @ mkGenNormalOrDupWorkReq",
+                $format(
+                    "inputCnt=", fshow(inputCnt), " should be valid"
+                )
+            );
+        endmethod
+
+        method Bool notEmpty() = aggregatedPipeIn.notEmpty;
+    endinterface;
+
+    return expandedPipeOut;
+endmodule
+*/
 module mkExistingPendingWorkReqPipeOut#(
     CntrlQP cntrl,
     PipeOut#(WorkReq) workReqPipeIn
@@ -861,9 +988,9 @@ module mkExistingPendingWorkReqPipeOut#(
         };
         pendingWorkReqOutQ.enq(pendingWR);
 
-        // $display(
-        //     "time=%0t: generates pendingWR=", $time, fshow(pendingWR)
-        // );
+        $display(
+            "time=%0t: generates pendingWR=", $time, fshow(pendingWR)
+        );
     endrule
 
     Vector#(vSz, PipeOut#(PendingWorkReq)) resultPipeOutVec <-
@@ -1282,9 +1409,36 @@ endmodule
 module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(CntrlQP);
     let cntrl <- mkCntrlQP;
 
+    let setCntrl2RTS <- mkChangeCntrlState2RTS(
+        cntrl.srvPort,
+        cntrl.contextSQ.statusSQ,
+        getDefaultQPN,
+        qpType,
+        pmtu
+    );
+
+    // let setExpectedPsnAsNextPSN = True;
+    // let setZero2ExpectedPsnAndNextPSN = False;
+    // let qpDestroyWhenErr = False;
+    // let setCntrl2RTS <- mkCntrlStateCycle(
+    //     cntrl.srvPort,
+    //     cntrl.contextSQ.statusSQ,
+    //     getDefaultQPN,
+    //     qpType,
+    //     pmtu,
+    //     setExpectedPsnAsNextPSN,
+    //     setZero2ExpectedPsnAndNextPSN,
+    //     qpDestroyWhenErr
+    // );
+    return cntrl;
+endmodule
+
+module mkSimCntrlStateCycle#(TypeQP qpType, PMTU pmtu)(CntrlQP);
+    let cntrl <- mkCntrlQP;
+
     let setExpectedPsnAsNextPSN = True;
     let setZero2ExpectedPsnAndNextPSN = False;
-    let qpDestroyWhenErr = False;
+    let qpDestroyWhenErr = True;
 
     let setCntrl2RTS <- mkCntrlStateCycle(
         cntrl.srvPort,
@@ -1404,7 +1558,7 @@ module mkSimInputPktBuf4SingleQP#(
     let inputRdmaPktBuf <- mkInputRdmaPktBufAndHeaderValidation(
         headerAndMetaDataAndPayloadPipeOut, qpMetaData
     );
-    let reqPktMetaDataAndPayloadPipeIn = inputRdmaPktBuf[0].reqPktPipeOut;
+    let reqPktMetaDataAndPayloadPipeIn  = inputRdmaPktBuf[0].reqPktPipeOut;
     let respPktMetaDataAndPayloadPipeIn = inputRdmaPktBuf[0].respPktPipeOut;
     let cnpPipeIn = inputRdmaPktBuf[0].cnpPipeOut;
 
@@ -1615,6 +1769,12 @@ module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));
             "time=%0t: mkDebugSink debug", $time,
             ", dequeue first=", fshow(pipeIn.first)
         );
+    endrule
+endmodule
+
+module mkGetSink#(Get#(anytype) getIn)(Empty);
+    rule drain;
+        let result <- getIn.get;
     endrule
 endmodule
 

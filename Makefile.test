@@ -49,8 +49,10 @@ TestMetaData.bsv                 = mkTestMetaDataMRs \
                                     mkTestTLB
 TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
                                     mkTestPayloadGenSegmentAndPaddingCase \
-                                    mkTestDmaReadCntrl \
-                                    mkTestDmaWriteCntrl
+                                    mkTestDmaReadCntrlNormalCase \
+                                    mkTestDmaReadCntrlCancelCase \
+                                    mkTestDmaWriteCntrl \
+                                    mkTestAddrChunkSrv
 TestQueuePair.bsv                = mkTestPermCheckCltArbiter \
                                     mkTestDmaReadCltArbiter \
                                     mkTestQueuePairReqErrResetCase \
