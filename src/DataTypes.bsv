@@ -103,7 +103,7 @@ typedef Bit#(QP_CAP_CNT_WIDTH) ScatterGatherElemCnt;
 // typedef Bit#(PMTU_VALUE_MAX_WIDTH) PmtuValueWidth;
 typedef Bit#(MAX_PMTU_WIDTH)       PmtuResidue;
 typedef Bit#(TOTAL_FRAG_NUM_WIDTH) TotalFragNum;
-typedef Bit#(PMTU_FRAG_NUM_WIDTH)  PmtuFragNum;
+typedef Bit#(PMTU_FRAG_NUM_WIDTH)  PktFragNum;
 typedef Bit#(PKT_NUM_WIDTH)        PktNum;
 typedef Bit#(PKT_LEN_WIDTH)        PktLen;
 
@@ -204,7 +204,7 @@ typedef enum {
 
 typedef struct {
     PktLen pktPayloadLen;
-    PmtuFragNum pktFragNum;
+    PktFragNum pktFragNum;
     Bool isZeroPayloadLen;
     RdmaHeader pktHeader;
     HandlerPD pdHandler;
@@ -242,6 +242,14 @@ typedef struct {
     QPN sqpn;
     ADDR startAddr;
     Length len;
+    WorkReqID wrID;
+} DmaReadMetaData deriving(Bits, FShow);
+
+typedef struct {
+    DmaReqSrcType initiator;
+    QPN sqpn;
+    ADDR startAddr;
+    PktLen len;
     WorkReqID wrID;
 } DmaReadReq deriving(Bits, FShow);
 
@@ -288,15 +296,16 @@ typedef enum {
 } DmaReqSrcType deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Bool addPadding;
-    Bool segment;
-    PMTU pmtu;
-    DmaReadReq dmaReadReq;
+    DmaReadMetaData dmaReadMetaData;
+    // DmaReadReq dmaReadReq;
+    // Bool segment;
+    Bool          addPadding;
+    PMTU          pmtu;
 } PayloadGenReq deriving(Bits, FShow);
 
 typedef struct {
+    // Bool segment;
     Bool addPadding;
-    Bool segment;
     Bool isRespErr;
 } PayloadGenResp deriving(Bits, FShow);
 
@@ -311,7 +320,7 @@ typedef union tagged {
 } PayloadConInfo deriving(Bits, FShow);
 
 typedef struct {
-    PmtuFragNum fragNum;
+    PktFragNum fragNum;
     PayloadConInfo consumeInfo;
 } PayloadConReq deriving(Bits, FShow);
 

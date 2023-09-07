@@ -30,6 +30,10 @@ function IndexQP getDefaultIndexQP();
     return fromInteger(valueOf(DEFAULT_QP_IDX));
 endfunction
 
+function Integer getMaxFragBufSize();
+    return valueOf(PMTU_MAX_FRAG_NUM);
+endfunction
+
 interface CountDown;
     method Action decr();
     method int   _read();
@@ -184,13 +188,22 @@ function Tuple4#(Bool, PktNum, PSN, PSN) calcPktNumNextAndEndPSN(
     return tuple4(isOnlyPkt, pktNum, nextPSN, endPSN);
 endfunction
 
+// This function should be used in simulation only
+function ByteEn addPadding2LastFragByteEn(ByteEn lastFragByteEn);
+    let lastFragValidByteNum = calcByteEnBitNumInSim(lastFragByteEn);
+    let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
+    let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
+    let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
+    return lastFragByteEnWithPadding;
+endfunction
+/*
 // This module should be used in simulation only
 module mkSegmentDataStreamByPmtu#(
     DataStreamPipeOut dataStreamPipeIn,
     PipeOut#(PMTU) pmtuPipeIn
 )(DataStreamPipeOut);
-    Reg#(PmtuFragNum) pmtuFragNumReg <- mkRegU;
-    Reg#(PmtuFragNum) fragCntReg <- mkRegU;
+    Reg#(PktFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktFragNum) fragCntReg <- mkRegU;
     FIFOF#(DataStream) dataQ <- mkFIFOF;
     Reg#(Bool) setFirstReg <- mkReg(False);
 
@@ -202,14 +215,14 @@ module mkSegmentDataStreamByPmtu#(
         if (!setFirstReg && curData.isFirst) begin
             let pmtu = pmtuPipeIn.first;
             pmtuPipeIn.deq;
-            let pmtuFragNum = calcFragNumByPmtu(pmtu);
-            pmtuFragNumReg <= pmtuFragNum;
-            fragCntReg <= pmtuFragNum - 2;
+            let pktFragNum = calcFragNumByPmtu(pmtu);
+            pktFragNumReg <= pktFragNum;
+            fragCntReg <= pktFragNum - 2;
         end
         else if (setFirstReg) begin
             curData.isFirst = True;
             setFirstReg <= False;
-            fragCntReg <= pmtuFragNumReg - 2;
+            fragCntReg <= pktFragNumReg - 2;
         end
         else if (isFragCntZero) begin
             curData.isLast = True;
@@ -226,15 +239,6 @@ module mkSegmentDataStreamByPmtu#(
     method Action deq() = dataQ.deq;
     method Bool notEmpty() = dataQ.notEmpty;
 endmodule
-
-// This function should be used in simulation only
-function ByteEn addPadding2LastFragByteEn(ByteEn lastFragByteEn);
-    let lastFragValidByteNum = calcByteEnBitNumInSim(lastFragByteEn);
-    let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
-    let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
-    let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
-    return lastFragByteEnWithPadding;
-endfunction
 
 // This module should be used in simulation only
 module mkSegmentDataStreamByPmtuAndAddPadCnt#(
@@ -263,8 +267,8 @@ module mkSegmentDataStreamByPmtuAndAddPadCnt#(
     let resultPipeOut <- mkFunc2Pipe(addPadding, segDataStreamPipeOut);
     return resultPipeOut;
 endmodule
-
-module mkDataStreamAddPadCnt#(
+*/
+module mkDataStreamAddPadding#(
     DataStreamPipeOut dataStreamPipeIn
 )(DataStreamPipeOut);
     function DataStream addPadding(DataStream inputDataStream);
@@ -354,6 +358,16 @@ module mkRandomLenPipeOut#(
     // Both min and max are inclusive
     Length minLength, Length maxLength
 )(PipeOut#(Length));
+    Vector#(1, PipeOut#(Length)) resultVec <- mkRandomValueInRangePipeOut(
+        minLength, maxLength
+    );
+    return resultVec[0];
+endmodule
+/*
+module mkRandomLenPipeOut#(
+    // Both min and max are inclusive
+    Length minLength, Length maxLength
+)(PipeOut#(Length));
     Randomize#(Length) randomLen <- mkConstrainedRandomizer(minLength, maxLength);
     FIFOF#(Length) lenQ <- mkFIFOF;
 
@@ -382,7 +396,7 @@ module mkRandomLenPipeOut#(
 
     return toPipeOut(lenQ);
 endmodule
-
+*/
 module mkFixedLenHeaderMetaPipeOut#(
     PipeOut#(HeaderByteNum) headerLenPipeIn,
     Bool alwaysHasPayload
@@ -579,7 +593,7 @@ module mkSimGenWorkReqByOpCode#(
     PipeOut#(Long) swapPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(IMM) immDtPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(RKEY) rkey2InvPipeOut <- mkGenericRandomPipeOut;
-    let dmaLenPipeOut <- mkRandomLenPipeOut(minLength, maxLength);
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minLength, maxLength);
     Vector#(vSz, PipeOut#(WorkReq)) resultPipeOutVec <-
         mkForkVector(toPipeOut(workReqOutQ));
 
@@ -587,8 +601,8 @@ module mkSimGenWorkReqByOpCode#(
         let wrID = workReqIdPipeOut.first;
         workReqIdPipeOut.deq;
 
-        let dmaLen = dmaLenPipeOut.first;
-        dmaLenPipeOut.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
 
         let wrOpCode = workReqOpCodePipeIn.first;
         workReqOpCodePipeIn.deq;
@@ -617,7 +631,7 @@ module mkSimGenWorkReqByOpCode#(
             flags    : enum2Flag(flag),
             raddr    : isAtomicWR ? 0 : dontCareValue,
             rkey     : dontCareValue,
-            len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : dmaLen,
+            len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : payloadLen,
             laddr    : dontCareValue,
             lkey     : dontCareValue,
             sqpn     : sqpn,

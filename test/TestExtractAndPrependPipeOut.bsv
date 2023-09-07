@@ -13,7 +13,7 @@ import PrimUtils :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
-function Length headerMetaData2DmaLen(HeaderMetaData hmd) = zeroExtend(hmd.headerLen);
+function PktLen headerMetaData2PktLen(HeaderMetaData hmd) = zeroExtend(hmd.headerLen);
 
 (* doc = "testcase" *)
 module mkTestHeaderAndDataStreamConversion(Empty);
@@ -24,12 +24,12 @@ module mkTestHeaderAndDataStreamConversion(Empty);
     Vector#(3, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
         mkRandomHeaderMetaPipeOut(minHeaderLen, maxHeaderLen, alwaysHasPayload);
     let headerMetaDataPipeOut4Dma = headerMetaDataPipeOutVec[0];
-    let headerMetaDataPipeOut4Conv <- mkBufferN(4, headerMetaDataPipeOutVec[1]);
-    let headerMetaDataPipeOut4Ref  <- mkBufferN(4, headerMetaDataPipeOutVec[2]);
+    let headerMetaDataPipeOut4Conv <- mkBufferN(2, headerMetaDataPipeOutVec[1]);
+    let headerMetaDataPipeOut4Ref  <- mkBufferN(2, headerMetaDataPipeOutVec[2]);
 
-    let dmaLenPipeOut <- mkFunc2Pipe(headerMetaData2DmaLen, headerMetaDataPipeOut4Dma);
+    let pktLenPipeOut <- mkFunc2Pipe(headerMetaData2PktLen, headerMetaDataPipeOut4Dma);
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut);
+        mkFixedPktLenDataStreamPipeOut(pktLenPipeOut);
     let dataStreamPipeOut4Conv = dataStreamPipeOutVec[0];
     let dataStreamPipeOut4Ref <- mkBufferN(2, dataStreamPipeOutVec[1]);
 
@@ -98,11 +98,11 @@ module mkTestPrependHeaderBeforeEmptyDataStream(Empty);
     Vector#(2, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
         mkRandomHeaderMetaPipeOut(minHeaderLen, maxHeaderLen, alwaysHasPayload);
     let headerMetaDataPipeOut4Dma = headerMetaDataPipeOutVec[0];
-    let headerMetaDataPipeOut4Prepend <- mkBufferN(4, headerMetaDataPipeOutVec[1]);
+    let headerMetaDataPipeOut4Prepend <- mkBufferN(2, headerMetaDataPipeOutVec[1]);
 
-    let dmaLenPipeOut <- mkFunc2Pipe(headerMetaData2DmaLen, headerMetaDataPipeOut4Dma);
+    let pktLenPipeOut <- mkFunc2Pipe(headerMetaData2PktLen, headerMetaDataPipeOut4Dma);
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut);
+        mkFixedPktLenDataStreamPipeOut(pktLenPipeOut);
     let headerDataStreamPipeOut4Prepend = dataStreamPipeOutVec[0];
     let headerDataStreamPipeOut4Ref <- mkBufferN(2, dataStreamPipeOutVec[1]);
 
@@ -143,19 +143,20 @@ endmodule
 (* doc = "testcase" *)
 module mkTestExtractHeaderWithPayloadLessThanOneFrag(Empty);
     let alwaysHasPayload = True;
-    Length minPayloadLen = 1;
-    Length maxPayloadLen = 7;
+    PktLen minPktPayloadLen = 1;
+    PktLen maxPktPayloadLen = 7;
     HeaderByteNum minHeaderLen = 1;
     HeaderByteNum maxHeaderLen = 64;
 
-    PipeOut#(Length) payloadLenPipeOut <-
-        mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
+    Vector#(1, PipeOut#(PktLen)) pktPayloadLenPipeOutVec <-
+        mkRandomValueInRangePipeOut(minPktPayloadLen, maxPktPayloadLen);
+    let pktPayloadLenPipeOut = pktPayloadLenPipeOutVec[0];
 
-    function ActionValue#(Length) headerLen2DmaLen(HeaderByteNum headerLen);
+    function ActionValue#(PktLen) headerLen2PktLen(HeaderByteNum headerLen);
         actionvalue
-            let payloadLen = payloadLenPipeOut.first;
-            payloadLenPipeOut.deq;
-            return zeroExtend(headerLen) + payloadLen;
+            let pktPayloadLen = pktPayloadLenPipeOut.first;
+            pktPayloadLenPipeOut.deq;
+            return zeroExtend(headerLen) + pktPayloadLen;
         endactionvalue
     endfunction
 
@@ -163,17 +164,15 @@ module mkTestExtractHeaderWithPayloadLessThanOneFrag(Empty);
         mkRandomValueInRangePipeOut(minHeaderLen, maxHeaderLen);
     let headerLenPipeOut = headerLenPipeOutVec[0];
     Vector#(2, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
-        mkFixedLenHeaderMetaPipeOut(
-            headerLenPipeOut, alwaysHasPayload
-        );
+        mkFixedLenHeaderMetaPipeOut(headerLenPipeOut, alwaysHasPayload);
     let headerMetaDataPipeOut4Extract = headerMetaDataPipeOutVec[0];
     let headerMetaDataPipeOut4Prepend <- mkBufferN(2, headerMetaDataPipeOutVec[1]);
 
-    PipeOut#(Length) dmaLenPipeOut <- mkActionValueFunc2Pipe(
-        headerLen2DmaLen, headerLenPipeOutVec[1]
+    PipeOut#(PktLen) pktLenPipeOut <- mkActionValueFunc2Pipe(
+        headerLen2PktLen, headerLenPipeOutVec[1]
     );
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut);
+        mkFixedPktLenDataStreamPipeOut(pktLenPipeOut);
     let dataStreamPipeOut4Extract = dataStreamPipeOutVec[0];
     let dataStreamPipeOut4Ref <- mkBufferN(2, dataStreamPipeOutVec[1]);
 
@@ -217,8 +216,8 @@ endmodule
 
 (* doc = "testcase" *)
 module mkTestExtractHeaderLongerThanDataStream(Empty);
-    let minDmaLength = 1;
-    let maxDmaLength = fromInteger(valueOf(HEADER_MAX_BYTE_LENGTH)) - 1;
+    let minPktLen = 1;
+    let maxPktLen = fromInteger(valueOf(HEADER_MAX_BYTE_LENGTH)) - 1;
 
     HeaderByteNum headerLen = fromInteger(valueOf(HEADER_MAX_BYTE_LENGTH));
     let { headerFragNum, headerLastFragValidByteNum } =
@@ -231,7 +230,7 @@ module mkTestExtractHeaderLongerThanDataStream(Empty);
     };
 
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkRandomLenSimDataStreamPipeOut(minDmaLength, maxDmaLength);
+        mkRandomPktLenDataStreamPipeOut(minPktLen, maxPktLen);
     let headerMetaDataPipeOut <- mkConstantPipeOut(headerMetaData);
     let extractHeaderFromPipeOut <- mkExtractHeaderFromDataStreamPipeOut(
         dataStreamPipeOutVec[0], headerMetaDataPipeOut
@@ -278,13 +277,13 @@ endmodule
 (* doc = "testcase" *)
 module mkTestExtractAndPrependHeader(Empty);
     let alwaysHasPayload = True; // TODO: support no payload case
-    let minDmaLength = 128;
-    let maxDmaLength = 256;
+    let minPktLen = 128;
+    let maxPktLen = 256;
     let minHeaderLen = 1;
     let maxHeaderLen = 64;
 
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkRandomLenSimDataStreamPipeOut(minDmaLength, maxDmaLength);
+        mkRandomPktLenDataStreamPipeOut(minPktLen, maxPktLen);
     Vector#(2, PipeOut#(HeaderMetaData)) headerMetaDataPipeOutVec <-
         mkRandomHeaderMetaPipeOut(minHeaderLen, maxHeaderLen, alwaysHasPayload);
     let headerMetaDataPipeOut4Extract = headerMetaDataPipeOutVec[0];

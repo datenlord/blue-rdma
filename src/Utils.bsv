@@ -265,8 +265,10 @@ function Bool pktLenGtPMTU(PktLen pktLen, PMTU pmtu);
     endcase;
 endfunction
 
-function PmtuFragNum calcFragNumByPmtu(PMTU pmtu);
-    // TODO: check DATA_BUS_BYTE_WIDTH must be power of 2
+function PktFragNum calcFragNumByPmtu(PMTU pmtu) provisos(
+    // Check DATA_BUS_BYTE_WIDTH must be power of 2
+    Add#(TLog#(DATA_BUS_BYTE_WIDTH), 1, TLog#(TAdd#(1, DATA_BUS_BYTE_WIDTH)))
+);
     let busByteWidth = valueOf(TLog#(DATA_BUS_BYTE_WIDTH));
     let pmtuWidth = getPmtuLogValue(pmtu);
     let shiftAmt = pmtuWidth - busByteWidth;
@@ -1628,7 +1630,7 @@ endfunction
 // TODO: check discard duplicate or ghost reponses has
 // no response from PayloadConsumer will not incur bugs.
 function ActionValue#(PayloadConReq) genDiscardPayloadReq(
-    PmtuFragNum fragNum,
+    PktFragNum fragNum,
     DmaReqSrcType initiator,
     QPN sqpn,
     ADDR startAddr,
@@ -1656,7 +1658,7 @@ function ActionValue#(PayloadConReq) genDiscardPayloadReq(
 endfunction
 /*
 function Action genDiscardPayloadReq(
-    PmtuFragNum fragNum,
+    PktFragNum fragNum,
     DmaReqSrcType initiator,
     QPN sqpn,
     ADDR startAddr,

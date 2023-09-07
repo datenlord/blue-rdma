@@ -11,21 +11,20 @@ import Settings :: *;
 import SimDma :: *;
 import Utils :: *;
 import Utils4Test :: *;
-
-(* doc = "testcase" *)
+/*
 module mkTestSegmentDataStream(Empty);
     let minDmaLen = 1;
     let maxDmaLen = 10000;
     let pmtu = IBV_MTU_256;
 
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-
-        mkRandomLenSimDataStreamPipeOut(minDmaLen, maxDmaLen);
+        mkRandomPktLenDataStreamPipeOut(minDmaLen, maxDmaLen);
     let pmtuPipeOut <- mkConstantPipeOut(pmtu);
     let pmtuSegPipeOut <- mkSegmentDataStreamByPmtu(
         dataStreamPipeOutVec[0], pmtuPipeOut
     );
     let refDataStreamPipeOut <- mkBuffer_n(2, dataStreamPipeOutVec[1]);
-    Reg#(PmtuFragNum) pmtuFragCntReg <- mkRegU;
+    Reg#(PktFragNum) pmtuFragCntReg <- mkRegU;
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -33,14 +32,14 @@ module mkTestSegmentDataStream(Empty);
         let refDataStream = refDataStreamPipeOut.first;
         refDataStreamPipeOut.deq;
 
-        let maxPmtuFragNum = calcFragNumByPmtu(pmtu);
+        let maxPktFragNum = calcFragNumByPmtu(pmtu);
         if (refDataStream.isLast) begin
             pmtuFragCntReg <= 0;
         end
         else if (refDataStream.isFirst) begin
             pmtuFragCntReg <= 1;
         end
-        else if (pmtuFragCntReg == maxPmtuFragNum - 1) begin
+        else if (pmtuFragCntReg == maxPktFragNum - 1) begin
             refDataStream.isLast = True;
             pmtuFragCntReg <= 0;
         end
@@ -59,8 +58,8 @@ module mkTestSegmentDataStream(Empty);
             segDataStream == refDataStream,
             "segDataStream assertion @ mkTestSegmentDataStream",
             $format(
-                "maxPmtuFragNum=%0d, pmtuFragCntReg=%0d",
-                maxPmtuFragNum, pmtuFragCntReg,
+                "maxPktFragNum=%0d, pmtuFragCntReg=%0d",
+                maxPktFragNum, pmtuFragCntReg,
                 ", segDataStream=", fshow(segDataStream),
                 " should == refDataStream=", fshow(refDataStream)
             )
@@ -68,14 +67,14 @@ module mkTestSegmentDataStream(Empty);
 
         countDown.decr;
         // $display(
-        //     "maxPmtuFragNum=%0d, pmtuFragCntReg=%0d",
-        //     maxPmtuFragNum, pmtuFragCntReg,
+        //     "maxPktFragNum=%0d, pmtuFragCntReg=%0d",
+        //     maxPktFragNum, pmtuFragCntReg,
         //     ", segDataStream=", fshow(segDataStream),
         //     " should == refDataStream=", fshow(refDataStream)
         // );
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
 module mkTestPsnFunc(Empty);
     let maxCycles = 100;

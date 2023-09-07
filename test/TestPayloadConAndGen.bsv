@@ -1,4 +1,5 @@
 import ClientServer :: *;
+import Cntrs :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
@@ -18,8 +19,8 @@ import Utils4Test :: *;
 
 (* doc = "testcase" *)
 module mkTestAddrChunkSrv(Empty);
-    let minPktLen = 2048;
-    let maxPktLen = 8192;
+    let minPayloadLen = 2048;
+    let maxPayloadLen = 8192;
     let pmtuVec = vec(
         IBV_MTU_256,
         IBV_MTU_512,
@@ -36,7 +37,7 @@ module mkTestAddrChunkSrv(Empty);
     let dut <- mkAddrChunkSrv(clearReg, isSQ);
 
     PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
-    let totalLenPipeOut <- mkRandomLenPipeOut(minPktLen, maxPktLen);
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
     let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
 
     Reg#(PmtuResidue) residueReg <- mkRegU;
@@ -55,14 +56,15 @@ module mkTestAddrChunkSrv(Empty);
         let startAddr = startAddrPipeOut.first;
         startAddrPipeOut.deq;
 
-        let totalLen = totalLenPipeOut.first;
-        totalLenPipeOut.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
 
         let pmtu = pmtuPipeOut.first;
         pmtuPipeOut.deq;
 
+        // let totalPktNum = calcPktNumByLenOnly(payloadLen, pmtu);
         let { tmpPktNum, pmtuResidue } = truncateLenByPMTU(
-            totalLen, pmtu
+            payloadLen, pmtu
         );
         let totalPktNum = tmpPktNum + (isZero(pmtuResidue) ? 0 : 1);
         pktNumReg   <= totalPktNum;
@@ -72,7 +74,7 @@ module mkTestAddrChunkSrv(Empty);
 
         let addrChunkReq = AddrChunkReq {
             startAddr: startAddr,
-            totalLen : totalLen,
+            totalLen : payloadLen,
             pmtu     : pmtu
         };
         dut.srvPort.request.put(addrChunkReq);
@@ -98,10 +100,10 @@ module mkTestAddrChunkSrv(Empty);
         end
 
         let addrChunkResp = AddrChunkResp {
-            dmaAddr: nextAddrReg,
-            dmaLen : (isLast && !isZeroResidue) ? zeroExtend(residueReg) : pmtuLen,
-            isFirst: isFirst,
-            isLast : isLast
+            chunkAddr: nextAddrReg,
+            chunkLen : (isLast && !isZeroResidue) ? zeroExtend(residueReg) : pmtuLen,
+            isFirst  : isFirst,
+            isLast   : isLast
         };
         respQ.enq(addrChunkResp);
     endrule
@@ -111,15 +113,15 @@ module mkTestAddrChunkSrv(Empty);
         let expectedResp = respQ.first;
         respQ.deq;
 
-        let expectedTotalLen = totalLenReg + zeroExtend(addrChunkResp.dmaLen);
+        let expectedTotalLen = totalLenReg + zeroExtend(addrChunkResp.chunkLen);
         if (addrChunkResp.isFirst) begin
-            expectedTotalLen = zeroExtend(addrChunkResp.dmaLen);
+            expectedTotalLen = zeroExtend(addrChunkResp.chunkLen);
         end
         totalLenReg <= expectedTotalLen;
 
         immAssert(
-            addrChunkResp.dmaAddr == expectedResp.dmaAddr &&
-            addrChunkResp.dmaLen == expectedResp.dmaLen   &&
+            addrChunkResp.chunkAddr == expectedResp.chunkAddr &&
+            addrChunkResp.chunkLen == expectedResp.chunkLen   &&
             addrChunkResp.isFirst == expectedResp.isFirst &&
             addrChunkResp.isLast == expectedResp.isLast,
             "expected addrChunkResp assertion @ mkTestAddrChunkSrv",
@@ -164,8 +166,8 @@ typedef enum {
 } TestDmaReadCntrlState deriving(Bits, Eq, FShow);
 
 module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
-    let minPktLen = 2048;
-    let maxPktLen = 8192;
+    let minPayloadLen = 2048;
+    let maxPayloadLen = 8192;
     let qpType = IBV_QPT_XRC_SEND;
     let pmtuVec = vec(
         IBV_MTU_256,
@@ -187,7 +189,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     Reg#(Bool)   isFinalRespLastFragReg <- mkReg(False);
 
     PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
-    let totalLenPipeOut <- mkRandomLenPipeOut(minPktLen, maxPktLen);
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
     let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
 
     let simDmaReadSrv <- mkSimDmaReadSrv;
@@ -213,26 +215,26 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         let startAddr = startAddrPipeOut.first;
         startAddrPipeOut.deq;
 
-        let totalLen = totalLenPipeOut.first;
-        totalLenPipeOut.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
 
         let pmtu = pmtuPipeOut.first;
         pmtuPipeOut.deq;
 
-        let totalPktNum = calcPktNumByLenOnly(totalLen, pmtu);
+        let totalPktNum = calcPktNumByLenOnly(payloadLen, pmtu);
         let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
-            calcTotalFragNumByLength(totalLen);
+            calcTotalFragNumByLength(payloadLen);
         totalFragNumQ.enq(totalFragNum);
 
         let dmaReadCntrlReq = DmaReadCntrlReq {
-            dmaReadReq   : DmaReadReq {
+            pmtu           : pmtu,
+            dmaReadMetaData: DmaReadMetaData {
                 initiator: DMA_SRC_RQ_RD,
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: startAddr,
-                len      : totalLen,
+                len      : payloadLen,
                 wrID     : dontCareValue
-            },
-            pmtu         : pmtu
+            }
         };
 
         dut.srvPort.request.put(dmaReadCntrlReq);
@@ -240,7 +242,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
 
         $display(
             "time=%0t: issueReq", $time,
-            ", totalLen=%0d", totalLen,
+            ", payloadLen=%0d", payloadLen,
             ", totalPktNum=%0d", totalPktNum,
             ", totalFragNum=%0d", totalFragNum
         );
@@ -322,56 +324,7 @@ typedef enum {
     TEST_DMA_CNTRL_CANCEL,
     TEST_DMA_CNTRL_WAIT_IDLE
 } TestDmaCntrlState deriving(Bits, Eq, FShow);
-/*
-module mkTestDmaReadCntrl(Empty);
-    let minPktLen = 2048;
-    let maxPktLen = 4096;
-    let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
 
-    let cntrl <- mkSimCntrl(qpType, pmtu);
-    let cntrlStatus = cntrl.contextSQ.statusSQ;
-
-    Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <-
-        mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
-    let pktLenPipeOut4Read = pktLenPipeOutVec[0];
-
-    let simDmaReadSrv <- mkSimDmaReadSrv;
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
-
-    Reg#(TestDmaCntrlState) stateReg <- mkReg(TEST_DMA_CNTRL_ISSUE_REQ);
-    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
-
-    rule issueReadReq if (stateReg == TEST_DMA_CNTRL_ISSUE_REQ);
-        let pktLen = pktLenPipeOut4Read.first;
-        pktLenPipeOut4Read.deq;
-
-        let dmaReadReq = DmaReadReq {
-            initiator: DMA_SRC_SQ_RD,
-            sqpn     : cntrlStatus.comm.getSQPN,
-            startAddr: dontCareValue,
-            len      : zeroExtend(pktLen),
-            wrID     : dontCareValue
-        };
-        dmaReadCntrl.srvPort.request.put(dmaReadReq);
-        stateReg <= TEST_DMA_CNTRL_RUN_A_CYCLE;
-    endrule
-
-    rule runOneCycle if (stateReg == TEST_DMA_CNTRL_RUN_A_CYCLE);
-        stateReg <= TEST_DMA_CNTRL_CANCEL;
-    endrule
-
-    rule cancelReq if (stateReg == TEST_DMA_CNTRL_CANCEL);
-        dmaReadCntrl.dmaCntrl.cancel;
-        stateReg <= TEST_DMA_CNTRL_WAIT_IDLE;
-    endrule
-
-    rule waitIdle if (stateReg == TEST_DMA_CNTRL_WAIT_IDLE && dmaReadCntrl.dmaCntrl.isIdle);
-        stateReg <= TEST_DMA_CNTRL_ISSUE_REQ;
-        countDown.decr;
-    endrule
-endmodule
-*/
 (* doc = "testcase" *)
 module mkTestDmaWriteCntrl(Empty);
     let minPktLen = 2048;
@@ -447,266 +400,7 @@ module mkTestDmaWriteCntrl(Empty);
         countDown.decr;
     endrule
 endmodule
-/*
-module mkTestPayloadConAndGenNormalCase(Empty);
-    let minPktLen = 2048;
-    let maxPktLen = 4096;
-    let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
 
-    // FIFOF#(PayloadGenReq) payloadGenReqQ <- mkFIFOF;
-    // FIFOF#(PayloadConReq) payloadConReqQ <- mkFIFOF;
-    FIFOF#(PSN) payloadConReqPsnQ <- mkFIFOF;
-
-    let cntrl <- mkSimCntrl(qpType, pmtu);
-    let cntrlStatus = cntrl.contextSQ.statusSQ;
-    // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
-
-    Vector#(2, PipeOut#(PktLen)) pktLenPipeOutVec <-
-        mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
-    let pktLenPipeOut4Gen = pktLenPipeOutVec[0];
-    let pktLenPipeOut4Con = pktLenPipeOutVec[1];
-
-    let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let simDmaReadSrvDataStreamPipeOut <- mkBufferN(2, simDmaReadSrv.dataStream);
-
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
-    let payloadGenerator <- mkPayloadGenerator(
-        cntrlStatus,
-        dmaReadCntrl
-        // toPipeOut(payloadGenReqQ)
-    );
-
-    let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
-    let simDmaWriteSrvDataStreamPipeOut = simDmaWriteSrv.dataStream;
-    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
-    let payloadConsumer <- mkPayloadConsumer(
-        cntrlStatus,
-        dmaWriteCntrl,
-        payloadGenerator.payloadDataStreamPipeOut
-        // toPipeOut(payloadConReqQ)
-    );
-
-    // Reg#(PSN) npsnReg <- mkReg(0);
-    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
-
-    // PipeOut need to handle:
-    // - pktLenPipeOut4Gen
-    // - pktLenPipeOut4Con
-    // - payloadGenerator.respPipeOut
-    // - payloadGenerator.payloadDataStreamPipeOut
-    // - simDmaReadSrvDataStreamPipeOut
-    // - simDmaWriteSrvDataStreamPipeOut
-    // - payloadConsumer.respPipeOut
-
-    rule genPayloadGenReq if (cntrlStatus.comm.isRTS);
-        let pktLen = pktLenPipeOut4Gen.first;
-        pktLenPipeOut4Gen.deq;
-
-        let payloadGenReq = PayloadGenReq {
-            addPadding   : False,
-            segment      : False,
-            pmtu         : pmtu,
-            dmaReadReq   : DmaReadReq {
-                initiator: DMA_SRC_SQ_RD,
-                sqpn     : cntrlStatus.comm.getSQPN,
-                startAddr: dontCareValue,
-                len      : zeroExtend(pktLen),
-                wrID     : dontCareValue
-            }
-        };
-        payloadGenerator.srvPort.request.put(payloadGenReq);
-        // payloadGenReqQ.enq(payloadGenReq);
-    endrule
-
-    rule recvPayloadGenResp if (cntrlStatus.comm.isRTS);
-        let payloadGenResp <- payloadGenerator.srvPort.response.get;
-        // let payloadGenResp = payloadGenerator.respPipeOut.first;
-        // payloadGenerator.respPipeOut.deq;
-        immAssert(
-            !payloadGenResp.isRespErr,
-            "payloadGenResp error assertion @ mkTestPayloadConAndGenNormalCase",
-            $format(
-                "payloadGenResp.isRespErr=", fshow(payloadGenResp.isRespErr),
-                " should be false"
-            )
-        );
-    endrule
-
-    rule genPayloadConReq if (cntrlStatus.comm.isRTS);
-        let pktLen = pktLenPipeOut4Con.first;
-        pktLenPipeOut4Con.deq;
-
-        let startPktSeqNum = cntrl.contextSQ.getNPSN;
-        // let startPktSeqNum = npsnReg;
-        let { isOnlyPkt, totalPktNum, nextPktSeqNum, endPktSeqNum } = calcPktNumNextAndEndPSN(
-            startPktSeqNum,
-            zeroExtend(pktLen),
-            cntrlStatus.comm.getPMTU
-        );
-        cntrl.contextSQ.setNPSN(nextPktSeqNum);
-        // npsnReg <= nextPktSeqNum;
-
-        let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
-            calcTotalFragNumByLength(zeroExtend(pktLen));
-
-        let payloadConReq = PayloadConReq {
-            fragNum      : truncate(totalFragNum),
-            consumeInfo  : tagged SendWriteReqReadRespInfo DmaWriteMetaData {
-                initiator: DMA_SRC_SQ_WR,
-                sqpn     : cntrlStatus.comm.getSQPN,
-                startAddr: dontCareValue,
-                len      : pktLen,
-                psn      : startPktSeqNum
-            }
-        };
-        // payloadConReqQ.enq(payloadConReq);
-        payloadConsumer.request.put(payloadConReq);
-        payloadConReqPsnQ.enq(startPktSeqNum);
-    endrule
-
-    rule comparePayloadConResp;
-        let payloadConResp <- payloadConsumer.response.get;
-        // let payloadConResp = payloadConsumer.respPipeOut.first;
-        // payloadConsumer.respPipeOut.deq;
-
-        let expectedPSN = payloadConReqPsnQ.first;
-        payloadConReqPsnQ.deq;
-
-        immAssert(
-            payloadConResp.dmaWriteResp.psn == expectedPSN,
-            "payloadConResp PSN assertion @ mkTestPayloadConAndGenNormalCase",
-            $format(
-                "payloadConResp.dmaWriteResp.psn=%h should == expectedPSN=%h",
-                payloadConResp.dmaWriteResp.psn, expectedPSN
-            )
-        );
-        // $display(
-        //     "time=%0t: payloadConResp.dmaWriteResp.psn=%h should == expectedPSN=%h",
-        //     $time, payloadConResp.dmaWriteResp.psn, expectedPSN
-        // );
-    endrule
-
-    rule comparePayloadDataStream;
-        let dmaReadPayload = simDmaReadSrvDataStreamPipeOut.first;
-        simDmaReadSrvDataStreamPipeOut.deq;
-        let dmaWritePayload = simDmaWriteSrvDataStreamPipeOut.first;
-        simDmaWriteSrvDataStreamPipeOut.deq;
-
-        immAssert(
-            dmaReadPayload == dmaWritePayload,
-            "dmaReadPayload == dmaWritePayload assertion @ mkTestPayloadConAndGenNormalCase",
-            $format(
-                "dmaReadPayload=", fshow(dmaReadPayload),
-                " should == dmaWritePayload=", fshow(dmaWritePayload)
-            )
-        );
-
-        // $display(
-        //     "time=%0t:", $time,
-        //     " dmaReadPayload=", fshow(dmaReadPayload),
-        //     " should == dmaWritePayload=", fshow(dmaWritePayload)
-        // );
-        countDown.decr;
-    endrule
-endmodule
-
-module mkTestPayloadGenSegmentAndPaddingCase(Empty);
-    let minPktLen = 2048;
-    let maxPktLen = 4096;
-    let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
-
-    let cntrl <- mkSimCntrl(qpType, pmtu);
-    let cntrlStatus = cntrl.contextSQ.statusSQ;
-    // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
-
-    // FIFOF#(PayloadGenReq) payloadGenReqQ <- mkFIFOF;
-    Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <-
-        mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
-    let pktLenPipeOut4Gen = pktLenPipeOutVec[0];
-
-    let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let simDmaReadSrvDataStreamPipeOut <- mkBufferN(2, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(pmtu);
-    let segmentedPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        simDmaReadSrvDataStreamPipeOut, pmtuPipeOut
-    );
-
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
-    let payloadGenerator <- mkPayloadGenerator(
-        cntrlStatus,
-        dmaReadCntrl
-        // toPipeOut(payloadGenReqQ)
-    );
-
-    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
-
-    // PipeOut need to handle:
-    // - pktLenPipeOut4Gen
-    // - payloadGenerator.payloadDataStreamPipeOut
-    // - segmentedPayloadPipeOut4Ref
-
-    rule genPayloadGenReq if (cntrlStatus.comm.isNonErr);
-        let pktLen = pktLenPipeOut4Gen.first;
-        pktLenPipeOut4Gen.deq;
-
-        let payloadGenReq = PayloadGenReq {
-            addPadding   : True,
-            segment      : True,
-            pmtu         : pmtu,
-            dmaReadReq   : DmaReadReq {
-                initiator: DMA_SRC_SQ_RD,
-                sqpn     : cntrlStatus.comm.getSQPN,
-                startAddr: dontCareValue,
-                len      : zeroExtend(pktLen),
-                wrID     : dontCareValue
-            }
-        };
-        payloadGenerator.srvPort.request.put(payloadGenReq);
-        // payloadGenReqQ.enq(payloadGenReq);
-    endrule
-
-    rule recvPayloadGenResp if (cntrlStatus.comm.isNonErr);
-        let payloadGenResp <- payloadGenerator.srvPort.response.get;
-        // let payloadGenResp = payloadGenerator.respPipeOut.first;
-        // payloadGenerator.respPipeOut.deq;
-        immAssert(
-            !payloadGenResp.isRespErr,
-            "payloadGenResp error assertion @ mkTestPayloadConAndGenNormalCase",
-            $format(
-                "payloadGenResp.isRespErr=", fshow(payloadGenResp.isRespErr),
-                " should be false"
-            )
-        );
-    endrule
-
-    rule comparePayloadDataStream if (cntrlStatus.comm.isNonErr);
-        let segmentedPayload = payloadGenerator.payloadDataStreamPipeOut.first;
-        payloadGenerator.payloadDataStreamPipeOut.deq;
-        let segmentedPayloadRef = segmentedPayloadPipeOut4Ref.first;
-        segmentedPayloadPipeOut4Ref.deq;
-
-        immAssert(
-            segmentedPayload == segmentedPayloadRef,
-            "segmentedPayload == segmentedPayloadRef assertion @ mkTestPayloadGenSegmentAndPaddingCase",
-            $format(
-                "segmentedPayload=", fshow(segmentedPayload),
-                " should == segmentedPayloadRef=", fshow(segmentedPayloadRef)
-            )
-        );
-
-        countDown.decr;
-        // $display(
-        //     "time=%0t:", $time,
-        //     " segmentedPayload=", fshow(segmentedPayload),
-        //     " should == segmentedPayloadRef=", fshow(segmentedPayloadRef)
-        // );
-    endrule
-endmodule
-*/
 (* doc = "testcase" *)
 module mkTestPayloadConAndGenNormalCase(Empty);
     let minPktLen = 2048;
@@ -759,10 +453,10 @@ module mkTestPayloadConAndGenNormalCase(Empty);
         pktLenPipeOut4Gen.deq;
 
         let payloadGenReq = PayloadGenReq {
-            addPadding   : False,
-            segment      : False,
-            pmtu         : pmtu,
-            dmaReadReq   : DmaReadReq {
+            // segment      : False,
+            addPadding     : False,
+            pmtu           : pmtu,
+            dmaReadMetaData: DmaReadMetaData {
                 initiator: DMA_SRC_SQ_RD,
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
@@ -860,24 +554,21 @@ endmodule
 
 (* doc = "testcase" *)
 module mkTestPayloadGenSegmentAndPaddingCase(Empty);
-    let minPktLen = 2048;
+    let minPktLen = 1;
     let maxPktLen = 4096;
     let qpType = IBV_QPT_XRC_SEND;
-    let pmtu = IBV_MTU_4096;
+    let pmtu = IBV_MTU_256;
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
     let cntrlStatus = cntrl.contextSQ.statusSQ;
 
-    Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <-
-        mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
-    let pktLenPipeOut4Gen = pktLenPipeOutVec[0];
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minPktLen, maxPktLen);
 
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let simDmaReadSrvDataStreamPipeOut <- mkBufferN(2, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(pmtu);
-    let segmentedPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        simDmaReadSrvDataStreamPipeOut, pmtuPipeOut
+    let dataStreamWithPaddingPipeOut <- mkDataStreamAddPadding(
+        simDmaReadSrv.dataStream
     );
+    let segmentedPayloadPipeOut4Ref <- mkBufferN(2, dataStreamWithPaddingPipeOut);
 
     let dmaReadCntrl <- mkDmaReadCntrl(
         cntrlStatus, simDmaReadSrv.dmaReadSrv
@@ -886,31 +577,46 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         cntrlStatus, dmaReadCntrl
     );
 
+    FIFOF#(Tuple6#(TotalFragNum, ByteEn, PktFragNum, PktNum, Bool, Bool)) payloadStatsQ <- mkFIFOF;
+    Count#(TotalFragNum) remainingTotalFragCnt <- mkCount(0);
+    Count#(PktFragNum) remainingPktFragCnt <- mkCount(0);
+    Count#(PktNum) remainingPktCnt <- mkCount(0);
+    Reg#(Bool) isNextPayloadGenReq <- mkReg(True);
+
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     // PipeOut need to handle:
-    // - pktLenPipeOut4Gen
+    // - payloadLenPipeOut
     // - payloadGenerator.payloadDataStreamPipeOut
     // - segmentedPayloadPipeOut4Ref
 
     rule genPayloadGenReq if (cntrlStatus.comm.isNonErr);
-        let pktLen = pktLenPipeOut4Gen.first;
-        pktLenPipeOut4Gen.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
 
         let payloadGenReq = PayloadGenReq {
-            addPadding   : True,
-            segment      : True,
-            pmtu         : pmtu,
-            dmaReadReq   : DmaReadReq {
+            // segment      : True,
+            addPadding     : True,
+            pmtu           : pmtu,
+            dmaReadMetaData: DmaReadMetaData {
                 initiator: DMA_SRC_SQ_RD,
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
-                len      : zeroExtend(pktLen),
+                len      : payloadLen,
                 wrID     : dontCareValue
             }
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);
-        // payloadGenReqQ.enq(payloadGenReq);
+
+        let maxPktFragNum = calcFragNumByPmtu(pmtu);
+        let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
+            calcTotalFragNumByLength(payloadLen);
+        let lastFragByteEnWithPadding = addPadding2LastFragByteEn(lastFragByteEn);
+        let isOnlyFrag = isLessOrEqOne(totalFragNum);
+        let { isOnlyPkt, pktNum } = calcPktNumByLength(payloadLen, pmtu);
+        payloadStatsQ.enq(tuple6(
+            totalFragNum, lastFragByteEnWithPadding, maxPktFragNum, pktNum, isOnlyPkt, isOnlyFrag
+        ));
     endrule
 
     rule recvPayloadGenResp if (cntrlStatus.comm.isNonErr);
@@ -925,6 +631,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
                 " should be false"
             )
         );
+        countDown.decr;
     endrule
 
     rule comparePayloadDataStream if (cntrlStatus.comm.isNonErr);
@@ -932,6 +639,10 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         payloadGenerator.payloadDataStreamPipeOut.deq;
         let segmentedPayloadRef = segmentedPayloadPipeOut4Ref.first;
         segmentedPayloadPipeOut4Ref.deq;
+
+        let {
+            totalFragNum, lastFragByteEnWithPadding, maxPktFragNum, pktNum, isOnlyPkt, isOnlyFrag
+        } = payloadStatsQ.first;
 
         immAssert(
             segmentedPayload == segmentedPayloadRef,
@@ -942,11 +653,100 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
             )
         );
 
-        countDown.decr;
+        if (isNextPayloadGenReq) begin
+            remainingTotalFragCnt <= totalFragNum - 1;
+            remainingPktFragCnt <= maxPktFragNum - 1;
+            remainingPktCnt <= pktNum;
+        end
+        else begin
+            remainingTotalFragCnt.decr(1);
+
+            if (segmentedPayload.isLast) begin
+                remainingPktCnt.decr(1);
+                remainingPktFragCnt <= maxPktFragNum;
+
+                if (!isLessOrEqOne(remainingPktCnt)) begin
+                    immAssert(
+                        isOne(remainingPktFragCnt),
+                        "remainingPktFragCnt assertion @ mkTestPayloadGenSegmentAndPaddingCase",
+                        $format(
+                            "remainingPktFragCnt=%0d", remainingPktFragCnt,
+                            " should be one, when remainingPktCnt=%0d", remainingPktCnt,
+                            " and segmentedPayload.isLast=", fshow(segmentedPayload.isLast)
+                        )
+                    );
+                end
+            end
+            else begin
+                remainingPktFragCnt.decr(1);
+            end
+        end
+
+        if (isOnlyFrag || isOne(remainingTotalFragCnt)) begin
+            payloadStatsQ.deq;
+            isNextPayloadGenReq <= True;
+
+            immAssert(
+                segmentedPayload.isLast,
+                "segmentedPayload.isLast assertion @ mkTestPayloadGenSegmentAndPaddingCase",
+                $format(
+                    "segmentedPayload.isLast=", fshow(segmentedPayload.isLast),
+                    " should be true, when isOnlyFrag=", fshow(isOnlyFrag),
+                    " or remainingTotalFragCnt=%0d", remainingTotalFragCnt
+                )
+            );
+            immAssert(
+                lastFragByteEnWithPadding == segmentedPayload.byteEn,
+                "lastFragByteEnWithPadding assertion @ mkTestPayloadGenSegmentAndPaddingCase",
+                $format(
+                    "lastFragByteEnWithPadding=%h should == segmentedPayload.byteEn=%h",
+                    lastFragByteEnWithPadding, segmentedPayload.byteEn,
+                    ", when isOnlyFrag=", fshow(isOnlyFrag),
+                    " or remainingTotalFragCnt=%0d", remainingTotalFragCnt
+                )
+            );
+
+            if (isOnlyFrag) begin
+                immAssert(
+                    isOne(pktNum) && isOne(totalFragNum),
+                    "pktNum and totalFragNum assertion @ mkTestPayloadGenSegmentAndPaddingCase",
+                    $format(
+                        "pktNum=%0d and totalFragNum=%0d", pktNum, totalFragNum,
+                        " should both be one, when isOnlyFrag=", fshow(isOnlyFrag)
+                    )
+                );
+            end
+            else begin
+                immAssert(
+                    isOne(remainingPktCnt),
+                    "remainingPktCnt assertion @ mkTestPayloadGenSegmentAndPaddingCase",
+                    $format(
+                        "remainingPktCnt=%0d", remainingPktCnt,
+                        " should be one, when remainingTotalFragCnt=%0d", remainingTotalFragCnt
+                    )
+                );
+            end
+        end
+        else begin
+            isNextPayloadGenReq <= False;
+        end
+
         // $display(
-        //     "time=%0t:", $time,
-        //     " segmentedPayload=", fshow(segmentedPayload),
-        //     " should == segmentedPayloadRef=", fshow(segmentedPayloadRef)
+        //     "time=%0t: comparePayloadDataStream", $time,
+        //     ", maxPktFragNum=%0d", maxPktFragNum,
+        //     ", totalFragNum=%0d", totalFragNum,
+        //     ", pktNum=%0d", pktNum,
+        //     ", lastFragByteEnWithPadding=%h", lastFragByteEnWithPadding,
+        //     ", isOnlyFrag=", fshow(isOnlyFrag),
+        //     ", isOnlyPkt=", fshow(isOnlyPkt),
+        //     ", isNextPayloadGenReq=", fshow(isNextPayloadGenReq),
+        //     ", remainingTotalFragCnt=%0d", remainingTotalFragCnt,
+        //     ", remainingPktFragCnt=%0d", remainingPktFragCnt,
+        //     ", remainingPktCnt=%0d", remainingPktCnt,
+        //     ", segmentedPayload.isFirst=", fshow(segmentedPayload.isFirst),
+        //     ", segmentedPayload.isLast=", fshow(segmentedPayload.isLast)
+        //     // ", segmentedPayload=", fshow(segmentedPayload),
+        //     // " should == segmentedPayloadRef=", fshow(segmentedPayloadRef)
         // );
     endrule
 endmodule

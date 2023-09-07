@@ -210,7 +210,7 @@ typedef struct {
     QPN         dqpn;   // TODO: remvoe this field
     RdmaHeader  rdmaHeader;
     HandlerPD   pdHandler;
-    PmtuFragNum pktFragNum;
+    PktFragNum  pktFragNum;
     PktLen      pktLen;
     PMTU        pmtu;
     Bool        pktValid;
@@ -260,13 +260,12 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
     Reg#(Bool)        isValidPktReg <- mkRegU;
     Reg#(PAD)          bthPadCntReg <- mkRegU;
-    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktFragNum)  pktFragNumReg <- mkRegU;
     Reg#(PktLen)          pktLenReg <- mkRegU;
     Reg#(Bool)          pktValidReg <- mkRegU;
 
     Reg#(RdmaPktBufState) pktBufStateReg <- mkReg(RDMA_PKT_BUT_ST_PRE_CHECK_FRAG);
 
-    // let payloadPipeIn <- mkBufferN(valueOf(PMTU_MAX_FRAG_NUM), pipeIn.payload);
     let payloadPipeIn <- mkBuffer(pipeIn.payload);
     let rdmaHeaderPipeOut <- mkDataStream2Header(
         pipeIn.headerAndMetaData.headerDataStream,

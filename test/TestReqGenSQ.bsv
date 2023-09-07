@@ -44,18 +44,14 @@ module mkTestReqGenNormalAndZeroLenCase#(
         mkRandomWorkReq(minDmaLength, maxDmaLength);
     let newPendingWorkReqPipeOut =
         genNewPendingWorkReqPipeOut(workReqPipeOutVec[0]);
-    let workReqPipeOut4Ref <- mkBufferN(4, workReqPipeOutVec[1]);
+    let workReqPipeOut4Ref <- mkBufferN(2, workReqPipeOutVec[1]);
 
     // Request payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let pmtuPipeOut <- mkConstantPipeOut(pmtu);
-    let segDataStreamPipeOut <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        simDmaReadSrv.dataStream, pmtuPipeOut
+    let dataStreamWithPaddingPipeOut <- mkDataStreamAddPadding(
+        simDmaReadSrv.dataStream
     );
-    // let segDataStreamPipeOut <- mkDataStreamAddPadCnt(
-    //     simDmaReadSrv.dataStream
-    // );
-    let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
+    let dataStreamWithPaddingPipeOut4Ref <- mkBufferN(getMaxFragBufSize, dataStreamWithPaddingPipeOut);
 
     let pendingWorkReqBufNotEmpty = True;
     let dmaReadCntrl <- mkDmaReadCntrl(
@@ -108,10 +104,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
     // mkSink(rdmaHeaderPipeOut);
     // mkSink(pendingWorkReqPipeOut4Ref);
     // mkSink(filteredPayloadDataStreamPipeOut);
-    // mkSink(segDataStreamPipeOut4Ref);
-    // rule decrCountDonw;
-    //     countDown.decr;
-    // endrule
+    // mkSink(dataStreamWithPaddingPipeOut4Ref);
 
     rule compareWorkReq;
         let pendingWR = pendingWorkReqPipeOut4Comp.first;
@@ -131,7 +124,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
         );
         // $display("time=%0t: WR=", $time, fshow(pendingWR.wr));
     endrule
-/*
+
     rule compareRdmaReqHeader;
         let rdmaHeader = rdmaHeaderPipeOut.first;
         rdmaHeaderPipeOut.deq;
@@ -139,36 +132,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
         let { transType, rdmaOpCode } =
             extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
         let bth = extractBTH(rdmaHeader.headerData);
-
-
-        let refPendingWR = pendingWorkReqPipeOut4Ref.first;
-        let wrStartPSN = unwrapMaybe(refPendingWR.startPSN);
-        let wrEndPSN = unwrapMaybe(refPendingWR.endPSN);
-        $display(
-            "time=%0t:", $time,
-            " bth.psn=%h, wrStartPSN=%h, wrEndPSN=%h",
-            bth.psn, wrStartPSN, wrEndPSN,
-            ", opcode=", fshow(rdmaOpCode),
-            ", workReqOpCode=", fshow(refPendingWR.wr.opcode)
-        );
-
-        if (isLastOrOnlyRdmaOpCode(bth.opcode)) begin
-            pendingWorkReqPipeOut4Ref.deq;
-        end
-
-        // It must compare header not payload,
-        // since WR might have zero length
-        countDown.decr;
-    endrule
-*/
-    rule compareRdmaReqHeader;
-        let rdmaHeader = rdmaHeaderPipeOut.first;
-        rdmaHeaderPipeOut.deq;
-
-        let { transType, rdmaOpCode } =
-            extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
-        let bth = extractBTH(rdmaHeader.headerData);
-        // $display("time=%0t: BTH=", $time, fshow(bth));
+        $display("time=%0t: BTH=", $time, fshow(bth));
 
         if (validPsnReg) begin
             curPsnReg <= curPsnReg + 1;
@@ -278,8 +242,8 @@ module mkTestReqGenNormalAndZeroLenCase#(
         let payloadDataStream = filteredPayloadDataStreamPipeOut.first;
         filteredPayloadDataStreamPipeOut.deq;
 
-        let refDataStream = segDataStreamPipeOut4Ref.first;
-        segDataStreamPipeOut4Ref.deq;
+        let refDataStream = dataStreamWithPaddingPipeOut4Ref.first;
+        dataStreamWithPaddingPipeOut4Ref.deq;
 
         immAssert(
             payloadDataStream == refDataStream,

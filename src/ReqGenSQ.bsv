@@ -552,7 +552,7 @@ module mkReqGenSQ#(
         // $display("time=%0t: reset and clear mkReqGenSQ", $time);
     endrule
 
-    // rule debug if (!(
+    // rule debugNotFullSQ if (!(
     //     workReqPayloadGenQ.notFull &&
     //     workReqPktNumQ.notFull     &&
     //     workReqPsnQ.notFull        &&
@@ -723,10 +723,10 @@ module mkReqGenSQ#(
 
         if (needDmaRead) begin
             let payloadGenReq = PayloadGenReq {
-                addPadding   : True,
-                segment      : True,
-                pmtu         : cntrlStatus.comm.getPMTU,
-                dmaReadReq   : DmaReadReq {
+                // segment      : True,
+                addPadding     : True,
+                pmtu           : cntrlStatus.comm.getPMTU,
+                dmaReadMetaData: DmaReadMetaData {
                     initiator: DMA_SRC_SQ_RD,
                     sqpn     : cntrlStatus.comm.getSQPN,
                     startAddr: curPendingWR.wr.laddr,

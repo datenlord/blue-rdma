@@ -20,10 +20,10 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
     FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkFIFOF;
     FIFOF#(DataStream)          payloadOutQ <- mkFIFOF;
 
-    Reg#(RdmaHeader)  rdmaHeaderReg <- mkRegU;
-    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
-    Reg#(PktLen)          pktLenReg <- mkRegU;
-    Reg#(Bool)          pktValidReg <- mkRegU;
+    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(PktFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktLen)         pktLenReg <- mkRegU;
+    Reg#(Bool)         pktValidReg <- mkRegU;
 
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaPktPipeIn
@@ -211,8 +211,8 @@ module mkTestSimExtractNormalHeaderPayload(Empty);
     mkSink(reqGenSQ.pendingWorkReqPipeOut);
     Vector#(2, DataStreamPipeOut) rdmaReqPipeOutVec <-
         mkForkVector(reqGenSQ.rdmaReqDataStreamPipeOut);
-    let rdmaReqPipeOut4InputPktBuf <- mkBufferN(8, rdmaReqPipeOutVec[0]);
-    let rdmaReqPipeOut4DUT <- mkBufferN(8, rdmaReqPipeOutVec[1]);
+    let rdmaReqPipeOut4InputPktBuf <- mkBufferN(getMaxFragBufSize, rdmaReqPipeOutVec[0]);
+    let rdmaReqPipeOut4DUT <- mkBufferN(getMaxFragBufSize, rdmaReqPipeOutVec[1]);
     // let rdmaReqPipeOut4DUT = reqGenSQ.rdmaReqDataStreamPipeOut;
 
     // QP metadata

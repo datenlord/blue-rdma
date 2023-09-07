@@ -2137,10 +2137,10 @@ module mkReqHandleRQ#(
                 (reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP)
             ) begin
                 let payloadGenReq = PayloadGenReq {
-                    addPadding   : True,
-                    segment      : True,
-                    pmtu         : cntrlStatus.comm.getPMTU,
-                    dmaReadReq   : DmaReadReq {
+                    // segment      : True,
+                    addPadding     : True,
+                    pmtu           : cntrlStatus.comm.getPMTU,
+                    dmaReadMetaData: DmaReadMetaData {
                         initiator: DMA_SRC_RQ_RD,
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: permCheckReq.reqAddr, // reth.va

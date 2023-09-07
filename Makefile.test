@@ -22,7 +22,7 @@ TESTBENCHS = \
             TestUtils.bsv \
             TestWorkCompGen.bsv
 
-SimDma.bsv                       = mkTestFixedLenSimDataStreamPipeOut
+SimDma.bsv                       = mkTestFixedPktLenDataStreamPipeOut
 SimExtractRdmaHeaderPayload.bsv  = mkTestSimExtractNormalHeaderPayload
 SimGenRdmaReqResp.bsv            = mkTestSimGenRdmaResp
 TestArbitration.bsv              = mkTestPipeOutArbiter \
@@ -95,8 +95,7 @@ TestSpecialFIFOF.bsv             = mkTestCacheFIFO2 \
                                     mkTestVectorSearch
 TestTransportLayer.bsv           = mkTestTransportLayerNormalCase \
                                     mkTestTransportLayerErrorCase
-TestUtils.bsv                    = mkTestSegmentDataStream \
-                                    mkTestPsnFunc
+TestUtils.bsv                    = mkTestPsnFunc
 TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \
                                     mkTestWorkCompGenErrFlushCaseRQ \
                                     mkTestWorkCompGenNormalCaseSQ \
