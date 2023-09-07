@@ -124,7 +124,7 @@ module mkEchoSrv(Server#(ReqType, RespType));
         pendingReqQ.enq(tuple2(clientIdx, isLast));
     endrule
 
-    rule issueResp;
+    rule genResp;
         let { clientIdx, isLast } = pendingReqQ.first;
         pendingReqQ.deq;
 

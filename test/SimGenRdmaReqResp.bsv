@@ -30,14 +30,14 @@ module mkSimGenRdmaReqAndSendWritePayloadPipeOut#(
 )(RdmaReqAndSendWritePayloadAndPendingWorkReq);
     let cntrl <- mkSimCntrl(qpType, pmtu);
     let cntrlStatus = cntrl.contextSQ.statusSQ;
-    // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
     // Assume no pending WR
     let pendingWorkReqBufNotEmpty = False;
 
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv.dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, simDmaReadSrv.dmaReadSrv
+    );
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus, dmaReadCntrl
     );
@@ -48,17 +48,21 @@ module mkSimGenRdmaReqAndSendWritePayloadPipeOut#(
         pendingWorkReqBufNotEmpty
     );
 
-    rule noErrWC;
-        immAssert(
-            !reqGenSQ.workCompGenReqPipeOut.notEmpty,
-            "No error WC assertion @ mkSimGenRdmaReq",
-            $format(
-                "reqGenSQ.workCompGenReqPipeOut.notEmpty=",
-                fshow(reqGenSQ.workCompGenReqPipeOut.notEmpty),
-                " should be false, since it should have no error WC"
-            )
-        );
-    endrule
+    let addNoErrWorkCompOutRule <- addRules(genEmptyPipeOutRule(
+        reqGenSQ.workCompGenReqPipeOut,
+        "reqGenSQ.workCompGenReqPipeOut empty assertion @ mkSimGenRdmaReqAndSendWritePayloadPipeOut"
+    ));
+    // rule noErrWC;
+    //     immAssert(
+    //         !reqGenSQ.workCompGenReqPipeOut.notEmpty,
+    //         "No error WC assertion @ mkSimGenRdmaReq",
+    //         $format(
+    //             "reqGenSQ.workCompGenReqPipeOut.notEmpty=",
+    //             fshow(reqGenSQ.workCompGenReqPipeOut.notEmpty),
+    //             " should be false, since it should have no error WC"
+    //         )
+    //     );
+    // endrule
 
     interface pendingWorkReqPipeOut      = reqGenSQ.pendingWorkReqPipeOut;
     interface rdmaReqDataStreamPipeOut   = reqGenSQ.rdmaReqDataStreamPipeOut;
@@ -292,7 +296,9 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
     Reg#(MSN)                          msnReg <- mkReg(0);
     Reg#(Bool)                        busyReg <- mkReg(False);
 
-    let dmaReadCntrl <- mkDmaReadCntrl(cntrlStatus, dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(
+        cntrlStatus, dmaReadSrv
+    );
     let payloadGenerator <- mkPayloadGenerator(
         cntrlStatus, dmaReadCntrl
     );
@@ -303,16 +309,6 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
         toPipeOut(psnRespOutQ),
         payloadGenerator.payloadDataStreamPipeOut
     );
-    // let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
-    //     cntrlStatus.comm.isReset,
-    //     toPipeOut(respHeaderOutQ)
-    // );
-    // let rdmaRespPipeOut <- mkPrependHeader2PipeOut(
-    //     cntrlStatus.comm.isReset,
-    //     headerDataStreamAndMetaDataPipeOut.headerDataStream,
-    //     headerDataStreamAndMetaDataPipeOut.headerMetaData,
-    //     payloadGenerator.payloadDataStreamPipeOut
-    // );
 
     // (* fire_when_enabled *)
     rule deqWorkReqPipeOut if (!busyReg);
@@ -370,10 +366,10 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
             // TODO: generate atomic WR response payload
             if (isNonZeroReadWorkReq(curPendingWR.wr)) begin
                 let payloadGenReq = PayloadGenReq {
-                    addPadding   : True,
-                    segment      : True,
-                    pmtu         : cntrlStatus.comm.getPMTU,
-                    dmaReadReq   : DmaReadReq {
+                    // segment      : True,
+                    addPadding     : True,
+                    pmtu           : cntrlStatus.comm.getPMTU,
+                    dmaReadMetaData: DmaReadMetaData {
                         initiator: DMA_SRC_SQ_RD,
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: curPendingWR.wr.laddr,
@@ -644,18 +640,14 @@ module mkTestSimGenRdmaResp(Empty);
     Vector#(2, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
     let pendingWorkReqPipeOut4RespGen = existingPendingWorkReqPipeOutVec[0];
-    let pendingWorkReqPipeOut4Ref <- mkBufferN(4, existingPendingWorkReqPipeOutVec[1]);
+    let pendingWorkReqPipeOut4Ref <- mkBufferN(2, existingPendingWorkReqPipeOutVec[1]);
 
     // Payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let pmtuPipeOut <- mkConstantPipeOut(pmtu);
-    // let segDataStreamPipeOut <- mkSegmentDataStreamByPmtu(
-    //     simDmaReadSrv.dataStream, pmtuPipeOut
-    // );
-    let segDataStreamPipeOut <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        simDmaReadSrv.dataStream, pmtuPipeOut
+    let segDataStreamPipeOut <- mkDataStreamAddPadding(
+        simDmaReadSrv.dataStream
     );
-    let segDataStreamPipeOut4Ref <- mkBufferN(4, segDataStreamPipeOut);
+    let segDataStreamPipeOut4Ref <- mkBufferN(getMaxFragBufSize, segDataStreamPipeOut);
 
     // Generate RDMA responses
     let rdmaRespAndHeaderPipeOut <- mkSimGenRdmaRespHeaderAndDataStream(

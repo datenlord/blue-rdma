@@ -537,15 +537,17 @@ module mkRespHandleSQ#(
             curPendingWR, curPktMetaData, respPktInfo, retryResetReqReg, wcReqType, wrAckType
         ));
         // $display(
-        //     "time=%0t: 1st stage deqPktMetaDataOrWorkReq,", $time,
-        //     " preStageStateReg=", fshow(preStageStateReg),
+        //     "time=%0t: 1st stage deqPktMetaDataOrWorkReq", $time,
+        //     ", qpn=%h", contextSQ.statusSQ.comm.getSQPN,
+        //     ", preStageStateReg=", fshow(preStageStateReg),
         //     ", bth.psn=%h", respPktInfo.bth.psn,
         //     ", bth.opcode=", fshow(respPktInfo.bth.opcode),
         //     ", aeth.code=", fshow(respPktInfo.aeth.code),
-        //     ", WR opcode=", fshow(curPendingWR.wr.opcode),
+        //     ", deqPendingWorkReq=", fshow(deqPendingWorkReq),
+        //     ", wr.id=%h", curPendingWR.wr.id,
+        //     ", wr.opcode=", fshow(curPendingWR.wr.opcode),
         //     ", rdmaRespType=", fshow(rdmaRespType),
-        //     ", wcReqType=", fshow(wcReqType),
-        //     ", wr.id=%h", curPendingWR.wr.id
+        //     ", wcReqType=", fshow(wcReqType)
         // );
     endrule
 

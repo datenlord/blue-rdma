@@ -55,7 +55,7 @@ module mkWorkReqAndRecvReqDispatcher#(
         map(toPipeOut, recvReqOutVec)
     );
 endmodule
-
+/*
 // TODO: remove it
 module mkSimExtractNormalReqResp#(
     MetaDataQPs qpMetaData,
@@ -68,10 +68,10 @@ module mkSimExtractNormalReqResp#(
     Vector#(MAX_QP, FIFOF#(DataStream))          respPayloadOutVec <- replicateM(mkFIFOF);
     Vector#(MAX_QP, FIFOF#(RdmaPktMetaData)) respPktMetaDataOutVec <- replicateM(mkFIFOF);
 
-    Reg#(RdmaHeader)  rdmaHeaderReg <- mkRegU;
-    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
-    Reg#(PktLen)          pktLenReg <- mkRegU;
-    Reg#(Bool)          pktValidReg <- mkRegU;
+    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(PktFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktLen)         pktLenReg <- mkRegU;
+    Reg#(Bool)         pktValidReg <- mkRegU;
 
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaPktPipeIn
@@ -312,7 +312,7 @@ module mkSimExtractNormalReqResp#(
 
     return map(genInputRdmaPktBuf, genVector);
 endmodule
-
+*/
 interface TransportLayer;
     interface Put#(RecvReq) recvReqInput;
     interface Put#(WorkReq) workReqInput;

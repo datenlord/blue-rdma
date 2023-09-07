@@ -20,10 +20,10 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
     FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkFIFOF;
     FIFOF#(DataStream)          payloadOutQ <- mkFIFOF;
 
-    Reg#(RdmaHeader)  rdmaHeaderReg <- mkRegU;
-    Reg#(PmtuFragNum) pktFragNumReg <- mkRegU;
-    Reg#(PktLen)          pktLenReg <- mkRegU;
-    Reg#(Bool)          pktValidReg <- mkRegU;
+    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(PktFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktLen)         pktLenReg <- mkRegU;
+    Reg#(Bool)         pktValidReg <- mkRegU;
 
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaPktPipeIn
@@ -33,6 +33,19 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData
     );
+
+    // rule debug;
+    //     $display(
+    //         "time=%0t: mkSimExtractNormalHeaderPayload debug", $time,
+    //         ", rdmaPktPipeIn.notEmpty=", fshow(rdmaPktPipeIn.notEmpty),
+    //         ", rdmaHeaderPipeOut.notEmpty=", fshow(rdmaHeaderPipeOut.notEmpty),
+    //         ", payloadPipeIn.notEmpty=", fshow(payloadPipeIn.notEmpty),
+    //         ", pktMetaDataOutQ.notEmpty=", fshow(pktMetaDataOutQ.notEmpty),
+    //         ", payloadOutQ.notEmpty=", fshow(payloadOutQ.notEmpty),
+    //         ", pktMetaDataOutQ.notFull=", fshow(pktMetaDataOutQ.notFull),
+    //         ", payloadOutQ.notFull=", fshow(payloadOutQ.notFull)
+    //     );
+    // endrule
 
     rule extractHeader;
         let payloadFrag = payloadPipeIn.first;
@@ -148,19 +161,6 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
         end
 
         if (bth.opcode == ACKNOWLEDGE) begin
-            // $display(
-            //     "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
-            //     ", bth.opcode=", fshow(bth.opcode),
-            //     ", bth.psn=%h", bth.psn,
-            //     ", bthPadCnt=%0d", bthPadCnt,
-            //     ", fragLen=%0d", fragLen,
-            //     ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
-            //     ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
-            //     ", fragLenWithOutPad=%0d", fragLenWithOutPad,
-            //     ", pktFragNum=%0d", pktFragNum,
-            //     ", pktLen=%0d", pktLen,
-            //     ", rdmaHeader=", fshow(rdmaHeader)
-            // );
             immAssert(
                 isZeroPayloadLen && payloadFrag.isLast && payloadFrag.isFirst,
                 "isZeroPayloadLen assertion @ mkSimExtractNormalHeaderPayload",
@@ -172,6 +172,19 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
                 )
             );
         end
+        // $display(
+        //     "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn,
+        //     ", bthPadCnt=%0d", bthPadCnt,
+        //     ", fragLen=%0d", fragLen,
+        //     ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+        //     ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+        //     ", fragLenWithOutPad=%0d", fragLenWithOutPad,
+        //     ", pktFragNum=%0d", pktFragNum,
+        //     ", pktLen=%0d", pktLen,
+        //     ", rdmaHeader=", fshow(rdmaHeader)
+        // );
     endrule
 
     interface pktMetaData = toPipeOut(pktMetaDataOutQ);
@@ -198,8 +211,8 @@ module mkTestSimExtractNormalHeaderPayload(Empty);
     mkSink(reqGenSQ.pendingWorkReqPipeOut);
     Vector#(2, DataStreamPipeOut) rdmaReqPipeOutVec <-
         mkForkVector(reqGenSQ.rdmaReqDataStreamPipeOut);
-    let rdmaReqPipeOut4InputPktBuf <- mkBufferN(8, rdmaReqPipeOutVec[0]);
-    let rdmaReqPipeOut4DUT <- mkBufferN(8, rdmaReqPipeOutVec[1]);
+    let rdmaReqPipeOut4InputPktBuf <- mkBufferN(getMaxFragBufSize, rdmaReqPipeOutVec[0]);
+    let rdmaReqPipeOut4DUT <- mkBufferN(getMaxFragBufSize, rdmaReqPipeOutVec[1]);
     // let rdmaReqPipeOut4DUT = reqGenSQ.rdmaReqDataStreamPipeOut;
 
     // QP metadata

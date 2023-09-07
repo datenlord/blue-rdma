@@ -30,6 +30,10 @@ function IndexQP getDefaultIndexQP();
     return fromInteger(valueOf(DEFAULT_QP_IDX));
 endfunction
 
+function Integer getMaxFragBufSize();
+    return valueOf(PMTU_MAX_FRAG_NUM);
+endfunction
+
 interface CountDown;
     method Action decr();
     method int   _read();
@@ -184,13 +188,22 @@ function Tuple4#(Bool, PktNum, PSN, PSN) calcPktNumNextAndEndPSN(
     return tuple4(isOnlyPkt, pktNum, nextPSN, endPSN);
 endfunction
 
+// This function should be used in simulation only
+function ByteEn addPadding2LastFragByteEn(ByteEn lastFragByteEn);
+    let lastFragValidByteNum = calcByteEnBitNumInSim(lastFragByteEn);
+    let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
+    let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
+    let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
+    return lastFragByteEnWithPadding;
+endfunction
+/*
 // This module should be used in simulation only
 module mkSegmentDataStreamByPmtu#(
     DataStreamPipeOut dataStreamPipeIn,
     PipeOut#(PMTU) pmtuPipeIn
 )(DataStreamPipeOut);
-    Reg#(PmtuFragNum) pmtuFragNumReg <- mkRegU;
-    Reg#(PmtuFragNum) fragCntReg <- mkRegU;
+    Reg#(PktFragNum) pktFragNumReg <- mkRegU;
+    Reg#(PktFragNum) fragCntReg <- mkRegU;
     FIFOF#(DataStream) dataQ <- mkFIFOF;
     Reg#(Bool) setFirstReg <- mkReg(False);
 
@@ -202,14 +215,14 @@ module mkSegmentDataStreamByPmtu#(
         if (!setFirstReg && curData.isFirst) begin
             let pmtu = pmtuPipeIn.first;
             pmtuPipeIn.deq;
-            let pmtuFragNum = calcFragNumByPmtu(pmtu);
-            pmtuFragNumReg <= pmtuFragNum;
-            fragCntReg <= pmtuFragNum - 2;
+            let pktFragNum = calcFragNumByPmtu(pmtu);
+            pktFragNumReg <= pktFragNum;
+            fragCntReg <= pktFragNum - 2;
         end
         else if (setFirstReg) begin
             curData.isFirst = True;
             setFirstReg <= False;
-            fragCntReg <= pmtuFragNumReg - 2;
+            fragCntReg <= pktFragNumReg - 2;
         end
         else if (isFragCntZero) begin
             curData.isLast = True;
@@ -226,15 +239,6 @@ module mkSegmentDataStreamByPmtu#(
     method Action deq() = dataQ.deq;
     method Bool notEmpty() = dataQ.notEmpty;
 endmodule
-
-// This function should be used in simulation only
-function ByteEn addPadding2LastFragByteEn(ByteEn lastFragByteEn);
-    let lastFragValidByteNum = calcByteEnBitNumInSim(lastFragByteEn);
-    let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
-    let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
-    let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
-    return lastFragByteEnWithPadding;
-endfunction
 
 // This module should be used in simulation only
 module mkSegmentDataStreamByPmtuAndAddPadCnt#(
@@ -261,6 +265,28 @@ module mkSegmentDataStreamByPmtuAndAddPadCnt#(
     );
 
     let resultPipeOut <- mkFunc2Pipe(addPadding, segDataStreamPipeOut);
+    return resultPipeOut;
+endmodule
+*/
+module mkDataStreamAddPadding#(
+    DataStreamPipeOut dataStreamPipeIn
+)(DataStreamPipeOut);
+    function DataStream addPadding(DataStream inputDataStream);
+        if (inputDataStream.isLast) begin
+            let lastFragByteEnWithPadding = addPadding2LastFragByteEn(
+                inputDataStream.byteEn
+            );
+            // $display(
+            //     "time=%0t: inputDataStream.byteEn=%h, padCnt=%0d",
+            //     $time, inputDataStream.byteEn, padCnt
+            // );
+            inputDataStream.byteEn = lastFragByteEnWithPadding;
+        end
+
+        return inputDataStream;
+    endfunction
+
+    let resultPipeOut <- mkFunc2Pipe(addPadding, dataStreamPipeIn);
     return resultPipeOut;
 endmodule
 
@@ -332,6 +358,16 @@ module mkRandomLenPipeOut#(
     // Both min and max are inclusive
     Length minLength, Length maxLength
 )(PipeOut#(Length));
+    Vector#(1, PipeOut#(Length)) resultVec <- mkRandomValueInRangePipeOut(
+        minLength, maxLength
+    );
+    return resultVec[0];
+endmodule
+/*
+module mkRandomLenPipeOut#(
+    // Both min and max are inclusive
+    Length minLength, Length maxLength
+)(PipeOut#(Length));
     Randomize#(Length) randomLen <- mkConstrainedRandomizer(minLength, maxLength);
     FIFOF#(Length) lenQ <- mkFIFOF;
 
@@ -360,7 +396,7 @@ module mkRandomLenPipeOut#(
 
     return toPipeOut(lenQ);
 endmodule
-
+*/
 module mkFixedLenHeaderMetaPipeOut#(
     PipeOut#(HeaderByteNum) headerLenPipeIn,
     Bool alwaysHasPayload
@@ -557,7 +593,7 @@ module mkSimGenWorkReqByOpCode#(
     PipeOut#(Long) swapPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(IMM) immDtPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(RKEY) rkey2InvPipeOut <- mkGenericRandomPipeOut;
-    let dmaLenPipeOut <- mkRandomLenPipeOut(minLength, maxLength);
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minLength, maxLength);
     Vector#(vSz, PipeOut#(WorkReq)) resultPipeOutVec <-
         mkForkVector(toPipeOut(workReqOutQ));
 
@@ -565,8 +601,8 @@ module mkSimGenWorkReqByOpCode#(
         let wrID = workReqIdPipeOut.first;
         workReqIdPipeOut.deq;
 
-        let dmaLen = dmaLenPipeOut.first;
-        dmaLenPipeOut.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
 
         let wrOpCode = workReqOpCodePipeIn.first;
         workReqOpCodePipeIn.deq;
@@ -586,7 +622,7 @@ module mkSimGenWorkReqByOpCode#(
         rkey2InvPipeOut.deq;
 
         QPN sqpn = getDefaultQPN;
-        QPN srqn = dontCareValue;
+        QPN srqn = getDefaultQPN; // For XRC
         QPN dqpn = getDefaultQPN;
         QKEY qkey = dontCareValue;
         let workReq = WorkReq {
@@ -595,7 +631,7 @@ module mkSimGenWorkReqByOpCode#(
             flags    : enum2Flag(flag),
             raddr    : isAtomicWR ? 0 : dontCareValue,
             rkey     : dontCareValue,
-            len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : dmaLen,
+            len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : payloadLen,
             laddr    : dontCareValue,
             lkey     : dontCareValue,
             sqpn     : sqpn,
@@ -789,8 +825,76 @@ module mkGenNormalOrDupWorkReq#(
 
         method Action deq();
             if (normalOrDupReqReg) begin
+                let pendingWR = pendingWorkReqPipeIn.first;
                 pendingWorkReqPipeIn.deq;
-                dupWorkReqReg <= pendingWorkReqPipeIn.first;
+                dupWorkReqReg <= pendingWR;
+
+                immAssert(
+                    isValid(pendingWR.pktNum),
+                    "pendingWR.pktNum assertion @ mkGenNormalOrDupWorkReq",
+                    $format(
+                        "pendingWR.pktNum=", fshow(pendingWR.pktNum),
+                        " should be valid"
+                    )
+                );
+                // $display(
+                //     "time=%0t:", $time,
+                //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
+                // );
+            end
+            // else begin
+            //     $display(
+            //         "time=%0t:", $time,
+            //         " duplicate pendingWR=", fshow(dupWorkReqReg)
+            //     );
+            // end
+
+            if (!normalOrDupReq) begin
+                normalOrDupReqReg <= !normalOrDupReqReg;
+            end
+        endmethod
+
+        method Bool notEmpty();
+            return normalOrDupReqReg ? pendingWorkReqPipeIn.notEmpty : True;
+        endmethod
+    endinterface;
+
+    let resultPipeOut <- mkFork(identityFunc, normalOrDupWorkReqPipeOut);
+    return resultPipeOut;
+endmodule
+/*
+module mkGenNormalOrDupWorkReq2#(
+    Bool normalOrDupReq,
+    PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
+)(Tuple2#(PipeOut#(Tuple2#(Bool, PktNum)), PipeOut#(PendingWorkReq)));
+    Reg#(Bool) normalOrDupReqReg <- mkReg(True);
+    Reg#(PendingWorkReq) dupWorkReqReg <- mkRegU;
+
+    PipeOut#(Tuple2#(Tuple2#(Bool, PktNum), PendingWorkReq)) normalOrDupWorkReqPipeOut = interface PipeOut;
+        method Tuple2#(Tuple2#(Bool, PktNum), PendingWorkReq) first();
+            let pendingWR = pendingWorkReqPipeIn.first;
+            return tuple2(
+                normalOrDupReqReg ?
+                    tuple2(True, unwrapMaybe(pendingWR.pktNum)) :
+                    tuple2(False, unwrapMaybe(dupWorkReqReg.pktNum)),
+                normalOrDupReqReg ? pendingWR : dupWorkReqReg
+            );
+        endmethod
+
+        method Action deq();
+            if (normalOrDupReqReg) begin
+                let pendingWR = pendingWorkReqPipeIn.first;
+                pendingWorkReqPipeIn.deq;
+                dupWorkReqReg <= pendingWR;
+
+                immAssert(
+                    isValid(pendingWR.pktNum),
+                    "pendingWR.pktNum assertion @ mkGenNormalOrDupWorkReq",
+                    $format(
+                        "pendingWR.pktNum=", fshow(pendingWR.pktNum),
+                        " should be valid"
+                    )
+                );
                 // $display(
                 //     "time=%0t:", $time,
                 //     " normal pendingWR=", fshow(pendingWorkReqPipeIn.first)
@@ -817,6 +921,43 @@ module mkGenNormalOrDupWorkReq#(
     return resultPipeOut;
 endmodule
 
+// PktNum must be larger than zero
+module mkExpandAggregatedPipeOut#(
+    PipeOut#(Tuple2#(anytype, PktNum)) aggregatedPipeIn
+)(PipeOut#(Tuple2#(anytype, PktNum)));
+    Count#(PktNum) remainingCnt <- mkCount(0);
+
+    PipeOut#(Tuple2#(anytype, PktNum)) expandedPipeOut = interface PipeOut;
+        method Tuple2#(anytype, PktNum) first();
+            let { inputVal, inputCnt } = aggregatedPipeIn.first;
+            return isOne(inputCnt) ? aggregatedPipeIn.first : tuple2(inputVal, remainingCnt);
+        endmethod
+
+        method Action deq();
+            let { inputVal, inputCnt } = aggregatedPipeIn.first;
+            if (isOne(inputCnt) || isOne(remainingCnt)) begin
+                aggregatedPipeIn.deq;
+                remainingCnt <= 0;
+            end
+            else begin
+                remainingCnt <= inputCnt - 1;
+            end
+
+            immAssert(
+                !isZero(inputCnt),
+                "inputCnt assertion @ mkGenNormalOrDupWorkReq",
+                $format(
+                    "inputCnt=", fshow(inputCnt), " should be valid"
+                )
+            );
+        endmethod
+
+        method Bool notEmpty() = aggregatedPipeIn.notEmpty;
+    endinterface;
+
+    return expandedPipeOut;
+endmodule
+*/
 module mkExistingPendingWorkReqPipeOut#(
     CntrlQP cntrl,
     PipeOut#(WorkReq) workReqPipeIn
@@ -1282,9 +1423,36 @@ endmodule
 module mkSimCntrl#(TypeQP qpType, PMTU pmtu)(CntrlQP);
     let cntrl <- mkCntrlQP;
 
+    let setCntrl2RTS <- mkChangeCntrlState2RTS(
+        cntrl.srvPort,
+        cntrl.contextSQ.statusSQ,
+        getDefaultQPN,
+        qpType,
+        pmtu
+    );
+
+    // let setExpectedPsnAsNextPSN = True;
+    // let setZero2ExpectedPsnAndNextPSN = False;
+    // let qpDestroyWhenErr = False;
+    // let setCntrl2RTS <- mkCntrlStateCycle(
+    //     cntrl.srvPort,
+    //     cntrl.contextSQ.statusSQ,
+    //     getDefaultQPN,
+    //     qpType,
+    //     pmtu,
+    //     setExpectedPsnAsNextPSN,
+    //     setZero2ExpectedPsnAndNextPSN,
+    //     qpDestroyWhenErr
+    // );
+    return cntrl;
+endmodule
+
+module mkSimCntrlStateCycle#(TypeQP qpType, PMTU pmtu)(CntrlQP);
+    let cntrl <- mkCntrlQP;
+
     let setExpectedPsnAsNextPSN = True;
     let setZero2ExpectedPsnAndNextPSN = False;
-    let qpDestroyWhenErr = False;
+    let qpDestroyWhenErr = True;
 
     let setCntrl2RTS <- mkCntrlStateCycle(
         cntrl.srvPort,
@@ -1404,7 +1572,7 @@ module mkSimInputPktBuf4SingleQP#(
     let inputRdmaPktBuf <- mkInputRdmaPktBufAndHeaderValidation(
         headerAndMetaDataAndPayloadPipeOut, qpMetaData
     );
-    let reqPktMetaDataAndPayloadPipeIn = inputRdmaPktBuf[0].reqPktPipeOut;
+    let reqPktMetaDataAndPayloadPipeIn  = inputRdmaPktBuf[0].reqPktPipeOut;
     let respPktMetaDataAndPayloadPipeIn = inputRdmaPktBuf[0].respPktPipeOut;
     let cnpPipeIn = inputRdmaPktBuf[0].cnpPipeOut;
 
@@ -1615,6 +1783,12 @@ module mkDebugSink#(PipeOut#(anytype) pipeIn)(Empty) provisos(FShow#(anytype));
             "time=%0t: mkDebugSink debug", $time,
             ", dequeue first=", fshow(pipeIn.first)
         );
+    endrule
+endmodule
+
+module mkGetSink#(Get#(anytype) getIn)(Empty);
+    rule drain;
+        let result <- getIn.get;
     endrule
 endmodule
 

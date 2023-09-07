@@ -513,19 +513,6 @@ module mkReqHandleRQ#(
     let cntrlStatus = contextRQ.statusRQ;
 
     let atomicSrv <- mkAtomicSrv(cntrlStatus);
-    // let payloadGenerator <- mkPayloadGenerator(
-    //     cntrlStatus, dmaReadSrv, toPipeOut(payloadGenReqOutQ)
-    // );
-    // let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
-    //     cntrlStatus.comm.isReset,
-    //     toPipeOut(respHeaderOutQ)
-    // );
-    // let rdmaRespPipeOut <- mkPrependHeader2PipeOut(
-    //     cntrlStatus.comm.isReset,
-    //     headerDataStreamAndMetaDataPipeOut.headerDataStream,
-    //     headerDataStreamAndMetaDataPipeOut.headerMetaData,
-    //     payloadGenerator.payloadDataStreamPipeOut
-    // );
     let rdmaRespPipeOut <- mkCombineHeaderAndPayload(
         cntrlStatus,
         toPipeOut(respHeaderOutQ),
@@ -638,9 +625,9 @@ module mkReqHandleRQ#(
         let isExpected   = bth.psn == expectedPSN;
         let isDuplicated = psnInRangeExclusive(bth.psn, oldestPSN, expectedPSN);
 
-        let { totalRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrlStatus.comm.getPMTU);
-        // let totalRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrlStatus.comm.getPMTU);
-        // let { isOnlyRespPkt, totalRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
+        let { tmpRespPktNum, pmtuResidue } = truncateLenByPMTU(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let tmpRespPktNum = calcPktNumByLenOnly(reth.dlen, cntrlStatus.comm.getPMTU);
+        // let { isOnlyRespPkt, tmpRespPktNum } = calcPktNumByLength(reth.dlen, cntrlStatus.comm.getPMTU);
         // let reqStatus = pktStatus2ReqStatusRQ(curPktMetaData.pktStatus, bth.trans);
 
         immAssert(
@@ -669,7 +656,7 @@ module mkReqHandleRQ#(
         let reqPktInfo = RdmaReqPktInfo {
             bth             : bth,
             epoch           : epoch,
-            respPktNum      : isReadReq ? totalRespPktNum : 1,
+            respPktNum      : isReadReq ? tmpRespPktNum : 1,
             endPSN          : dontCareValue,
             isSendReq       : isSendReq,
             isWriteReq      : isWriteReq,
@@ -696,8 +683,10 @@ module mkReqHandleRQ#(
         // $display(
         //     "time=%0t: 0.1st pre-stage preBuildReqInfo", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, ePSN=%h, epoch=%h", bth.psn, bth.dqpn, expectedPSN, epoch,
-        //     // ", reqStatus=", fshow(reqStatus),
+        //     ", bth.trans=", fshow(bth.trans),
+        //     ", bth.psn=%h, bth.dqpn=%h, reth.dlen=%0d", bth.psn, bth.dqpn, reth.dlen,
+        //     ", ePSN=%h, epoch=%h", expectedPSN, epoch,
+        //     ", curPktMetaData.pktStatus=", fshow(curPktMetaData.pktStatus),
         //     ", preStageStateReg=", fshow(preStageStateReg)
         // );
     endrule
@@ -782,6 +771,8 @@ module mkReqHandleRQ#(
         //     "time=%0t: 0.2nd pre-stage preCalcReqInfo", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h, bth.dqpn=%h", bth.psn, bth.dqpn,
+        //     ", totalRespPktNum=%0d", totalRespPktNum,
+        //     ", isOnlyRespPkt=", fshow(isOnlyRespPkt),
         //     ", reqStatus=", fshow(reqStatus),
         //     ", preStageStateReg=", fshow(preStageStateReg)
         // );
@@ -897,7 +888,10 @@ module mkReqHandleRQ#(
         // $display(
         //     "time=%0t: 1st stage checkEPSN", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
-        //     ", bth.psn=%h, bth.dqpn=%h, epoch=%h", bth.psn, bth.dqpn, epoch,
+        //     ", bth.psn=%h, bth.dqpn=%h", bth.psn, bth.dqpn,
+        //     ", epoch=%h, nextEPSN=%h", epoch, nextEPSN,
+        //     ", reqPktInfo.respPktNum=%0d", reqPktInfo.respPktNum,
+        //     ", isReadReq=", fshow(isReadReq),
         //     ", reqStatus=", fshow(reqStatus)
         // );
     endrule
@@ -1179,11 +1173,11 @@ module mkReqHandleRQ#(
                     );
 
                     // $display(
-                    //     "time=%0t:", $time,
-                    //     " pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
+                    //     "time=%0t:checkQpAccPermAndReadAtomicReqNum", $time,
+                    //     ", pendingDestReadAtomicReqCnt=%0d", pendingDestReadAtomicReqCnt,
                     //     " must < cntrlStatus.comm.getPendingDestReadAtomicReqNum=%0d",
                     //     cntrlStatus.comm.getPendingDestReadAtomicReqNum,
-                    //     " when bth.psn=%h", bth.psn,
+                    //     ", when bth.psn=%h", bth.psn,
                     //     ", bth.opcode=", fshow(bth.opcode),
                     //     ", reqStatus=", fshow(reqStatus)
                     // );
@@ -1522,11 +1516,14 @@ module mkReqHandleRQ#(
                             )
                         );
                         // $display(
-                        //     "time=%0d:", $time,
-                        //     " un-aligned atomicEth.va=%h", atomicEth.va
+                        //     "time=%0d: checkPerm4NormalReq", $time,
+                        //     ", un-aligned atomicEth.va=%h", atomicEth.va
                         // );
                     end
-                    // $display("time=%0t: atomicEth.va=%h", $time, atomicEth.va);
+                    // $display(
+                    //     "time=%0t checkPerm4NormalReq", $time,
+                    //     ", atomicEth.va=%h", atomicEth.va
+                    // );
                 end
             end
             else begin
@@ -1608,7 +1605,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, reth, expectDupReadCheckResp
         ));
         // $display(
-        //     "time=%0t: 11th stage", $time,
+        //     "time=%0t: 11th stage queryPerm4DupReadReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -1675,7 +1672,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, dupReadReqStartState
         ));
         // $display(
-        //     "time=%0t: 12th stage", $time,
+        //     "time=%0t: 12th stage checkPerm4DupReadReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -1753,7 +1750,7 @@ module mkReqHandleRQ#(
             reqPktInfo, dupReadReqStartState, curDmaWriteAddr
         ));
         // $display(
-        //     "time=%0t: 13th stage", $time,
+        //     "time=%0t: 13th stage calcNormalSendWriteReqDmaAddr", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -1826,7 +1823,7 @@ module mkReqHandleRQ#(
             curDmaWriteAddr, remainingDmaWriteLen, contextRQ.getRemainingDmaWriteLen
         ));
         // $display(
-        //     "time=%0t: 14th stage", $time,
+        //     "time=%0t: 14th stage calcNormalSendWriteReqDmaRemainingLen", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -1882,7 +1879,7 @@ module mkReqHandleRQ#(
             curDmaWriteAddr, remainingDmaWriteLen, enoughDmaSpaceCheck
         ));
         // $display(
-        //     "time=%0t: 15th stage", $time,
+        //     "time=%0t: 15th stage calcNormalSendWriteReqEnoughDmaSpace", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -1966,7 +1963,7 @@ module mkReqHandleRQ#(
             reqPktInfo, reqLenCheckResult, dupReadReqStartState
         ));
         // $display(
-        //     "time=%0t: 16th stage", $time,
+        //     "time=%0t: 16th stage calcNormalSendWriteReqDmaTotalLen", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -2035,7 +2032,7 @@ module mkReqHandleRQ#(
             reqPktInfo, curDmaWriteAddr, dupReadReqStartState
         ));
         // $display(
-        //     "time=%0t: 17th stage", $time,
+        //     "time=%0t: 17th stage checkReqLen", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus)
@@ -2117,7 +2114,7 @@ module mkReqHandleRQ#(
             hasReqStatusErr, dupReadReqStartState
         ));
         // $display(
-        //     "time=%0t: 18th stage", $time,
+        //     "time=%0t: 18th stage issuePayloadConReqOrDiscard", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", hasReqStatusErr=", fshow(hasReqStatusErr),
@@ -2143,10 +2140,10 @@ module mkReqHandleRQ#(
                 (reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP)
             ) begin
                 let payloadGenReq = PayloadGenReq {
-                    addPadding   : True,
-                    segment      : True,
-                    pmtu         : cntrlStatus.comm.getPMTU,
-                    dmaReadReq   : DmaReadReq {
+                    // segment      : True,
+                    addPadding     : True,
+                    pmtu           : cntrlStatus.comm.getPMTU,
+                    dmaReadMetaData: DmaReadMetaData {
                         initiator: DMA_SRC_RQ_RD,
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: permCheckReq.reqAddr, // reth.va
@@ -2157,6 +2154,10 @@ module mkReqHandleRQ#(
 
                 payloadGenerator.srvPort.request.put(payloadGenReq);
                 expectReadRespPayload = True;
+                // $display(
+                //     "time=%0t: issuePayloadGenReq", $time,
+                //     ", payloadGenReq=", fshow(payloadGenReq)
+                // );
             end
         end
 
@@ -2175,7 +2176,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
         // $display(
-        //     "time=%0t: 19th stage", $time,
+        //     "time=%0t: 19th stage issuePayloadGenReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus),
@@ -2225,7 +2226,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
         // $display(
-        //     "time=%0t: 20th stage", $time,
+        //     "time=%0t: 20th stage issueAtomicReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", reqStatus=", fshow(reqStatus),
@@ -2325,7 +2326,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
         // $display(
-        //     "time=%0t: 21st stage", $time,
+        //     "time=%0t: 21st stage shouldGenResp4NormalCase", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", bth.ackReq=", fshow(bth.ackReq),
@@ -2415,7 +2416,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo
         ));
         // $display(
-        //     "time=%0t: 22nd stage", $time,
+        //     "time=%0t: 22nd stage shouldGenResp4OtherCases", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", bth.ackReq=", fshow(bth.ackReq),
@@ -2442,8 +2443,14 @@ module mkReqHandleRQ#(
         // If hasErrRespGenReg, no need to count response packets
         isFirstOrOnlyRespPktReg <= isLastOrOnlyRespPkt || hasErrRespGenReg;
 
-        if (hasErrRespGenReg) begin
+        if (
+            !(reqStatus == RDMA_REQ_ST_NORMAL || reqStatus == RDMA_REQ_ST_DUP) ||
+            hasErrRespGenReg
+        ) begin
             // No responses after error response
+            // Error responses have single packet
+            isFirstOrOnlyRespPkt = True;
+            isLastOrOnlyRespPkt  = True;
             respCountQ.deq;
         end
         else begin
@@ -2475,7 +2482,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktSeqInfo
         ));
         // $display(
-        //     "time=%0t: 23rd stage", $time,
+        //     "time=%0t: 23rd stage countPendingResp", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
         //     ", isOnlyRespPkt=", fshow(reqPktInfo.isOnlyRespPkt),
@@ -2546,7 +2553,7 @@ module mkReqHandleRQ#(
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
         // $display(
-        //     "time=%0t: 24th stage", $time,
+        //     "time=%0t: 24th stage updateRespPsnAndMsn", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", bth.ackReq=", fshow(bth.ackReq),
@@ -2607,7 +2614,7 @@ module mkReqHandleRQ#(
             reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
         // $display(
-        //     "time=%0t: 25th stage", $time,
+        //     "time=%0t: 25th stage waitAtomicResp", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", respPSN=%h", respPktHeaderInfo.psn,
@@ -2678,7 +2685,7 @@ module mkReqHandleRQ#(
             respPktGenInfo, respPktHeaderInfo, atomicEth
         ));
         // $display(
-        //     "time=%0t: 26th stage", $time,
+        //     "time=%0t: 26th stage insertIntoAtomicCache", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", respPSN=%h", respPktHeaderInfo.psn,
@@ -2749,8 +2756,6 @@ module mkReqHandleRQ#(
                 );
 
                 let payloadGenResp <- payloadGenerator.srvPort.response.get;
-                // let payloadGenResp = payloadGenerator.respPipeOut.first;
-                // payloadGenerator.respPipeOut.deq;
 
                 if (payloadGenResp.isRespErr) begin
                     hasDmaReadRespErr     = True;
@@ -2771,15 +2776,12 @@ module mkReqHandleRQ#(
         // Set hasDmaReadRespErr when DMA read response error occurred
         respPktGenInfo.hasDmaReadRespErr = hasDmaReadRespErr;
 
-        // hasDmaReadRespErrReg <= hasDmaReadRespErr;
-        // readRespErrNotifyReg <= hasDmaReadRespErr;
-
         dupAtomicReqPermQueryQ.enq(tuple7(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo,
             respPktGenInfo, respPktHeaderInfo, atomicEth
         ));
         // $display(
-        //     "time=%0t: 27th stage", $time,
+        //     "time=%0t: 27th stage checkReadResp", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", bth.ackReq=", fshow(bth.ackReq),
@@ -2820,7 +2822,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
         // $display(
-        //     "time=%0t: 28th stage", $time,
+        //     "time=%0t: 28th stage queryPerm4DupAtomicReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", respPSN=%h", respPktHeaderInfo.psn,
@@ -2875,7 +2877,7 @@ module mkReqHandleRQ#(
             pktMetaData, reqStatus, permCheckReq, reqPktInfo, respPktGenInfo, respPktHeaderInfo
         ));
         // $display(
-        //     "time=%0t: 29th stage", $time,
+        //     "time=%0t: 29th stage checkPerm4DupAtomicReq", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn,
         //     ", respPSN=%h", respPktHeaderInfo.psn,
@@ -2989,7 +2991,7 @@ module mkReqHandleRQ#(
             respPktGenInfo, respPktHeaderInfo, maybeHeader
         ));
         // $display(
-        //     "time=%0t: 30th stage", $time,
+        //     "time=%0t: 30th stage genRespHeader", $time,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn, ", bth.ackReq=", fshow(bth.ackReq),
         //     ", respPSN=%h", respPktHeaderInfo.psn,
@@ -3073,7 +3075,7 @@ module mkReqHandleRQ#(
                         ", shouldGenResp=", fshow(respPktGenInfo.shouldGenResp),
                         ", hasErrRespGen=", fshow(hasErrRespGen),
                         ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                        " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                        ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                     )
                 );
             end
@@ -3111,7 +3113,7 @@ module mkReqHandleRQ#(
                     ", hasErrIncurred=", fshow(hasErrIncurred),
                     ", hasErrRespGen=", fshow(hasErrRespGen),
                     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                    " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                    ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                 )
             );
 
@@ -3124,7 +3126,7 @@ module mkReqHandleRQ#(
                     " must be valid when reqStatus=", fshow(reqStatus),
                     ", hasErrRespGen=", fshow(hasErrRespGen),
                     ", hasReqStatusErr=", fshow(hasReqStatusErr),
-                    " and hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
+                    ", hasDmaReadRespErr=", fshow(hasDmaReadRespErr)
                 )
             );
 
@@ -3477,8 +3479,6 @@ module mkReqHandleRQ#(
         // );
     endrule
 
-    // interface payloadConReqPipeOut      = toPipeOut(payloadConReqOutQ);
-    // interface payloadGenReqPipeOut      = toPipeOut(payloadGenReqOutQ);
     interface rdmaRespDataStreamPipeOut = rdmaRespPipeOut;
     interface workCompGenReqPipeOut     = toPipeOut(workCompGenReqOutQ);
     method Bool respHeaderOutNotEmpty() = psnRespOutQ.notEmpty;

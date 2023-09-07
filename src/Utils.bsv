@@ -265,8 +265,10 @@ function Bool pktLenGtPMTU(PktLen pktLen, PMTU pmtu);
     endcase;
 endfunction
 
-function PmtuFragNum calcFragNumByPmtu(PMTU pmtu);
-    // TODO: check DATA_BUS_BYTE_WIDTH must be power of 2
+function PktFragNum calcFragNumByPmtu(PMTU pmtu) provisos(
+    // Check DATA_BUS_BYTE_WIDTH must be power of 2
+    Add#(TLog#(DATA_BUS_BYTE_WIDTH), 1, TLog#(TAdd#(1, DATA_BUS_BYTE_WIDTH)))
+);
     let busByteWidth = valueOf(TLog#(DATA_BUS_BYTE_WIDTH));
     let pmtuWidth = getPmtuLogValue(pmtu);
     let shiftAmt = pmtuWidth - busByteWidth;
@@ -1248,6 +1250,7 @@ function Bool containWorkReqFlag(
     // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
+// The returned PktNum might be zero or one less than actual PktNum
 function Tuple2#(PktNum, PmtuResidue) truncateLenByPMTU(Length len, PMTU pmtu);
     return case (pmtu)
         IBV_MTU_256 : begin
@@ -1302,14 +1305,14 @@ function Bool workReqNeedDmaReadSQ(WorkReq wr);
         IBV_WR_RDMA_WRITE_WITH_IMM,
         IBV_WR_SEND               ,
         IBV_WR_SEND_WITH_IMM      ,
-        IBV_WR_SEND_WITH_INV      : !isZero(wr.len);
+        IBV_WR_SEND_WITH_INV      : !isZeroR(wr.len);
         default                   : False;
     endcase;
 endfunction
 
 function Bool workReqNeedDmaWriteSQ(WorkReq wr);
     return case (wr.opcode)
-        IBV_WR_RDMA_READ           : !isZero(wr.len);
+        IBV_WR_RDMA_READ           : !isZeroR(wr.len);
         IBV_WR_ATOMIC_CMP_AND_SWP  ,
         IBV_WR_ATOMIC_FETCH_AND_ADD: True;
         default                    : False;
@@ -1317,7 +1320,7 @@ function Bool workReqNeedDmaWriteSQ(WorkReq wr);
 endfunction
 
 function Bool workReqHasPayload(WorkReq wr);
-    return !(isZero(wr.len) || isReadOrAtomicWorkReq(wr.opcode));
+    return !(isZeroR(wr.len) || isReadOrAtomicWorkReq(wr.opcode));
 endfunction
 
 function Bool workReqNeedWorkCompSQ(WorkReq wr);
@@ -1627,7 +1630,7 @@ endfunction
 // TODO: check discard duplicate or ghost reponses has
 // no response from PayloadConsumer will not incur bugs.
 function ActionValue#(PayloadConReq) genDiscardPayloadReq(
-    PmtuFragNum fragNum,
+    PktFragNum fragNum,
     DmaReqSrcType initiator,
     QPN sqpn,
     ADDR startAddr,
@@ -1655,7 +1658,7 @@ function ActionValue#(PayloadConReq) genDiscardPayloadReq(
 endfunction
 /*
 function Action genDiscardPayloadReq(
-    PmtuFragNum fragNum,
+    PktFragNum fragNum,
     DmaReqSrcType initiator,
     QPN sqpn,
     ADDR startAddr,

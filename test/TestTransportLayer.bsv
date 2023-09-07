@@ -30,10 +30,10 @@ module mkTestTransportLayerErrorCase(Empty);
 endmodule
 
 module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
-    let minDmaLength = normalOrErrCase ? 1    : 8192; // 524288;
-    let maxDmaLength = normalOrErrCase ? 8192 : 16384; // 1048576;
+    let minDmaLength = normalOrErrCase ? 1    : 536870912;  // 512MB // 65536;  //
+    let maxDmaLength = normalOrErrCase ? 8192 : 1073741824; // 1GB   // 131072; //
     let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
-    let pmtu = IBV_MTU_512;
+    let pmtu = normalOrErrCase ? IBV_MTU_256 : IBV_MTU_4096;
     let isSendSideQ = True;
 
     FIFOF#(QPN) dqpnQ4RecvSide <- mkFIFOF;
@@ -272,7 +272,7 @@ module mkInitMetaDataAndConnectQP#(
     PipeOut#(Long) swapPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(IMM) immDtPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(RKEY) rkey2InvPipeOut <- mkGenericRandomPipeOut;
-    let dmaLenPipeOut <- mkRandomLenPipeOut(minDmaLength, maxDmaLength);
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minDmaLength, maxDmaLength);
 
     let countDown <- mkCountDown(valueOf(TDiv#(MAX_CMP_CNT, 10)));
 
@@ -290,8 +290,8 @@ module mkInitMetaDataAndConnectQP#(
             let wrID = workReqIdPipeOut.first;
             workReqIdPipeOut.deq;
 
-            let dmaLen = dmaLenPipeOut.first;
-            dmaLenPipeOut.deq;
+            let payloadLen = payloadLenPipeOut.first;
+            payloadLenPipeOut.deq;
 
             let isAtomicWR = isAtomicWorkReq(wrOpCode);
 
@@ -313,7 +313,7 @@ module mkInitMetaDataAndConnectQP#(
                 flags    : needResp ? enum2Flag(IBV_SEND_SIGNALED) : enum2Flag(IBV_SEND_NO_FLAGS),
                 raddr    : raddr,
                 rkey     : rkey,
-                len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : dmaLen,
+                len      : isAtomicWR ? fromInteger(valueOf(ATOMIC_WORK_REQ_LEN)) : payloadLen,
                 laddr    : laddr,
                 lkey     : lkey,
                 sqpn     : sqpn,

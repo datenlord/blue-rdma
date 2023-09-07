@@ -166,7 +166,9 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     Vector#(3, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOutVec[0]);
     let pendingWorkReqPipeOut4PendingQ = existingPendingWorkReqPipeOutVec[0];
-    let pendingWorkReqPipeOut4WorkComp <- mkBufferN(8, existingPendingWorkReqPipeOutVec[1]);
+    let pendingWorkReqPipeOut4WorkComp <- mkBufferN(
+        valueOf(MAX_QP_WR), existingPendingWorkReqPipeOutVec[1]
+    );
     if (respType == TEST_RESP_HANDLE_GHOST_RESP) begin
         let sinkPendingWorkReq4PendingQ <- mkSink(pendingWorkReqPipeOut4PendingQ);
     end
@@ -181,19 +183,18 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     let { normalOrDupReqSelPipeOut, normalOrDupPendingWorkReqPipeOut } <- mkGenNormalOrDupWorkReq(
         normalOrDupReq, existingPendingWorkReqPipeOutVec[2]
     );
-    let normalOrDupReqSelPipeOut4ReadResp <- mkBufferN(8, normalOrDupReqSelPipeOut);
+    let normalOrDupReqSelPipeOut4ReadResp <- mkBufferN(2, normalOrDupReqSelPipeOut);
     Vector#(2, PipeOut#(PendingWorkReq)) normalOrDupPendingWorkReqPipeOutVec <-
         mkForkVector(normalOrDupPendingWorkReqPipeOut);
     let pendingWorkReqPipeOut4RespGen  = normalOrDupPendingWorkReqPipeOutVec[0];
-    let pendingWorkReqPipeOut4ReadResp <- mkBufferN(8, normalOrDupPendingWorkReqPipeOutVec[1]);
+    let pendingWorkReqPipeOut4ReadResp <- mkBufferN(2, normalOrDupPendingWorkReqPipeOutVec[1]);
 
     // Only select read response payload for normal WR
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    let readRespPayloadPipeOutBuf <- mkBufferN(32, simDmaReadSrv.dataStream);
-    let pmtuPipeOut <- mkConstantPipeOut(cntrlStatus.comm.getPMTU);
-    let readRespPayloadPipeOut4Ref <- mkSegmentDataStreamByPmtuAndAddPadCnt(
-        readRespPayloadPipeOutBuf, pmtuPipeOut
+    let readRespPayloadWithPaddingPipeOut <- mkDataStreamAddPadding(
+        simDmaReadSrv.dataStream
     );
+    let readRespPayloadPipeOut4Ref <- mkBufferN(getMaxFragBufSize, readRespPayloadWithPaddingPipeOut);
     // Generate RDMA responses
     let rdmaRespDataStreamPipeOut <- mkSimGenNormalOrErrOrRetryRdmaResp(
         respType, cntrlStatus, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
@@ -210,7 +211,7 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
     Vector#(2, PipeOut#(RdmaPktMetaData)) pktMetaDataPipeOutVec <-
         mkForkVector(pktMetaDataAndPayloadPipeOut.pktMetaData);
     let pktMetaDataPipeOut4RespHandle = pktMetaDataPipeOutVec[0];
-    let pktMetaDataPipeOut4ReadResp <- mkBufferN(8, pktMetaDataPipeOutVec[1]);
+    let pktMetaDataPipeOut4ReadResp <- mkBufferN(2, pktMetaDataPipeOutVec[1]);
     // Retry handler
     let retryHandler <- mkRetryHandleSQ(
         cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
@@ -243,7 +244,6 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
 
     // WorkCompGenSQ
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
-    // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
         payloadConsumer.response,
@@ -434,7 +434,7 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     Vector#(3, PipeOut#(PendingWorkReq)) existingPendingWorkReqPipeOutVec <-
         mkExistingPendingWorkReqPipeOut(cntrl, workReqPipeOut);
     let pendingWorkReqPipeOut4RespGen = existingPendingWorkReqPipeOutVec[0];
-    let pendingWorkReqPipeOut4WorkComp <- mkBufferN(32, existingPendingWorkReqPipeOutVec[1]);
+    let pendingWorkReqPipeOut4WorkComp <- mkBufferN(2, existingPendingWorkReqPipeOutVec[1]);
     let pendingWorkReqPipeOut4PendingQ = existingPendingWorkReqPipeOutVec[2];
     let pendingWorkReq2Q <- mkConnection(
         toGet(pendingWorkReqPipeOut4PendingQ), toPut(pendingWorkReqBuf.fifof)

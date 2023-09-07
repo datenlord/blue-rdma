@@ -29,7 +29,6 @@ endmodule
 
 module mkDataStreamPipeOutFromDmaReadResp#(Get#(DmaReadResp) resp)(DataStreamPipeOut);
     PipeOut#(DmaReadResp) dmaReadRespPipeOut <- mkPipeOutFromDmaReadResp(resp);
-    // DataStreamPipeOut ret <- mkDataStreamFromDmaReadResp(dmaReadRespPipeOut);
     DataStreamPipeOut ret <- mkFunc2Pipe(getDmaReadRespData, dmaReadRespPipeOut);
     // rule display;
     //     $display(
@@ -54,34 +53,47 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
     FIFOF#(DmaReadReq)   dmaReadReqOutQ <- mkFIFOF;
     FIFOF#(DmaReadResp) dmaReadRespOutQ <- mkFIFOF;
 
-    // Reg#(Bool) isFirstReg <- mkReg(True);
-    // Reg#(TotalFragNum) remainingFragCntReg <- mkRegU;
     Randomize#(DataStream) randomDataStream <- mkGenericRandomizer;
     Reg#(Bool) dmaReadSrvInitReg <- mkReg(False);
-    Reg#(TotalFragNum) totalFragCntReg <- mkRegU;
+    Reg#(TotalFragNum) remainingFragNumReg <- mkRegU;
     Reg#(Bool) busyReg <- mkReg(False);
     Reg#(Bool) isFirstReg <- mkRegU;
     Reg#(ByteEn) lastFragByteEnReg <- mkRegU;
     Reg#(BusBitNum) lastFragInvalidBitNumReg <- mkRegU;
     Reg#(DmaReadReq) curReqReg <- mkRegU;
 
-    Bool isFragCntZero = isZero(totalFragCntReg);
-/*
-    rule debug if (!(
-        dmaReadReqQ.notFull    &&
-        dmaReadRespQ.notFull   &&
-        dmaReadReqOutQ.notFull &&
-        dmaReadRespOutQ.notFull
-    ));
-        $display(
-            "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
-            ", dmaReadReqQ.notFull=", fshow(dmaReadReqQ.notFull),
-            ", dmaReadRespQ.notFull=", fshow(dmaReadRespQ.notFull),
-            ", dmaReadReqOutQ.notFull=", fshow(dmaReadReqOutQ.notFull),
-            ", dmaReadRespOutQ.notFull=", fshow(dmaReadRespOutQ.notFull)
-        );
-    endrule
-*/
+    Bool isFragCntZero = isZero(remainingFragNumReg);
+
+    // rule debugNotFull if (!(
+    //     dmaReadReqQ.notFull    &&
+    //     dmaReadRespQ.notFull   &&
+    //     dmaReadReqOutQ.notFull &&
+    //     dmaReadRespOutQ.notFull
+    // ));
+    //     $display(
+    //         "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
+    //         ", dmaReadReqQ.notFull=", fshow(dmaReadReqQ.notFull),
+    //         ", dmaReadRespQ.notFull=", fshow(dmaReadRespQ.notFull),
+    //         ", dmaReadReqOutQ.notFull=", fshow(dmaReadReqOutQ.notFull),
+    //         ", dmaReadRespOutQ.notFull=", fshow(dmaReadRespOutQ.notFull)
+    //     );
+    // endrule
+
+    // rule debugNotEmpty if (!(
+    //     dmaReadReqQ.notEmpty    &&
+    //     dmaReadRespQ.notEmpty   &&
+    //     dmaReadReqOutQ.notEmpty &&
+    //     dmaReadRespOutQ.notEmpty
+    // ));
+    //     $display(
+    //         "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut debug", $time,
+    //         ", dmaReadReqQ.notEmpty=", fshow(dmaReadReqQ.notEmpty),
+    //         ", dmaReadRespQ.notEmpty=", fshow(dmaReadRespQ.notEmpty),
+    //         ", dmaReadReqOutQ.notEmpty=", fshow(dmaReadReqOutQ.notEmpty),
+    //         ", dmaReadRespOutQ.notEmpty=", fshow(dmaReadRespOutQ.notEmpty)
+    //     );
+    // endrule
+
     rule init if (!dmaReadSrvInitReg);
         randomDataStream.cntrl.init;
 
@@ -108,8 +120,8 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             dmaReadSrvInitReg <= False;
 
             // $display(
-            //     "time=%0t: cancel DMA read", $time,
-            //     ", initiator=", fshow(dmaReadReq.initiator)
+            //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut acceptReq", $time,
+            //     ", cancel DMA read, initiator=", fshow(dmaReadReq.initiator)
             // );
         end
         else begin
@@ -117,15 +129,15 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             immAssert(
                 !isZeroLen,
                 "dmaReadReq.len non-zero assrtion",
-                $format("dmaReadReq.len=%h should not be zero", dmaReadReq.len)
+                $format("dmaReadReq.len=%0d should not be zero", dmaReadReq.len)
             );
 
             let { totalFragCnt, lastFragByteEn, lastFragValidByteNum } =
-                calcTotalFragNumByLength(dmaReadReq.len);
+                calcTotalFragNumByLength(zeroExtend(dmaReadReq.len));
             let { lastFragValidBitNum, lastFragInvalidByteNum, lastFragInvalidBitNum } =
                 calcFragBitNumAndByteNum(lastFragValidByteNum);
 
-            totalFragCntReg <= isZeroLen ? 0 : totalFragCnt - 1;
+            remainingFragNumReg <= isZeroLen ? 0 : totalFragCnt - 1;
             lastFragByteEnReg <= lastFragByteEn;
             lastFragInvalidBitNumReg <= lastFragInvalidBitNum;
 
@@ -133,7 +145,7 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
                 !isZero(lastFragByteEn),
                 "lastFragByteEn non-zero assertion",
                 $format(
-                    "lastFragByteEn=%h should not have zero ByteEn, dmaReadReq.len=%h",
+                    "lastFragByteEn=%h should not have zero ByteEn, dmaReadReq.len=%0d",
                     lastFragByteEn, dmaReadReq.len
                 )
             );
@@ -143,15 +155,15 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             isFirstReg <= True;
 
             // $display(
-            //     "time=%0t:", $time,
-            //     " DMA read request, wr.id=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
+            //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut acceptReq", $time,
+            //     ", DMA read request, wr.id=%h, dmaReadReq.len=%0d, totalFragCnt=%0d",
             //     dmaReadReq.wrID, dmaReadReq.len, totalFragCnt
             // );
         end
     endrule
 
     rule genResp if (busyReg && dmaReadSrvInitReg);
-        totalFragCntReg <= totalFragCntReg - 1;
+        remainingFragNumReg <= remainingFragNumReg - 1;
         let dataStream <- randomDataStream.next;
         dataStream.isFirst = isFirstReg;
         isFirstReg <= False;
@@ -181,12 +193,12 @@ module mkSimDmaReadSrvAndReqRespPipeOut(DmaReadSrvAndReqRespPipeOut);
             $format("dmaReadResp.data should not have zero ByteEn, ", fshow(dataStream))
         );
         // $display(
-        //     "time=%0t:", $time,
-        //     " DMA read response, wr.id=%h, totalFragNum=%0d",
-        //     curReqReg.wrID, totalFragCntReg,
-        //     ", dataStream=", fshow(dataStream)
-        //     // ", dataStream.isFirst=", fshow(dataStream.isFirst),
-        //     // ", dataStream.isLast=", fshow(dataStream.isLast)
+        //     "time=%0t: mkSimDmaReadSrvAndReqRespPipeOut genResp", $time,
+        //     ", DMA read response, wr.id=%h, remainingFragNum=%0d",
+        //     curReqReg.wrID, remainingFragNumReg,
+        //     // ", dataStream=", fshow(dataStream)
+        //     ", dataStream.isFirst=", fshow(dataStream.isFirst),
+        //     ", dataStream.isLast=", fshow(dataStream.isLast)
         // );
     endrule
 
@@ -254,12 +266,12 @@ module mkSimDmaReadSrvWithErr#(
         end
         dmaReadRespQ.enq(dmaReadResp);
 
-        $display(
-            "time=%0t: genErrDmaReadRespIfNeeded", $time,
-            ", dmaReadResp.isRespErr=", fshow(dmaReadResp.isRespErr),
-            ", payloadLenCnt=%0d", payloadLenCnt,
-            ", errLen=%0d", errLen
-        );
+        // $display(
+        //     "time=%0t: genErrDmaReadRespIfNeeded", $time,
+        //     ", dmaReadResp.isRespErr=", fshow(dmaReadResp.isRespErr),
+        //     ", payloadLenCnt=%0d", payloadLenCnt,
+        //     ", errLen=%0d", errLen
+        // );
     endrule
 
     interface request = simDmaReadSrv.dmaReadSrv.request;
@@ -360,53 +372,90 @@ module mkSimDmaWriteSrv(DmaWriteSrv);
     return simDmaWriteSrv.dmaWriteSrv;
 endmodule
 
-module mkFixedLenSimDataStreamPipeOut#(
-    PipeOut#(Length) dmaLenPipeOut
+module mkFixedPktLenDataStreamPipeOut#(
+    PipeOut#(PktLen) pktLenPipeOut
 )(Vector#(vSz, DataStreamPipeOut));
     let simDmaReadSrv <- mkSimDmaReadSrv;
     let dataStreamPipeOut <- mkDataStreamPipeOutFromDmaReadResp(simDmaReadSrv.response);
     Vector#(vSz, DataStreamPipeOut) dataStreamPipeOutVec <- mkForkVector(dataStreamPipeOut);
 
     rule sendDmaReq;
-        let dmaLength = dmaLenPipeOut.first;
-        dmaLenPipeOut.deq;
+        let pktLen = pktLenPipeOut.first;
+        pktLenPipeOut.deq;
 
         let dmaReq = DmaReadReq {
             initiator: DMA_SRC_RQ_RD,
             sqpn     : getDefaultQPN,
             startAddr: dontCareValue,
-            len      : dmaLength,
+            len      : pktLen,
             wrID     : dontCareValue
         };
         simDmaReadSrv.request.put(dmaReq);
-        // $display("time=%0t: dmaLength=%0d", $time, dmaLength);
+        // $display("time=%0t: pktLen=%0d", $time, pktLen);
     endrule
 
     return dataStreamPipeOutVec;
 endmodule
 
 // typedef Vector#(vSz, DataStreamPipeOut) SimDataStreamPipeOut#(type numeric vSz);
-module mkRandomLenSimDataStreamPipeOut#(
+module mkRandomPktLenDataStreamPipeOut#(
+    PktLen minPktLen, PktLen maxPktLen
+)(Vector#(vSz, DataStreamPipeOut));
+    Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <-
+        mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
+    let pktLenPipeOut = pktLenPipeOutVec[0];
+    Vector#(vSz, DataStreamPipeOut) simDataStreamPipeOut <-
+        mkFixedPktLenDataStreamPipeOut(pktLenPipeOut);
+
+    return simDataStreamPipeOut;
+endmodule
+/*
+module mkFixedPktLenDataStreamPipeOut#(
+    PipeOut#(Length) payloadLenPipeOut
+)(Vector#(vSz, DataStreamPipeOut));
+    let simDmaReadSrv <- mkSimDmaReadSrv;
+    let dataStreamPipeOut <- mkDataStreamPipeOutFromDmaReadResp(simDmaReadSrv.response);
+    Vector#(vSz, DataStreamPipeOut) dataStreamPipeOutVec <- mkForkVector(dataStreamPipeOut);
+
+    rule sendDmaReq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
+
+        let dmaReq = DmaReadReq {
+            initiator: DMA_SRC_RQ_RD,
+            sqpn     : getDefaultQPN,
+            startAddr: dontCareValue,
+            len      : payloadLen,
+            wrID     : dontCareValue
+        };
+        simDmaReadSrv.request.put(dmaReq);
+        // $display("time=%0t: payloadLen=%0d", $time, payloadLen);
+    endrule
+
+    return dataStreamPipeOutVec;
+endmodule
+
+module mkRandomPktLenDataStreamPipeOut#(
     Length minDataStreamLength, Length maxDataStreamLength
 )(Vector#(vSz, DataStreamPipeOut));
     let dmaLenPipeOut <- mkRandomLenPipeOut(minDataStreamLength, maxDataStreamLength);
     Vector#(vSz, DataStreamPipeOut) simDataStreamPipeOut <-
-        mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut);
+        mkFixedPktLenDataStreamPipeOut(dmaLenPipeOut);
 
     return simDataStreamPipeOut;
 endmodule
-
+*/
 (* doc = "testcase" *)
-module mkTestFixedLenSimDataStreamPipeOut(Empty);
-    let minDmaLength = 1;
-    let maxDmaLength = 125;
+module mkTestFixedPktLenDataStreamPipeOut(Empty);
+    let minPktLen = 1;
+    let maxPktLen = 125;
 
-    let dmaLenPipeOut <- mkRandomLenPipeOut(minDmaLength, maxDmaLength);
-    let { dmaLenPipeOut4Gen, dmaLenPipeOut4Ref } <- mkForkAndBufferRight(dmaLenPipeOut);
+    Vector#(1, PipeOut#(PktLen)) pktLenPipeOutVec <- mkRandomValueInRangePipeOut(minPktLen, maxPktLen);
+    let { pktLenPipeOut4Gen, pktLenPipeOut4Ref } <- mkForkAndBufferRight(pktLenPipeOutVec[0]);
     Vector#(1, DataStreamPipeOut) simDataStreamPipeOutVec <-
-        mkFixedLenSimDataStreamPipeOut(dmaLenPipeOut4Gen);
-    Reg#(Length) refDmaLenReg <- mkRegU;
-    Reg#(Length) totalDmaLenReg <- mkRegU;
+        mkFixedPktLenDataStreamPipeOut(pktLenPipeOut4Gen);
+    Reg#(PktLen) refPktLenReg <- mkRegU;
+    Reg#(PktLen) pktLenReg <- mkRegU;
 
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -414,28 +463,28 @@ module mkTestFixedLenSimDataStreamPipeOut(Empty);
         let curDataStreamFrag = simDataStreamPipeOutVec[0].first;
         simDataStreamPipeOutVec[0].deq;
 
-        let curLength = calcByteEnBitNumInSim(curDataStreamFrag.byteEn);
+        let curFragLen = calcByteEnBitNumInSim(curDataStreamFrag.byteEn);
 
-        let totalDmaLen = totalDmaLenReg;
-        let refDmaLen = refDmaLenReg;
+        let totalPktLen = pktLenReg;
+        let refPktLen = refPktLenReg;
         if (curDataStreamFrag.isFirst) begin
-            refDmaLen = dmaLenPipeOut4Ref.first;
-            dmaLenPipeOut4Ref.deq;
-            refDmaLenReg <= refDmaLen;
+            refPktLen = pktLenPipeOut4Ref.first;
+            pktLenPipeOut4Ref.deq;
+            refPktLenReg <= refPktLen;
 
-            totalDmaLen = zeroExtend(curLength);
-            totalDmaLenReg <= zeroExtend(curLength);
+            totalPktLen = zeroExtend(curFragLen);
+            pktLenReg <= zeroExtend(curFragLen);
         end
         else begin
-            totalDmaLen = totalDmaLenReg + zeroExtend(curLength);
-            totalDmaLenReg <= totalDmaLen;
+            totalPktLen = pktLenReg + zeroExtend(curFragLen);
+            pktLenReg <= totalPktLen;
         end
 
         if (curDataStreamFrag.isLast) begin
             immAssert(
-                totalDmaLen == refDmaLen,
-                "dataStream length assertion @ mkTestFixedLenSimDataStreamPipeOut",
-                $format("totalDmaLen=%0d should == refDmaLen=%0d", totalDmaLen, refDmaLen)
+                totalPktLen == refPktLen,
+                "dataStream length assertion @ mkTestFixedPktLenDataStreamPipeOut",
+                $format("totalPktLen=%0d should == refPktLen=%0d", totalPktLen, refPktLen)
             );
         end
 

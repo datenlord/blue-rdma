@@ -168,7 +168,7 @@ module mkTestCalculatePktLen#(
     let reqGenSQ <- mkSimGenRdmaReq(
         newPendingWorkReqPipeOut, qpType, pmtu
     );
-    let pendingWorkReqPipeOut4Ref <- mkBufferN(4, reqGenSQ.pendingWorkReqPipeOut);
+    let pendingWorkReqPipeOut4Ref <- mkBufferN(2, reqGenSQ.pendingWorkReqPipeOut);
     let rdmaReqPipeOut = reqGenSQ.rdmaReqDataStreamPipeOut;
 
     // QP metadata
