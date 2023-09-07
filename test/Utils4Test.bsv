@@ -1002,9 +1002,9 @@ module mkExistingPendingWorkReqPipeOut#(
         };
         pendingWorkReqOutQ.enq(pendingWR);
 
-        $display(
-            "time=%0t: generates pendingWR=", $time, fshow(pendingWR)
-        );
+        // $display(
+        //     "time=%0t: generates pendingWR=", $time, fshow(pendingWR)
+        // );
     endrule
 
     Vector#(vSz, PipeOut#(PendingWorkReq)) resultPipeOutVec <-

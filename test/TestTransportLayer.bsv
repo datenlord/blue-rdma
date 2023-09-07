@@ -372,12 +372,12 @@ module mkInitMetaDataAndConnectQP#(
                 if (needCheckResp) begin
                     workReqIdQ4Cmp.enq(tuple2(sqpn, wr.id));
                 end
-                $display(
-                    "time=%0t: issueWorkReq", $time,
-                    ", wrOpCode=", fshow(wrOpCode),
-                    ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
-                    sqpn, dqpn, lkey, rkey, wr.id, wr.len
-                );
+                // $display(
+                //     "time=%0t: issueWorkReq", $time,
+                //     ", wrOpCode=", fshow(wrOpCode),
+                //     ", sqpn=%h, dqpn=%h, lkey=%h, rkey=%h, wr.id=%h, wr.len=%0d",
+                //     sqpn, dqpn, lkey, rkey, wr.id, wr.len
+                // );
             endrule
 
             rule collectWorkComp4SendSide if (

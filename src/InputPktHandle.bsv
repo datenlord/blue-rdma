@@ -430,15 +430,15 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             else begin
                 if (!payloadFrag.isLast) begin
                     $warning(
-                        "time=%0t:", $time,
-                        " InputRdmaPktBuf preCheckHeader, discard invalid RDMA packet of multi-fragment payload"
+                        "time=%0t: InputRdmaPktBuf preCheckHeader", $time,
+                        ", discard invalid RDMA packet of multi-fragment payload"
                     );
                     pktBufStateReg <= RDMA_PKT_BUF_ST_DISCARD_FRAG;
                 end
                 else begin
                     $warning(
-                        "time=%0t:", $time,
-                        " InputRdmaPktBuf preCheckHeader, discard invalid RDMA packet of single-fragment payload"
+                        "time=%0t: InputRdmaPktBuf preCheckHeader", $time,
+                        ", discard invalid RDMA packet of single-fragment payload"
                     );
                 end
             end
@@ -534,15 +534,15 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                     isResp
                 );
             end
-            $display(
-                "time=%0t: checkMetaDataQP", $time,
-                ", pdHandler=%h", pdHandler,
-                ", dqpn=%h", headerValidateInfo.dqpn,
-                ", bth.dqpn=%h", bth.dqpn,
-                ", bth.psn=%h", bth.psn,
-                ", bth.opcode=", fshow(bth.opcode),
-                ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
-            );
+            // $display(
+            //     "time=%0t: checkMetaDataQP", $time,
+            //     ", pdHandler=%h", pdHandler,
+            //     ", dqpn=%h", headerValidateInfo.dqpn,
+            //     ", bth.dqpn=%h", bth.dqpn,
+            //     ", bth.psn=%h", bth.psn,
+            //     ", bth.opcode=", fshow(bth.opcode),
+            //     ", qp.statusRQ.comm.isERR=", fshow(qp.statusRQ.comm.isERR)
+            // );
 
             // let transTypeMatch = transTypeMatchQpType(bth.trans, cntrlStatus.getTypeQP, isRespPkt);
             // let qpStateMatch = isRespPkt ? cntrlStatus.comm.isRTS : cntrlStatus.comm.isNonErr;
@@ -813,8 +813,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             else begin
                 // Discard zero length payload no matter packet has payload or not
                 $info(
-                    "time=%0t:", $time,
-                    " InputRdmaPktBuf checkPktLen, discard zero-length payload for RDMA packet"
+                    "time=%0t: InputRdmaPktBuf checkPktLen", $time,
+                    ", discard zero-length payload for RDMA packet"
                 );
             end
 
@@ -822,21 +822,21 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 pktValid = (isFirstOrMidPkt && isPktLenEqPMTU) ||
                     (isLastOrOnlyPkt && !isPktLenGtPMTU);
 
-                $display(
-                    "time=%0t: checkPktLen", $time,
-                    ", bth.trans=", fshow(pktLenCheckInfo.trans),
-                    ", bth.dqpn=%h", pktLenCheckInfo.dqpn,
-                    ", bth.psn=%h", pktLenCheckInfo.psn,
-                    ", bth.opcode=", fshow(pktLenCheckInfo.opcode),
-                    ", bth.padCnt=%h", pktLenCheckInfo.padCnt,
-                    ", pktLen=%0d", pktLen,
-                    ", pmtu=", fshow(pmtu),
-                    ", isFirstOrMidPkt=", fshow(isFirstOrMidPkt),
-                    ", isPktLenEqPMTU=", fshow(isPktLenEqPMTU),
-                    ", isLastOrOnlyPkt=", fshow(isLastOrOnlyPkt),
-                    ", isPktLenGtPMTU=", fshow(isPktLenGtPMTU),
-                    ", pktValid=", fshow(pktValid)
-                );
+                // $display(
+                //     "time=%0t: checkPktLen", $time,
+                //     ", bth.trans=", fshow(pktLenCheckInfo.trans),
+                //     ", bth.dqpn=%h", pktLenCheckInfo.dqpn,
+                //     ", bth.psn=%h", pktLenCheckInfo.psn,
+                //     ", bth.opcode=", fshow(pktLenCheckInfo.opcode),
+                //     ", bth.padCnt=%h", pktLenCheckInfo.padCnt,
+                //     ", pktLen=%0d", pktLen,
+                //     ", pmtu=", fshow(pmtu),
+                //     ", isFirstOrMidPkt=", fshow(isFirstOrMidPkt),
+                //     ", isPktLenEqPMTU=", fshow(isPktLenEqPMTU),
+                //     ", isLastOrOnlyPkt=", fshow(isLastOrOnlyPkt),
+                //     ", isPktLenGtPMTU=", fshow(isPktLenGtPMTU),
+                //     ", pktValid=", fshow(pktValid)
+                // );
             end
 
             let pktStatus = PKT_ST_VALID;

@@ -95,13 +95,13 @@ module mkAddrChunkSrv#(Bool clearAll, Bool isSQ)(AddrChunkSrv);
         busyReg          <= True;
         isFirstReg       <= True;
 
-        $display(
-            "time=%0t: mkAddrChunkSrv recvReq", $time,
-            ", isSQ=", fshow(isSQ),
-            ", totalPktNum=%0d", totalPktNum,
-            ", pmtuResidue=%h", pmtuResidue,
-            ", addrChunkReq=", fshow(addrChunkReq)
-        );
+        // $display(
+        //     "time=%0t: mkAddrChunkSrv recvReq", $time,
+        //     ", isSQ=", fshow(isSQ),
+        //     ", totalPktNum=%0d", totalPktNum,
+        //     ", pmtuResidue=%h", pmtuResidue,
+        //     ", addrChunkReq=", fshow(addrChunkReq)
+        // );
     endrule
 
     rule genResp if (!clearAll && busyReg);
@@ -121,13 +121,13 @@ module mkAddrChunkSrv#(Bool clearAll, Bool isSQ)(AddrChunkSrv);
         };
         respQ.enq(addrChunkResp);
 
-        $display(
-            "time=%0t: mkAddrChunkSrv genResp", $time,
-            ", isSQ=", fshow(isSQ),
-            ", pktNumReg=%0d", pktNumReg,
-            ", chunkAddrReg=%h", chunkAddrReg,
-            ", addrChunkResp=", fshow(addrChunkResp)
-        );
+        // $display(
+        //     "time=%0t: mkAddrChunkSrv genResp", $time,
+        //     ", isSQ=", fshow(isSQ),
+        //     ", pktNumReg=%0d", pktNumReg,
+        //     ", chunkAddrReg=%h", chunkAddrReg,
+        //     ", addrChunkResp=", fshow(addrChunkResp)
+        // );
     endrule
 
     interface srvPort = toGPServer(reqQ, respQ);
@@ -238,13 +238,13 @@ module mkDmaReadCntrl#(
             pmtu     : dmaReadCntrlReq.pmtu
         };
         addrChunkSrv.srvPort.request.put(addrChunkReq);
-        $display(
-            "time=%0t: mkDmaReadCntrl recvReq", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", dmaReadCntrlReq=", fshow(dmaReadCntrlReq),
-            ", addrChunkReq=", fshow(addrChunkReq)
-        );
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl recvReq", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", dmaReadCntrlReq=", fshow(dmaReadCntrlReq),
+        //     ", addrChunkReq=", fshow(addrChunkReq)
+        // );
     endrule
 
     rule issueDmaReq if (!clearAll && !cancelReg[1]);
@@ -275,14 +275,14 @@ module mkDmaReadCntrl#(
         if (isLastDmaReqChunk) begin
             pendingDmaCntrlReqQ.deq;
         end
-        $display(
-            "time=%0t: mkDmaReadCntrl issueDmaReq", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", pendingDmaReadCntrlReq=", fshow(pendingDmaReadCntrlReq),
-            ", addrChunkResp=", fshow(addrChunkResp),
-            ", dmaReadReq=", fshow(dmaReadReq)
-        );
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl issueDmaReq", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", pendingDmaReadCntrlReq=", fshow(pendingDmaReadCntrlReq),
+        //     ", addrChunkResp=", fshow(addrChunkResp),
+        //     ", dmaReadReq=", fshow(dmaReadReq)
+        // );
     endrule
 
     rule recvDmaResp if (!clearAll);
@@ -303,18 +303,18 @@ module mkDmaReadCntrl#(
         if (dmaResp.dataStream.isLast) begin
             pendingDmaReadReqQ.deq;
         end
-        $display(
-            "time=%0t: mkDmaReadCntrl recvDmaResp", $time,
-            ", sqpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", wrID=%h", dmaResp.wrID,
-            ", isFirst=", fshow(dmaResp.dataStream.isFirst),
-            ", isLast=", fshow(dmaResp.dataStream.isLast),
-            ", isFirstDmaReqChunk=", fshow(isFirstDmaReqChunk),
-            ", isLastDmaReqChunk=", fshow(isLastDmaReqChunk),
-            ", isOrigFirst=", fshow(isOrigFirst),
-            ", isOrigLast=", fshow(isOrigLast)
-        );
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl recvDmaResp", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", wrID=%h", dmaResp.wrID,
+        //     ", isFirst=", fshow(dmaResp.dataStream.isFirst),
+        //     ", isLast=", fshow(dmaResp.dataStream.isLast),
+        //     ", isFirstDmaReqChunk=", fshow(isFirstDmaReqChunk),
+        //     ", isLastDmaReqChunk=", fshow(isLastDmaReqChunk),
+        //     ", isOrigFirst=", fshow(isOrigFirst),
+        //     ", isOrigLast=", fshow(isOrigLast)
+        // );
     endrule
 
     rule setGracefulStop if (
@@ -791,12 +791,12 @@ module mkPayloadConsumer#(
 
         let isFragNumLessOrEqOne = isLessOrEqOne(consumeReq.fragNum);
         countReqFragQ.enq(tuple3(consumeReq, isFragNumLessOrEqOne, isDiscardReq));
-        $display(
-            "time=%0t: PayloadConsumer recvReq", $time,
-            ", qpn=%h", cntrlStatus.comm.getSQPN,
-            ", isSQ=", fshow(cntrlStatus.isSQ),
-            ", consumeReq=", fshow(consumeReq)
-        );
+        // $display(
+        //     "time=%0t: PayloadConsumer recvReq", $time,
+        //     ", qpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ),
+        //     ", consumeReq=", fshow(consumeReq)
+        // );
     endrule
 
     rule countReqFrag if (cntrlStatus.comm.isNonErr || cntrlStatus.comm.isERR);

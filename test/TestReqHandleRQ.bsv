@@ -594,14 +594,14 @@ module mkNonZeroSendWriteReqPayloadPipeOut#(
             end
 
             if (dataStream.isLast) begin
-                $display(
-                    "time=%0t: mkNonZeroSendWriteReqPayloadPipeOut filterDataStream", $time,
-                    ", pktNum=%0d or remainingPktCnt=%0d",
-                    pktNum, remainingPktCnt,
-                    ", dataStream.isFirst=", fshow(dataStream.isFirst),
-                    ", dataStream.isLast=", fshow(dataStream.isLast),
-                    ", isOnlyReqPkt=", fshow(isOnlyReqPkt)
-                );
+                // $display(
+                //     "time=%0t: mkNonZeroSendWriteReqPayloadPipeOut filterDataStream", $time,
+                //     ", pktNum=%0d or remainingPktCnt=%0d",
+                //     pktNum, remainingPktCnt,
+                //     ", dataStream.isFirst=", fshow(dataStream.isFirst),
+                //     ", dataStream.isLast=", fshow(dataStream.isLast),
+                //     ", isOnlyReqPkt=", fshow(isOnlyReqPkt)
+                // );
 
                 if (isOnlyReqPkt || isOne(remainingPktCnt)) begin
                     filterPipeIn.deq;
@@ -814,12 +814,12 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
             )
         );
 
-        $display(
-            "time=%0t: sendWritePayloadDataStream=", $time,
-            fshow(sendWritePayloadDataStream),
-            " should == sendWritePayloadDataStreamRef=",
-            fshow(sendWritePayloadDataStreamRef)
-        );
+        // $display(
+        //     "time=%0t: sendWritePayloadDataStream=", $time,
+        //     fshow(sendWritePayloadDataStream),
+        //     " should == sendWritePayloadDataStreamRef=",
+        //     fshow(sendWritePayloadDataStreamRef)
+        // );
     endrule
 
     rule compareWorkCompWithPendingWorkReq;
@@ -829,7 +829,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
         normalOrDupReqSelPipeOut4WorkComp.deq;
 
         countDown.decr;
-        $display("time=%0t: pendingWR=", $time, fshow(pendingWR));
+        // $display("time=%0t: pendingWR=", $time, fshow(pendingWR));
 
         if (isNormalReq && workReqNeedRecvReq(pendingWR.wr.opcode)) begin
             let wc = workCompPipeOut4RecvReq.first;
@@ -852,7 +852,7 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
                 "workCompMatchWorkReqInRQ assertion @ mkTestReqHandleNormalAndDupReqCase",
                 $format("WC=", fshow(wc), " not match WR=", fshow(pendingWR.wr))
             );
-            $display("time=%0t: WC=", $time, fshow(wc));
+            // $display("time=%0t: WC=", $time, fshow(wc));
 
             if (workReqHasImmDt(pendingWR.wr.opcode)) begin
                 immAssert(
@@ -958,18 +958,18 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
                         )
                     );
                 end
-                $display(
-                    "time=%0t: response", $time,
-                    ", bth=", fshow(bth),
-                    ", aeth=", fshow(aeth)
-                );
+                // $display(
+                //     "time=%0t: response", $time,
+                //     ", bth=", fshow(bth),
+                //     ", aeth=", fshow(aeth)
+                // );
             end
             else begin
-                $display(
-                    "time=%0t: response", $time,
-                    ", bth=", fshow(bth),
-                    ", pendingWR=", fshow(pendingWR)
-                );
+                // $display(
+                //     "time=%0t: response", $time,
+                //     ", bth=", fshow(bth),
+                //     ", pendingWR=", fshow(pendingWR)
+                // );
             end
 
             if (isAtomicWR) begin
@@ -986,11 +986,11 @@ module mkTestReqHandleNormalAndDupReqCase#(Bool normalOrDupReq)(Empty);
                             " should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
                         )
                     );
-                    $display(
-                        "time=%0t:", $time,
-                        ", atomicAckEth.orig=%h", atomicAckEth.orig,
-                        ", should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
-                    );
+                    // $display(
+                    //     "time=%0t:", $time,
+                    //     ", atomicAckEth.orig=%h", atomicAckEth.orig,
+                    //     ", should == normalAtomicRespOrigReg=%h", normalAtomicRespOrigReg
+                    // );
                 end
             end
         end

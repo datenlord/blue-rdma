@@ -36,8 +36,6 @@ module mkTestReqGenNormalAndZeroLenCase#(
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
     let cntrlStatus = cntrl.contextSQ.statusSQ;
-    // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
 
     // WorkReq generation
     Vector#(2, PipeOut#(WorkReq)) workReqPipeOutVec <-
@@ -132,7 +130,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
         let { transType, rdmaOpCode } =
             extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
         let bth = extractBTH(rdmaHeader.headerData);
-        $display("time=%0t: BTH=", $time, fshow(bth));
+        // $display("time=%0t: BTH=", $time, fshow(bth));
 
         if (validPsnReg) begin
             curPsnReg <= curPsnReg + 1;
@@ -265,8 +263,7 @@ module mkTestReqGenDmaReadErrCase(Empty);
 
     let cntrl <- mkSimCntrl(qpType, pmtu);
     let cntrlStatus = cntrl.contextSQ.statusSQ;
-    // let setExpectedPsnAsNextPSN = False;
-    // let cntrl <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
+
     Reg#(Bool) genErrWorkCompReg[2] <- mkCReg(2, False);
 
     // WorkReq generation

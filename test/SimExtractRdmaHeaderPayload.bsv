@@ -172,19 +172,19 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
                 )
             );
         end
-        $display(
-            "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
-            ", bth.opcode=", fshow(bth.opcode),
-            ", bth.psn=%h", bth.psn,
-            ", bthPadCnt=%0d", bthPadCnt,
-            ", fragLen=%0d", fragLen,
-            ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
-            ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
-            ", fragLenWithOutPad=%0d", fragLenWithOutPad,
-            ", pktFragNum=%0d", pktFragNum,
-            ", pktLen=%0d", pktLen,
-            ", rdmaHeader=", fshow(rdmaHeader)
-        );
+        // $display(
+        //     "time=%0t: mkSimExtractNormalHeaderPayload recvPktFrag", $time,
+        //     ", bth.opcode=", fshow(bth.opcode),
+        //     ", bth.psn=%h", bth.psn,
+        //     ", bthPadCnt=%0d", bthPadCnt,
+        //     ", fragLen=%0d", fragLen,
+        //     ", payloadFrag.isFirst=", fshow(payloadFrag.isFirst),
+        //     ", payloadFrag.isLast=", fshow(payloadFrag.isLast),
+        //     ", fragLenWithOutPad=%0d", fragLenWithOutPad,
+        //     ", pktFragNum=%0d", pktFragNum,
+        //     ", pktLen=%0d", pktLen,
+        //     ", rdmaHeader=", fshow(rdmaHeader)
+        // );
     endrule
 
     interface pktMetaData = toPipeOut(pktMetaDataOutQ);
