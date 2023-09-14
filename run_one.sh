@@ -9,11 +9,11 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-TEST_LOG=std.log
+TEST_LOG=try.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
-FILES=`ls TestReqHandleRQ.bsv`
+FILES=`ls SimDma.bsv`
 for FILE in $FILES; do
     # echo $FILE
     TESTCASES=`grep -Phzo 'doc.*?\nmodule\s+\S+(?=\()' $FILE | xargs -0  -I {}  echo "{}" | grep module | cut -d ' ' -f 2`

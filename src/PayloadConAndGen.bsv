@@ -349,6 +349,83 @@ interface DmaWriteCntrl;
     interface DmaCntrl dmaCntrl;
 endinterface
 
+module mkDmaWriteCntrl#(
+    CntrlStatus cntrlStatus,
+    DmaWriteSrv dmaWriteSrv
+)(DmaWriteCntrl);
+    FIFOF#(DmaWriteReq)   reqQ <- mkFIFOF;
+    FIFOF#(DmaWriteResp) respQ <- mkFIFOF;
+
+    FIFOF#(Bool) hasPendingReqQ <- mkFIFOF;
+
+    Reg#(Bool) gracefulStopReg[2] <- mkCReg(2, False);
+    Reg#(Bool)       cancelReg[2] <- mkCReg(2, False);
+
+    let clearAll = cntrlStatus.comm.isReset;
+
+    rule resetAndClear if (clearAll);
+        reqQ.clear;
+        respQ.clear;
+
+        hasPendingReqQ.clear;
+
+        cancelReg[1]       <= False;
+        gracefulStopReg[1] <= False;
+    endrule
+
+    rule issueReq if (!clearAll && !cancelReg[1]);
+        let dmaWriteReq = reqQ.first;
+        reqQ.deq;
+
+        dmaWriteSrv.request.put(dmaWriteReq);
+        if (dmaWriteReq.dataStream.isFirst) begin
+            hasPendingReqQ.enq(True);
+        end
+    endrule
+
+    rule recvResp if (!clearAll);
+        let dmaWriteResp <- dmaWriteSrv.response.get;
+        respQ.enq(dmaWriteResp);
+        hasPendingReqQ.deq;
+    endrule
+
+    rule gracefulStopReq if (!clearAll && cancelReg[1] && !gracefulStopReg[1]);
+        let dmaWriteReq = reqQ.first;
+
+        if (!dmaWriteReq.dataStream.isFirst) begin
+            reqQ.deq;
+            dmaWriteSrv.request.put(dmaWriteReq);
+        end
+
+        // $display("time=%0t: DmaWriteCntrl cancel write request", $time);
+    endrule
+
+    rule setGracefulStop if (
+        !clearAll           &&
+        cancelReg[1]        &&
+        !gracefulStopReg[1] &&
+        // !respQ.notEmpty     &&
+        !hasPendingReqQ.notEmpty
+    );
+        gracefulStopReg[1] <= True;
+        // $display(
+        //     "time=%0t: mkDmaWritetrl cancel write done", $time,
+        //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
+        //     ", isSQ=", fshow(cntrlStatus.isSQ)
+        // );
+    endrule
+
+    interface srvPort = toGPServer(reqQ, respQ);
+
+    interface dmaCntrl = interface DmaCntrl;
+        method Action cancel();
+            cancelReg[0] <= True;
+        endmethod
+
+        method Bool isIdle() = gracefulStopReg[0];
+    endinterface;
+endmodule
+/*
 typedef enum {
     DMA_WRITE_CNTRL_IDLE,
     DMA_WRITE_CNTRL_SEND_REQ,
@@ -431,7 +508,7 @@ module mkDmaWriteCntrl#(
         method Bool isIdle() = stateReg == DMA_WRITE_CNTRL_IDLE && !dmaReqQ.notEmpty && !dmaRespQ.notEmpty;
     endinterface;
 endmodule
-
+*/
 interface BramPipe#(type anytype);
     interface PipeOut#(anytype) pipeOut;
     method Action clear();
