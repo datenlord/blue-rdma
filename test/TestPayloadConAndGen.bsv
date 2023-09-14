@@ -1,9 +1,9 @@
+import BuildVector :: *;
 import ClientServer :: *;
 import Cntrs :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
-import BuildVector :: *;
 import Vector :: *;
 
 import Headers :: *;
@@ -160,10 +160,10 @@ module mkTestDmaReadCntrlCancelCase(Empty);
 endmodule
 
 typedef enum {
-    TEST_DMA_READ_CNTRL_RESET,
-    TEST_DMA_READ_CNTRL_RUN,
-    TEST_DMA_READ_CNTRL_IDLE
-} TestDmaReadCntrlState deriving(Bits, Eq, FShow);
+    TEST_DMA_CNTRL_RESET,
+    TEST_DMA_CNTRL_RUN,
+    TEST_DMA_CNTRL_IDLE
+} TestDmaCntrlState deriving(Bits, Eq, FShow);
 
 module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     let minPayloadLen = 2048;
@@ -176,7 +176,6 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         IBV_MTU_2048,
         IBV_MTU_4096
     );
-    // Reg#(Bool) clearReg <- mkReg(True);
     let unusedPMTU = IBV_MTU_256;
     let cntrl <- mkSimCntrlStateCycle(qpType, unusedPMTU);
     let cntrlStatus = cntrl.contextSQ.statusSQ;
@@ -185,8 +184,8 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     Reg#(TotalFragNum) remainingFragNumReg <- mkReg(0);
     FIFOF#(TotalFragNum) totalFragNumQ <- mkFIFOF;
 
-    PipeOut#(Bool)  randomCancelPipeOut <- mkGenericRandomPipeOut;
-    Reg#(Bool)   isFinalRespLastFragReg <- mkReg(False);
+    PipeOut#(Bool) randomCancelPipeOut <- mkGenericRandomPipeOut;
+    Reg#(Bool)  isFinalRespLastFragReg <- mkReg(False);
 
     PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
     let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
@@ -195,23 +194,22 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     let simDmaReadSrv <- mkSimDmaReadSrv;
     let dut <- mkDmaReadCntrl(cntrlStatus, simDmaReadSrv);
 
-    Reg#(TestDmaReadCntrlState) stateReg <- mkReg(TEST_DMA_READ_CNTRL_RESET);
+    Reg#(TestDmaCntrlState) stateReg <- mkReg(TEST_DMA_CNTRL_RESET);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    rule clearAll if (stateReg == TEST_DMA_READ_CNTRL_RESET);
-        // clearReg <= False;
+    rule clearAll if (stateReg == TEST_DMA_CNTRL_RESET);
         canceledReg <= False;
         remainingFragNumReg <= 0;
         isFinalRespLastFragReg <= False;
         totalFragNumQ.clear;
 
         if (cntrlStatus.comm.isRTS) begin
-            stateReg <= TEST_DMA_READ_CNTRL_RUN;
-            $display("time=%0t: clearAll", $time);
+            stateReg <= TEST_DMA_CNTRL_RUN;
+            // $display("time=%0t: clearAll", $time);
         end
     endrule
 
-    rule issueReq if (stateReg == TEST_DMA_READ_CNTRL_RUN);
+    rule issueReq if (stateReg == TEST_DMA_CNTRL_RUN);
         let startAddr = startAddrPipeOut.first;
         startAddrPipeOut.deq;
 
@@ -240,15 +238,15 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         dut.srvPort.request.put(dmaReadCntrlReq);
         countDown.decr;
 
-        $display(
-            "time=%0t: issueReq", $time,
-            ", payloadLen=%0d", payloadLen,
-            ", totalPktNum=%0d", totalPktNum,
-            ", totalFragNum=%0d", totalFragNum
-        );
+        // $display(
+        //     "time=%0t: issueReq", $time,
+        //     ", payloadLen=%0d", payloadLen,
+        //     ", totalPktNum=%0d", totalPktNum,
+        //     ", totalFragNum=%0d", totalFragNum
+        // );
     endrule
 
-    rule checkResp if (stateReg == TEST_DMA_READ_CNTRL_RUN && !dut.dmaCntrl.isIdle);
+    rule checkResp if (stateReg == TEST_DMA_CNTRL_RUN && !dut.dmaCntrl.isIdle);
         let dmaReadCntrlResp <- dut.srvPort.response.get;
         isFinalRespLastFragReg <= dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
 
@@ -262,14 +260,6 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
             end
         end
 
-        $display(
-            "time=%0t: checkResp", $time,
-            ", remainingFragNumReg=%0d", remainingFragNumReg,
-            ", isFirst=", fshow(dmaReadCntrlResp.dmaReadResp.dataStream.isFirst),
-            ", isLast=", fshow(dmaReadCntrlResp.dmaReadResp.dataStream.isLast),
-            ", isOrigFirst=", fshow(dmaReadCntrlResp.isOrigFirst),
-            ", isOrigLast=", fshow(dmaReadCntrlResp.isOrigLast)
-        );
         if (dmaReadCntrlResp.isOrigLast) begin
             totalFragNumQ.deq;
 
@@ -292,12 +282,20 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
                 cntrl.setStateErr;
                 dut.dmaCntrl.cancel;
                 canceledReg <= True;
-                $display("time=%0t: dmaCntrl.cancel", $time);
+                // $display("time=%0t: dmaCntrl.cancel", $time);
             end
         end
+        // $display(
+        //     "time=%0t: checkResp", $time,
+        //     ", remainingFragNumReg=%0d", remainingFragNumReg,
+        //     ", isFirst=", fshow(dmaReadCntrlResp.dmaReadResp.dataStream.isFirst),
+        //     ", isLast=", fshow(dmaReadCntrlResp.dmaReadResp.dataStream.isLast),
+        //     ", isOrigFirst=", fshow(dmaReadCntrlResp.isOrigFirst),
+        //     ", isOrigLast=", fshow(dmaReadCntrlResp.isOrigLast)
+        // );
     endrule
 
-    rule waitUntilGracefulStop if (stateReg == TEST_DMA_READ_CNTRL_RUN && dut.dmaCntrl.isIdle);
+    rule waitUntilGracefulStop if (stateReg == TEST_DMA_CNTRL_RUN && dut.dmaCntrl.isIdle);
         immAssert(
             isFinalRespLastFragReg,
             "isFinalRespLastFragReg assertion @ mkTestDmaReadCntrlNormalOrCancelCase",
@@ -308,16 +306,221 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         );
 
         cntrl.errFlushDone;
-        stateReg <= TEST_DMA_READ_CNTRL_IDLE;
-        $display("time=%0t: dmaCntrl.isIdle", $time);
+        stateReg <= TEST_DMA_CNTRL_IDLE;
+        // $display("time=%0t: dmaCntrl.isIdle", $time);
     endrule
 
-    rule loop if (stateReg == TEST_DMA_READ_CNTRL_IDLE);
-        // clearReg <= True;
-        stateReg <= TEST_DMA_READ_CNTRL_RESET;
+    rule loop if (stateReg == TEST_DMA_CNTRL_IDLE);
+        stateReg <= TEST_DMA_CNTRL_RESET;
     endrule
 endmodule
 
+(* doc = "testcase" *)
+module mkTestDmaWriteCntrlNormalCase(Empty);
+    let normalOrCancelCase = True;
+    let result <- mkTestDmaWriteCntrlNormalOrCancelCase(normalOrCancelCase);
+endmodule
+
+(* doc = "testcase" *)
+module mkTestDmaWriteCntrlCancelCase(Empty);
+    let normalOrCancelCase = False;
+    let result <- mkTestDmaWriteCntrlNormalOrCancelCase(normalOrCancelCase);
+endmodule
+
+module mkTestDmaWriteCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
+    let minPayloadLen = 2048;
+    let maxPayloadLen = 8192;
+    let qpType = IBV_QPT_XRC_SEND;
+    let pmtuVec = vec(
+        IBV_MTU_256,
+        IBV_MTU_512,
+        IBV_MTU_1024,
+        IBV_MTU_2048,
+        IBV_MTU_4096
+    );
+    let unusedPMTU = IBV_MTU_256;
+    let cntrl <- mkSimCntrlStateCycle(qpType, unusedPMTU);
+    let cntrlStatus = cntrl.contextSQ.statusSQ;
+
+    Reg#(Bool) canceledReg <- mkReg(False);
+    Reg#(PSN) psnReg <- mkReg(0);
+    Reg#(Bool) isFirstFragReg <- mkReg(True);
+    Reg#(TotalFragNum) remainingTotalFragNumReg <- mkReg(0);
+    Reg#(PktFragNum) remainingPktFragNumReg <- mkReg(0);
+    FIFOF#(Tuple3#(TotalFragNum, ByteEn, PktFragNum)) pendingReqStatsQ <- mkFIFOF;
+
+    PipeOut#(Bool) randomCancelPipeOut <- mkGenericRandomPipeOut;
+    Reg#(Bool)   isFinalReqLastFragReg <- mkReg(False);
+
+    // PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
+    let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
+
+    let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
+    let dut <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
+
+    Reg#(TestDmaCntrlState) stateReg <- mkReg(TEST_DMA_CNTRL_RESET);
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    rule clearAll if (stateReg == TEST_DMA_CNTRL_RESET);
+        canceledReg <= False;
+        psnReg <= 0;
+        isFirstFragReg <= True;
+        remainingTotalFragNumReg <= 0;
+        remainingPktFragNumReg <= 0;
+        isFinalReqLastFragReg <= False;
+        pendingReqStatsQ.clear;
+
+        if (cntrlStatus.comm.isRTS) begin
+            stateReg <= TEST_DMA_CNTRL_RUN;
+            // $display("time=%0t: clearAll", $time);
+        end
+    endrule
+
+    rule prepareReq if (stateReg == TEST_DMA_CNTRL_RUN);
+        // let startAddr = startAddrPipeOut.first;
+        // startAddrPipeOut.deq;
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
+
+        let pmtu = pmtuPipeOut.first;
+        pmtuPipeOut.deq;
+
+        let totalPktNum = calcPktNumByLenOnly(payloadLen, pmtu);
+        let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
+            calcTotalFragNumByLength(payloadLen);
+        let pktFragNum = calcFragNumByPmtu(pmtu);
+        pendingReqStatsQ.enq(tuple3(totalFragNum, lastFragByteEn, pktFragNum));
+        // $display(
+        //     "time=%0t: issueReq", $time,
+        //     ", payloadLen=%0d", payloadLen,
+        //     ", totalPktNum=%0d", totalPktNum,
+        //     ", totalFragNum=%0d", totalFragNum,
+        //     ", pktFragNum=%0d", pktFragNum
+        // );
+    endrule
+
+    rule genReq if (stateReg == TEST_DMA_CNTRL_RUN);
+        let { totalFragNum, lastFragByteEn, pktFragNum } = pendingReqStatsQ.first;
+        let isOrigFirst = isZero(remainingTotalFragNumReg);
+        let isFinalFrag = isOne(totalFragNum) || isOne(remainingTotalFragNumReg);
+        if (isFinalFrag) begin
+            pendingReqStatsQ.deq;
+            remainingTotalFragNumReg <= 0;
+        end
+        else begin
+            if (isZero(remainingTotalFragNumReg)) begin
+                remainingTotalFragNumReg <= totalFragNum - 1;
+
+                immAssert(
+                    !isLessOrEqOne(totalFragNum),
+                    "totalFragNum assertion @ mkTestDmaWriteCntrlNormalOrCancelCase",
+                    $format(
+                        "totalFragNum=%0d should > 1", totalFragNum
+                    )
+                );
+            end
+            else begin
+                remainingTotalFragNumReg <= remainingTotalFragNumReg - 1;
+            end
+        end
+
+        let isLastFrag = isFinalFrag || isOne(remainingPktFragNumReg);
+        if (isLastFrag) begin
+            isFirstFragReg <= True;
+            psnReg <= psnReg + 1;
+        end
+        else begin
+            isFirstFragReg <= False;
+        end
+
+        if (isFirstFragReg) begin
+            remainingPktFragNumReg <= pktFragNum - 1;
+        end
+        else begin
+            remainingPktFragNumReg <= remainingPktFragNumReg - 1;
+        end
+
+        let dmaWriteReq = DmaWriteReq {
+            metaData     : DmaWriteMetaData {
+                initiator: DMA_SRC_RQ_WR,
+                sqpn     : cntrlStatus.comm.getSQPN,
+                startAddr: dontCareValue,
+                len      : dontCareValue,
+                psn      : psnReg
+            },
+            dataStream : DataStream {
+                data   : dontCareValue,
+                byteEn : isLastFrag ? lastFragByteEn : maxBound,
+                isFirst: isFirstFragReg,
+                isLast : isLastFrag
+            }
+        };
+
+        dut.srvPort.request.put(dmaWriteReq);
+
+        // $display(
+        //     "time=%0t: genReq", $time,
+        //     ", remainingTotalFragNumReg=%0d", remainingTotalFragNumReg,
+        //     ", remainingPktFragNumReg=%0d", remainingPktFragNumReg,
+        //     ", isFirst=", fshow(isFirstFragReg),
+        //     ", isLast=", fshow(isLastFrag),
+        //     ", isOrigFirst=", fshow(isOrigFirst),
+        //     ", isFinalFrag=", fshow(isFinalFrag)
+        // );
+    endrule
+
+    rule discardReq if (stateReg == TEST_DMA_CNTRL_RUN);
+        let dmaWriteReqDataStream = simDmaWriteSrv.dataStream.first;
+        simDmaWriteSrv.dataStream.deq;
+        isFinalReqLastFragReg <= dmaWriteReqDataStream.isLast;
+        // $display(
+        //     "time=%0t: discardReq", $time,
+        //     ", dmaWriteReqDataStream.isLast=", fshow(dmaWriteReqDataStream.isLast)
+        // );
+    endrule
+
+    rule checkReq if (stateReg == TEST_DMA_CNTRL_IDLE);
+        immAssert(
+            isFinalReqLastFragReg,
+            "isFinalReqLastFragReg assertion @ mkTestDmaWriteCntrlNormalOrCancelCase",
+            $format(
+                "isFinalReqLastFragReg=", fshow(isFinalReqLastFragReg),
+                " should be true, when canceledReg=", fshow(canceledReg),
+                " and dut.dmaCntrl.isIdle=", fshow(dut.dmaCntrl.isIdle)
+            )
+        );
+    endrule
+
+    rule checkResp if (stateReg == TEST_DMA_CNTRL_RUN && !dut.dmaCntrl.isIdle);
+        let dmaWriteResp <- dut.srvPort.response.get;
+        countDown.decr;
+
+        if (!normalOrCancelCase) begin
+            let shouldCancel = randomCancelPipeOut.first;
+            randomCancelPipeOut.deq;
+
+            if (shouldCancel && !canceledReg) begin
+                cntrl.setStateErr;
+                dut.dmaCntrl.cancel;
+                canceledReg <= True;
+                // $display("time=%0t: dmaCntrl.cancel", $time);
+            end
+        end
+    endrule
+
+    rule waitUntilGracefulStop if (stateReg == TEST_DMA_CNTRL_RUN && dut.dmaCntrl.isIdle);
+        cntrl.errFlushDone;
+        stateReg <= TEST_DMA_CNTRL_IDLE;
+        // $display("time=%0t: dmaCntrl.isIdle", $time);
+    endrule
+
+    rule loop if (stateReg == TEST_DMA_CNTRL_IDLE);
+        // clearReg <= True;
+        stateReg <= TEST_DMA_CNTRL_RESET;
+    endrule
+endmodule
+/*
 typedef enum {
     TEST_DMA_CNTRL_ISSUE_REQ,
     TEST_DMA_CNTRL_RUN_A_CYCLE,
@@ -325,7 +528,6 @@ typedef enum {
     TEST_DMA_CNTRL_WAIT_IDLE
 } TestDmaCntrlState deriving(Bits, Eq, FShow);
 
-(* doc = "testcase" *)
 module mkTestDmaWriteCntrl(Empty);
     let minPktLen = 2048;
     let maxPktLen = 4096;
@@ -400,7 +602,7 @@ module mkTestDmaWriteCntrl(Empty);
         countDown.decr;
     endrule
 endmodule
-
+*/
 (* doc = "testcase" *)
 module mkTestPayloadConAndGenNormalCase(Empty);
     let minPktLen = 2048;

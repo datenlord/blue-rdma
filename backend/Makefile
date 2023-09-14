@@ -6,7 +6,7 @@ VLOGDIR ?= verilog
 OUTPUTDIR ?= output
 LOGFILE ?= run.log
 # ONLYSYNTH ?= 1
-RUNTOPHASE ?= place
+RUNTOPHASE ?= place # synth place route all
 PARTNAME = xcvu13p-fhgb2104-2-i
 # TARGETFILE ?= ../src/QueuePair.bsv
 # TOPMODULE ?= mkQP
@@ -33,7 +33,7 @@ verilog: compile
 	bluetcl listVlogFiles.tcl -bdir $(BUILDDIR) -vdir $(BUILDDIR) $(TOPMODULE) $(TOPMODULE) | grep -i '\.v' | xargs -I {} cp {} $(VLOGDIR)
 
 vivado: verilog
-	/tools/Xilinx/Vivado/2022.2/bin/vivado -mode tcl -nolog -nojournal -source ../../simple-tlb/non_project_build.tcl 2>&1 | tee $(LOGFILE)
+	vivado -mode tcl -nolog -nojournal -source ./non_project_build.tcl 2>&1 | tee $(LOGFILE)
 
 clean:
 	rm -rf $(BUILDDIR) $(OUTPUTDIR) $(VLOGDIR) .Xil *.jou *.log

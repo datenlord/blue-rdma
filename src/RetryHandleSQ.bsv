@@ -318,13 +318,13 @@ module mkRetryHandleSQ#(
                 timeOutTriggerQ.enq(triggerTimeOut);
                 resetTimeOutCntInternal;
 
-                $display(
-                    "time=%0t: checkTimeOut", $time,
-                    ", qpn=%h", cntrlStatus.comm.getSQPN,
-                    ", isTimeOutCntHighPartZeroReg=", fshow(isTimeOutCntHighPartZeroReg),
-                    ", isTimeOutCntLowPartZeroReg=", fshow(isTimeOutCntLowPartZeroReg),
-                    ", triggerTimeOut=", fshow(triggerTimeOut)
-                );
+                // $display(
+                //     "time=%0t: checkTimeOut", $time,
+                //     ", qpn=%h", cntrlStatus.comm.getSQPN,
+                //     ", isTimeOutCntHighPartZeroReg=", fshow(isTimeOutCntHighPartZeroReg),
+                //     ", isTimeOutCntLowPartZeroReg=", fshow(isTimeOutCntLowPartZeroReg),
+                //     ", triggerTimeOut=", fshow(triggerTimeOut)
+                // );
             end
             else begin
                 timeOutCntReg <= timeOutCntReg - 1;

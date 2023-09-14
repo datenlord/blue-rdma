@@ -22,7 +22,8 @@ TESTBENCHS = \
             TestUtils.bsv \
             TestWorkCompGen.bsv
 
-SimDma.bsv                       = mkTestFixedPktLenDataStreamPipeOut
+SimDma.bsv                       = mkTestFixedPktLenDataStreamPipeOut \
+                                    mkTestDmaReadAndWriteSrv
 SimExtractRdmaHeaderPayload.bsv  = mkTestSimExtractNormalHeaderPayload
 SimGenRdmaReqResp.bsv            = mkTestSimGenRdmaResp
 TestArbitration.bsv              = mkTestPipeOutArbiter \
@@ -51,7 +52,8 @@ TestPayloadConAndGen.bsv         = mkTestPayloadConAndGenNormalCase \
                                     mkTestPayloadGenSegmentAndPaddingCase \
                                     mkTestDmaReadCntrlNormalCase \
                                     mkTestDmaReadCntrlCancelCase \
-                                    mkTestDmaWriteCntrl \
+                                    mkTestDmaWriteCntrlNormalCase \
+                                    mkTestDmaWriteCntrlCancelCase \
                                     mkTestAddrChunkSrv
 TestQueuePair.bsv                = mkTestPermCheckCltArbiter \
                                     mkTestDmaReadCltArbiter \
