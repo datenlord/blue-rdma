@@ -1413,6 +1413,15 @@ module mkConnectPendingWorkReqPipeOut2PendingWorkReqQ#(
     endrule
 endmodule
 */
+
+// suppose LKey == RKey
+function IndexMR wr2IndexMR(WorkReq wr) = lkey2IndexMR(wr.lkey);
+function IndexMR lkey2IndexMR(LKEY lkey) = unpack(truncateLSB(lkey));
+function IndexMR rkey2IndexMR(RKEY rkey) = unpack(truncateLSB(rkey));
+
+
+
+
 // WorkComp related
 
 // TODO: support multiple WC flags
@@ -1635,7 +1644,8 @@ function ActionValue#(PayloadConReq) genDiscardPayloadReq(
     QPN sqpn,
     ADDR startAddr,
     PktLen len,
-    PSN psn
+    PSN psn,
+    IndexMR mrID
 );
     actionvalue
         immAssert(
@@ -1650,7 +1660,8 @@ function ActionValue#(PayloadConReq) genDiscardPayloadReq(
                 sqpn     : sqpn,
                 startAddr: startAddr,
                 len      : len,
-                psn      : psn
+                psn      : psn,
+                mrID    : mrID       
             }
         };
         return discardReq;

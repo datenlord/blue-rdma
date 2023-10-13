@@ -231,7 +231,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: startAddr,
                 len      : payloadLen,
-                wrID     : dontCareValue
+                mrID     : dontCareValue
             }
         };
 
@@ -447,7 +447,8 @@ module mkTestDmaWriteCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : dontCareValue,
-                psn      : psnReg
+                psn      : psnReg,
+                mrID     : dontCareValue
             },
             dataStream : DataStream {
                 data   : dontCareValue,
@@ -558,7 +559,8 @@ module mkTestDmaWriteCntrl(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : pktLen,
-                psn      : dontCareValue
+                psn      : dontCareValue,
+                mrID     : dontCareValue
             },
             dataStream: DataStream {
                 data: dontCareValue,
@@ -663,7 +665,7 @@ module mkTestPayloadConAndGenNormalCase(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : zeroExtend(pktLen),
-                wrID     : dontCareValue
+                mrID     : dontCareValue
             }
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);
@@ -703,7 +705,8 @@ module mkTestPayloadConAndGenNormalCase(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : pktLen,
-                psn      : startPktSeqNum
+                psn      : startPktSeqNum,
+                mrID     : dontCareValue
             }
         };
         payloadConsumer.request.put(payloadConReq);
@@ -805,7 +808,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : payloadLen,
-                wrID     : dontCareValue
+                mrID     : dontCareValue
             }
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);

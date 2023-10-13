@@ -108,7 +108,7 @@ module mkSimDmaReadClt(SimDmaReadClt) provisos(
             sqpn     : dontCareValue,
             startAddr: dontCareValue,
             len      : 1025,
-            wrID     : dontCareValue
+            mrID     : dontCareValue
         };
 
         reqQ.enq(dmaReadReq);

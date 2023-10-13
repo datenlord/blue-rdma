@@ -1276,7 +1276,8 @@ module mkRespHandleSQ#(
                             sqpn     : cntrlStatus.comm.getSQPN,
                             startAddr: nextReadRespWriteAddr,
                             len      : pktMetaData.pktPayloadLen,
-                            psn      : bth.psn
+                            psn      : bth.psn,
+                            mrID     : wr2IndexMR(pendingWR.wr)
                         }
                     };
                     // payloadConReqOutQ.enq(payloadConReq);
@@ -1303,7 +1304,8 @@ module mkRespHandleSQ#(
                                 sqpn     : cntrlStatus.comm.getSQPN,
                                 startAddr: pendingWR.wr.laddr,
                                 len      : truncate(pendingWR.wr.len),
-                                psn      : bth.psn
+                                psn      : bth.psn,
+                                mrID     : wr2IndexMR(pendingWR.wr)
                             },
                             atomicRespPayload: atomicAckAeth.orig
                         }
@@ -1318,7 +1320,8 @@ module mkRespHandleSQ#(
             let initiator = DMA_SRC_SQ_DISCARD;
             let payloadDiscardReq <- genDiscardPayloadReq(
                 pktMetaData.pktFragNum, initiator, cntrlStatus.comm.getSQPN,
-                nextReadRespWriteAddr, pktMetaData.pktPayloadLen, bth.psn
+                nextReadRespWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
+                wr2IndexMR(pendingWR.wr)
             );
             // payloadConReqOutQ.enq(payloadDiscardReq);
             payloadConReqPort.put(payloadDiscardReq);

@@ -2268,7 +2268,8 @@ module mkReqHandleRQ#(
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: curDmaWriteAddr,
                         len      : pktMetaData.pktPayloadLen,
-                        psn      : bth.psn
+                        psn      : bth.psn,
+                        mrID     : rkey2IndexMR(permCheckReq.rkey)
                     }
                 };
                 // payloadConReqOutQ.enq(payloadConReq);
@@ -2281,7 +2282,8 @@ module mkReqHandleRQ#(
             let initiator = DMA_SRC_RQ_DISCARD;
             let payloadDiscardReq <- genDiscardPayloadReq(
                 pktMetaData.pktFragNum, initiator, cntrlStatus.comm.getSQPN,
-                curDmaWriteAddr, pktMetaData.pktPayloadLen, bth.psn
+                curDmaWriteAddr, pktMetaData.pktPayloadLen, bth.psn,
+                rkey2IndexMR(permCheckReq.rkey)
             );
             // payloadConReqOutQ.enq(payloadDiscardReq);
             payloadConReqPort.put(payloadDiscardReq);
@@ -2353,7 +2355,7 @@ module mkReqHandleRQ#(
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: permCheckReq.reqAddr, // reth.va
                         len      : permCheckReq.totalLen, // reth.dlen
-                        wrID     : dontCareValue
+                        mrID     : rkey2IndexMR(permCheckReq.rkey)
                     }
                 };
 

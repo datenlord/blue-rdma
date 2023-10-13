@@ -1,0 +1,9 @@
+build
+output
+backend/verilog
+generate
+.Xil
+*.log
+*.jou
+*.ltx
+tight_setup_hold_pins.txt

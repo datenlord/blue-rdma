@@ -806,6 +806,9 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             let isFirstOrMidPkt = pktLenCheckInfo.isFirstOrMidPkt;
             let isLastOrOnlyPkt = pktLenCheckInfo.isLastOrOnlyPkt;
 
+            // fix byteEN to prevent dma write access touch unrelated bytes.
+            payloadFrag.byteEn = payloadFrag.byteEn << pktLenCheckInfo.padCnt;
+
             if (!isZeroPayloadLen) begin
                 payloadOutputQ.enq(tuple3(payloadFrag, qpIndex, isRespPkt));
                 // $display("time=%0t: payloadFrag=", $time, fshow(payloadFrag));

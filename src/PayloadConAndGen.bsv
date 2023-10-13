@@ -261,7 +261,7 @@ module mkDmaReadCntrl#(
             sqpn     : dmaReadMetaData.sqpn,
             startAddr: addrChunkResp.chunkAddr,
             len      : addrChunkResp.chunkLen,
-            wrID     : dmaReadMetaData.wrID
+            mrID     : dmaReadMetaData.mrID
         };
 
         dmaReadSrv.request.put(dmaReadReq);
@@ -307,7 +307,6 @@ module mkDmaReadCntrl#(
         //     "time=%0t: mkDmaReadCntrl recvDmaResp", $time,
         //     ", sqpn=%h", cntrlStatus.comm.getSQPN,
         //     ", isSQ=", fshow(cntrlStatus.isSQ),
-        //     ", wrID=%h", dmaResp.wrID,
         //     ", isFirst=", fshow(dmaResp.dataStream.isFirst),
         //     ", isLast=", fshow(dmaResp.dataStream.isLast),
         //     ", isFirstDmaReqChunk=", fshow(isFirstDmaReqChunk),

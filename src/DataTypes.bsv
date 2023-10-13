@@ -132,6 +132,57 @@ typedef struct {
 
 typedef SizeOf#(PayloadTLB) TLB_PAYLOAD_WIDTH;
 
+typedef Bit#(TLog#(MAX_PGT_FIRST_STAGE_ENTRY)) PgtFirstStageIndex;
+typedef Bit#(TLog#(MAX_PGT_SECOND_STAGE_ENTRY)) PgtSecondStageIndex;
+
+typedef struct {
+    PgtSecondStageIndex secondStageOffset;
+    PgtSecondStageIndex secondStageEntryCnt;
+    ADDR baseVA;
+    } PgtFirstStagePayload deriving(Bits, FShow);
+typedef SizeOf#(PgtFirstStagePayload) PGT_FIRST_STAGE_PAYLOAD_WIDTH;
+
+typedef struct {
+    Bit#(TLB_CACHE_PA_DATA_WIDTH) paPart;
+} PgtSecondStagePayload deriving(Bits, FShow);
+typedef SizeOf#(PgtSecondStagePayload) PGT_SECOND_STAGE_PAYLOAD_WIDTH;
+
+// this alias make it easy if we change to a real MMU+TLB arch
+typedef PgtFirstStageIndex          ASID;  
+
+typedef struct {
+    ASID asid;
+    PgtFirstStagePayload content;
+} PgtModifyFirstStageReq deriving(Bits, FShow);
+
+typedef struct {
+    Bool success;
+} PgtModifyFirstStageResp deriving(Bits, FShow);
+
+typedef struct {
+    PgtSecondStageIndex index;
+    PgtSecondStagePayload content;
+} PgtModifySecondStageReq deriving(Bits, FShow);
+
+typedef struct {
+    Bool success;
+} PgtModifySecondStageResp deriving(Bits, FShow);
+
+
+typedef union tagged {
+    PgtModifyFirstStageReq Req4FirstStage;
+    PgtModifySecondStageReq Req4SecondStage;
+} PgtModifyReq deriving(Bits, FShow);
+
+// not used now, but the modify response maybe used in the future if we need to wait
+// DMA finish before modify the TLB.
+typedef union tagged {
+    PgtModifyFirstStageResp Resp4FirstStage;
+    PgtModifySecondStageResp Resp4SecondStage;
+} PgtModifyResp deriving(Bits, FShow);
+
+
+
 // Common types
 
 typedef Server#(DmaReadReq, DmaReadResp)   DmaReadSrv;
@@ -242,7 +293,7 @@ typedef struct {
     QPN sqpn;
     ADDR startAddr;
     Length len;
-    WorkReqID wrID;
+    IndexMR mrID;
 } DmaReadMetaData deriving(Bits, FShow);
 
 typedef struct {
@@ -250,13 +301,12 @@ typedef struct {
     QPN sqpn;
     ADDR startAddr;
     PktLen len;
-    WorkReqID wrID;
+    IndexMR mrID;
 } DmaReadReq deriving(Bits, FShow);
 
 typedef struct {
     DmaReqSrcType initiator;
     QPN sqpn;
-    WorkReqID wrID;
     Bool isRespErr;
     DataStream dataStream;
 } DmaReadResp deriving(Bits, FShow);
@@ -267,6 +317,7 @@ typedef struct {
     ADDR startAddr;
     PktLen len;
     PSN psn;
+    IndexMR mrID;
 } DmaWriteMetaData deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -695,3 +746,19 @@ typedef enum {
     IBV_EVENT_GID_CHANGE,
     IBV_EVENT_WQ_FATAL
 } AsyncEventType deriving(Bits, Eq);
+
+
+// PD Related
+typedef TLog#(MAX_PD) PD_INDEX_WIDTH;
+typedef TSub#(PD_HANDLE_WIDTH, PD_INDEX_WIDTH) PD_KEY_WIDTH;
+
+typedef Bit#(PD_KEY_WIDTH)    KeyPD;
+typedef UInt#(PD_INDEX_WIDTH) IndexPD;
+
+// MR related
+typedef TDiv#(MAX_MR, MAX_PD) MAX_MR_PER_PD;
+typedef TLog#(MAX_MR_PER_PD) MR_INDEX_WIDTH;
+typedef TSub#(KEY_WIDTH, MR_INDEX_WIDTH) MR_KEY_PART_WIDTH;
+
+typedef UInt#(MR_INDEX_WIDTH) IndexMR;
+typedef Bit#(MR_KEY_PART_WIDTH) KeyPartMR;

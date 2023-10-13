@@ -731,7 +731,7 @@ module mkReqGenSQ#(
                     sqpn     : cntrlStatus.comm.getSQPN,
                     startAddr: curPendingWR.wr.laddr,
                     len      : curPendingWR.wr.len,
-                    wrID     : curPendingWR.wr.id
+                    mrID     : wr2IndexMR(curPendingWR.wr)
                 }
             };
 

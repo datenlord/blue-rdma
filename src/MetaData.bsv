@@ -152,13 +152,6 @@ endmodule
 
 // MR related
 
-typedef TDiv#(MAX_MR, MAX_PD) MAX_MR_PER_PD;
-typedef TLog#(MAX_MR_PER_PD) MR_INDEX_WIDTH;
-typedef TSub#(KEY_WIDTH, MR_INDEX_WIDTH) MR_KEY_PART_WIDTH;
-
-typedef UInt#(MR_INDEX_WIDTH) IndexMR;
-typedef Bit#(MR_KEY_PART_WIDTH) KeyPartMR;
-
 typedef struct {
     ADDR laddr;
     Length len;
@@ -254,12 +247,6 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
 endmodule
 
 // PD related
-
-typedef TLog#(MAX_PD) PD_INDEX_WIDTH;
-typedef TSub#(PD_HANDLE_WIDTH, PD_INDEX_WIDTH) PD_KEY_WIDTH;
-
-typedef Bit#(PD_KEY_WIDTH)    KeyPD;
-typedef UInt#(PD_INDEX_WIDTH) IndexPD;
 
 typedef struct {
     Bool allocOrNot;
@@ -760,7 +747,6 @@ module mkMetaDataSrv#(
         if (maybeMRs matches tagged Valid .mrMetaData) begin
             mrResp <- mrMetaData.srvPort.response.get;
         end
-
         metaDataRespQ.enq(tagged Resp4MR mrResp);
         stateReg <= META_DATA_RECV_REQ;
     endrule
@@ -768,7 +754,6 @@ module mkMetaDataSrv#(
     rule genResp4PD if (stateReg == META_DATA_PD_RESP);
         let pdReq = pdReqReg;
         let pdResp <- pdMetaData.srvPort.response.get;
-
         metaDataRespQ.enq(tagged Resp4PD pdResp);
         stateReg <= META_DATA_RECV_REQ;
     endrule
@@ -787,7 +772,6 @@ module mkMetaDataSrv#(
         if (isValidPD) begin
             qpResp <- qpMetaData.srvPort.response.get;
         end
-
         metaDataRespQ.enq(tagged Resp4QP qpResp);
         stateReg <= META_DATA_RECV_REQ;
     endrule
@@ -795,237 +779,3 @@ module mkMetaDataSrv#(
     return toGPServer(metaDataReqQ, metaDataRespQ);
 endmodule
 
-// TLB related
-
-typedef TExp#(11)  BRAM_CACHE_SIZE; // 2K
-typedef BYTE_WIDTH BRAM_CACHE_DATA_WIDTH;
-
-typedef Bit#(TLog#(BRAM_CACHE_SIZE)) BramCacheAddr;
-typedef Bit#(BRAM_CACHE_DATA_WIDTH)  BramCacheData;
-
-typedef Server#(BramCacheAddr, BramCacheData) BramRead;
-
-interface BramCache;
-    interface BramRead read;
-    method Action write(BramCacheAddr cacheAddr, BramCacheData writeData);
-endinterface
-
-// BramCache total size 2K * 8 = 16Kb
-module mkBramCache(BramCache);
-    BRAM_Configure cfg = defaultValue;
-    // Both read address and read output are registered
-    cfg.latency = 2;
-    // Allow full pipeline behavior
-    cfg.outFIFODepth = 4;
-    BRAM2Port#(BramCacheAddr, BramCacheData) bram2Port <- mkBRAM2Server(cfg);
-
-    FIFOF#(BramCacheAddr)  bramReadReqQ <- mkFIFOF;
-    FIFOF#(BramCacheData) bramReadRespQ <- mkFIFOF;
-
-    rule handleBramReadReq;
-        let cacheAddr = bramReadReqQ.first;
-        bramReadReqQ.deq;
-
-        let req = BRAMRequest{
-            write: False,
-            responseOnWrite: False,
-            address: cacheAddr,
-            datain: dontCareValue
-        };
-        bram2Port.portA.request.put(req);
-    endrule
-
-    rule handleBramReadResp;
-        let readRespData <- bram2Port.portA.response.get;
-        bramReadRespQ.enq(readRespData);
-    endrule
-
-    method Action write(BramCacheAddr cacheAddr, BramCacheData writeData);
-        let req = BRAMRequest{
-            write: True,
-            responseOnWrite: False,
-            address: cacheAddr,
-            datain: writeData
-        };
-        bram2Port.portB.request.put(req);
-    endmethod
-
-    interface read = toGPServer(bramReadReqQ, bramReadRespQ);
-endmodule
-
-interface CascadeCache#(numeric type addrWidth, numeric type payloadWidth);
-    interface Server#(Bit#(addrWidth), Bit#(payloadWidth)) read;
-    method Action write(Bit#(addrWidth) cacheAddr, Bit#(payloadWidth) writeData);
-endinterface
-
-module mkCascadeCache(CascadeCache#(addrWidth, payloadWidth)) provisos(
-    NumAlias#(TLog#(BRAM_CACHE_SIZE), bramCacheIndexWidth),
-    Add#(bramCacheIndexWidth, TAdd#(1, anysize), addrWidth), // addrWidth > bramCacheIndexWidth
-    NumAlias#(TDiv#(payloadWidth, BRAM_CACHE_DATA_WIDTH), colNum),
-    Add#(TMul#(BRAM_CACHE_DATA_WIDTH, colNum), 0, payloadWidth), // payloadWidth must be multiplier of BYTE_WIDTH
-    NumAlias#(TSub#(addrWidth, bramCacheIndexWidth), cascadeCacheIndexWidth),
-    NumAlias#(TExp#(cascadeCacheIndexWidth), rowNum)
-);
-    function BramCacheAddr getBramCacheIndex(Bit#(addrWidth) cacheAddr);
-        return truncate(cacheAddr); // [valueOf(bramCacheIndexWidth) - 1 : 0];
-    endfunction
-
-    function Bit#(cascadeCacheIndexWidth) getCascadeCacheIndex(Bit#(addrWidth) cacheAddr);
-        return truncateLSB(cacheAddr); // [valueOf(addrWidth) - 1 : valueOf(bramCacheIndexWidth)];
-    endfunction
-
-    function Action readReqHelper(BramCacheAddr bramCacheIndex, BramCache bramCache);
-        action
-            bramCache.read.request.put(bramCacheIndex);
-        endaction
-    endfunction
-
-    function ActionValue#(BramCacheData) readRespHelper(BramCache bramCache);
-        actionvalue
-            let bramCacheReadRespData <- bramCache.read.response.get;
-            return bramCacheReadRespData;
-        endactionvalue
-    endfunction
-
-    function Action writeHelper(
-        BramCacheAddr bramCacheIndex, Tuple2#(BramCache, BramCacheData) tupleInput
-    );
-        action
-            let { bramCache, writeData } = tupleInput;
-            bramCache.write(bramCacheIndex, writeData);
-        endaction
-    endfunction
-
-    function Bit#(payloadWidth) concatBitVec(BramCacheData bramCacheData, Bit#(payloadWidth) concatResult);
-        return truncate({ concatResult, bramCacheData });
-    endfunction
-    // function Bit#(m) concatBitVec(Vector#(nSz, Bit#(n)) inputBitVec) provisos(
-    //     Add#(TMul#(n, nSz), 0, m)
-    // );
-    //     Bit#(m) result = dontCareValue;
-    //     for (Integer idx = 0; idx < valueOf(n); idx = idx + 1) begin
-    //         // result[(idx+1)*valueOf(n) : idx*valueOf(n)] = inputBitVec[idx];
-    //         result = truncate({ result, inputBitVec[idx] });
-    //     end
-    //     return result;
-    // endfunction
-
-    Vector#(rowNum, Vector#(colNum, BramCache)) cascadeCacheVec <- replicateM(replicateM(mkBramCache));
-    FIFOF#(Bit#(cascadeCacheIndexWidth)) cascadeCacheIndexQ <- mkFIFOF;
-    FIFOF#(Bit#(addrWidth)) cacheReadReqQ <- mkFIFOF;
-    FIFOF#(Bit#(payloadWidth)) cacheReadRespQ <- mkFIFOF;
-
-    rule handleCacheReadReq;
-        let cacheAddr = cacheReadReqQ.first;
-        cacheReadReqQ.deq;
-
-        let cascadeCacheIndex = getCascadeCacheIndex(cacheAddr);
-        let bramCacheIndex = getBramCacheIndex(cacheAddr);
-
-        mapM_(readReqHelper(bramCacheIndex), cascadeCacheVec[cascadeCacheIndex]);
-        cascadeCacheIndexQ.enq(cascadeCacheIndex);
-    endrule
-
-    rule handleCacheReadResp;
-        let cascadeCacheIndex = cascadeCacheIndexQ.first;
-        cascadeCacheIndexQ.deq;
-        Vector#(colNum, BramCacheData) bramCacheReadRespVec <- mapM(
-            readRespHelper, cascadeCacheVec[cascadeCacheIndex]
-        );
-        Bit#(payloadWidth) concatSeed = dontCareValue;
-        Bit#(payloadWidth) concatResult = foldr(concatBitVec, concatSeed, bramCacheReadRespVec);
-
-        cacheReadRespQ.enq(concatResult);
-    endrule
-
-    method Action write(Bit#(addrWidth) cacheAddr, Bit#(payloadWidth) writeData);
-        let cascadeCacheIndex = getCascadeCacheIndex(cacheAddr);
-        let bramCacheIndex = getBramCacheIndex(cacheAddr);
-
-        Vector#(colNum, BramCacheData) writeDataVec = toChunks(writeData);
-        Vector#(colNum, Tuple2#(BramCache, BramCacheData)) bramCacheAndWriteDataVec = zip(
-            cascadeCacheVec[cascadeCacheIndex], writeDataVec
-        );
-        mapM_(writeHelper(bramCacheIndex), bramCacheAndWriteDataVec);
-    endmethod
-
-    interface read = toGPServer(cacheReadReqQ, cacheReadRespQ);
-endmodule
-
-typedef Tuple2#(Bool, ADDR) FindRespTLB;
-typedef Server#(ADDR, FindRespTLB) FindInTLB;
-
-interface TLB;
-    interface FindInTLB find;
-    method Action insert(ADDR va, ADDR pa);
-    // TODO: implement delete method
-    // method Action delete(ADDR va);
-endinterface
-
-function Bit#(PAGE_OFFSET_WIDTH) getPageOffset(ADDR addr);
-    return truncate(addr);
-endfunction
-
-function ADDR restorePA(
-    Bit#(TLB_CACHE_PA_DATA_WIDTH) paData, Bit#(PAGE_OFFSET_WIDTH) pageOffset
-);
-    return signExtend({ paData, pageOffset });
-endfunction
-
-function Bit#(TLB_CACHE_PA_DATA_WIDTH) getData4PA(ADDR pa);
-    return truncate(pa >> valueOf(PAGE_OFFSET_WIDTH));
-endfunction
-
-module mkTLB(TLB);
-    CascadeCache#(TLB_CACHE_INDEX_WIDTH, TLB_PAYLOAD_WIDTH) cache4TLB <- mkCascadeCache;
-    FIFOF#(ADDR) vaInputQ <- mkFIFOF;
-    FIFOF#(ADDR) findReqQ <- mkFIFOF;
-    FIFOF#(FindRespTLB) findRespQ <- mkFIFOF;
-
-    function Bit#(TLB_CACHE_INDEX_WIDTH) getIndex4TLB(ADDR va);
-        return truncate(va >> valueOf(PAGE_OFFSET_WIDTH));
-    endfunction
-
-    function Bit#(TLB_CACHE_TAG_WIDTH) getTag4TLB(ADDR va);
-        return truncate(va >> valueOf(TAdd#(TLB_CACHE_INDEX_WIDTH, PAGE_OFFSET_WIDTH)));
-    endfunction
-
-    rule handleFindReq;
-        let va = findReqQ.first;
-        findReqQ.deq;
-
-        let index = getIndex4TLB(va);
-        cache4TLB.read.request.put(index);
-
-        vaInputQ.enq(va);
-    endrule
-
-    rule handleFindResp;
-        let va = vaInputQ.first;
-        vaInputQ.deq;
-
-        let inputTag = getTag4TLB(va);
-        let pageOffset = getPageOffset(va);
-
-        let readRespData <- cache4TLB.read.response.get;
-        PayloadTLB payload = unpack(readRespData);
-
-        let pa = restorePA(payload.data, pageOffset);
-        let tagMatch = inputTag == payload.tag;
-
-        findRespQ.enq(tuple2(tagMatch, pa));
-    endrule
-
-    method Action insert(ADDR va, ADDR pa);
-        let index = getIndex4TLB(va);
-        let inputTag = getTag4TLB(va);
-        let paData = getData4PA(pa);
-        let payload = PayloadTLB {
-            data: paData,
-            tag : inputTag
-        };
-        cache4TLB.write(index, pack(payload));
-    endmethod
-
-    interface find = toGPServer(findReqQ, findRespQ);
-endmodule

@@ -95,7 +95,6 @@ module mkNewPendingWorkReqPipeOut#(
     rule flushWR if (cntrlStatus.comm.isERR);
         let wr = workReqPipeIn.first;
         workReqPipeIn.deq;
-
         let newPendingWR = genNewPendingWorkReq(wr);
         newPendingWorkReqOutQ.enq(newPendingWR);
     endrule
