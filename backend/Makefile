@@ -2,10 +2,10 @@ include ../Makefile.base
 
 TCLDIR ?= xdc
 CLK ?= rdma_clock
+OOC ?= 1
 VLOGDIR ?= verilog
 OUTPUTDIR ?= output
 LOGFILE ?= run.log
-# ONLYSYNTH ?= 1
 RUNTOPHASE ?= place # synth place route all
 PARTNAME = xcvu13p-fhgb2104-2-i
 # TARGETFILE ?= ../src/QueuePair.bsv
@@ -19,7 +19,7 @@ export XDC = $(TCLDIR)
 export IPS = $(SRCDIR)/ip/$(PARTNAME)
 export CLOCKS = $(CLK)
 export OUTPUT = $(OUTPUTDIR)
-# export SYNTHONLY = $(ONLYSYNTH)
+export OOCSYNTH = $(OOC)
 export RUNTO = $(RUNTOPHASE)
 export PART = $(PARTNAME)
 
