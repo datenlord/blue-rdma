@@ -13,7 +13,7 @@ typedef TExp#(31)           MAX_MR_SIZE;   // 2GB
 typedef TExp#(21)           PAGE_SIZE_CAP; // 2MB
 typedef 4                   MAX_QP;
 typedef 32                  MAX_QP_WR;
-typedef 1                   MAX_SGE;
+typedef 8                   MAX_SGE;
 typedef 8                   MAX_CQ;
 typedef MAX_QP_WR           MAX_CQE;
 typedef 256                 MAX_MR;

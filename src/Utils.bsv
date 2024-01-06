@@ -1250,6 +1250,7 @@ function Bool containWorkReqFlag(
     // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
+// TODO: remove this function, it should consider start address to calculate PktNum
 // The returned PktNum might be zero or one less than actual PktNum
 function Tuple2#(PktNum, PmtuResidue) truncateLenByPMTU(Length len, PMTU pmtu);
     return case (pmtu)
