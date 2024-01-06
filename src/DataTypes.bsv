@@ -34,6 +34,8 @@ typedef 8 QP_CAP_CNT_WIDTH;
 // Derived settings
 typedef AETH_VALUE_WIDTH TIMER_WIDTH;
 
+typedef TAdd#(1, TLog#(MAX_SGE)) SGE_NUM_WIDTH;
+
 // 12 + 4 + 28 = 44 bytes
 typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
 
@@ -79,6 +81,8 @@ typedef TSub#(TSub#(ADDR_WIDTH, TLB_CACHE_INDEX_WIDTH), PAGE_OFFSET_WIDTH) TLB_C
 // Derived types
 typedef Bit#(DATA_BUS_WIDTH)      DATA;
 typedef Bit#(DATA_BUS_BYTE_WIDTH) ByteEn;
+
+typedef Bit#(SGE_NUM_WIDTH) ScatterGatherListIdx;
 
 typedef Bit#(HEADER_MAX_DATA_WIDTH)                HeaderData;
 typedef Bit#(HEADER_MAX_BYTE_EN_WIDTH)             HeaderByteEn;
@@ -246,17 +250,17 @@ typedef struct {
 } DmaReadMetaData deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqSrcType initiator;
-    QPN sqpn;
+    DmaReqSrcType initiator; // TODO: remove it
+    QPN sqpn; // TODO: remove it
     ADDR startAddr;
     PktLen len;
-    WorkReqID wrID;
+    WorkReqID wrID; // TODO: remove it
 } DmaReadReq deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqSrcType initiator;
-    QPN sqpn;
-    WorkReqID wrID;
+    DmaReqSrcType initiator; // TODO: remove it
+    QPN sqpn; // TODO: remove it
+    WorkReqID wrID; // TODO: remove it
     Bool isRespErr;
     DataStream dataStream;
 } DmaReadResp deriving(Bits, FShow);
@@ -485,7 +489,10 @@ typedef enum {
     IBV_WR_BIND_MW              =  8,
     IBV_WR_SEND_WITH_INV        =  9,
     IBV_WR_TSO                  = 10,
-    IBV_WR_DRIVER1              = 11
+    IBV_WR_DRIVER1              = 11,
+    IBV_WR_RDMA_READ_RESP       = 12, // Not defined in rdma-core
+    IBV_WR_FLUSH                = 14,
+    IBV_WR_ATOMIC_WRITE         = 15
 } WorkReqOpCode deriving(Bits, Eq, FShow);
 
 typedef enum {
