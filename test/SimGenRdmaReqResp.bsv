@@ -826,7 +826,7 @@ module mkTestSimGenRdmaResp(Empty);
 
         // if (refDataStream.isLast) begin
         //     let lastFragValidByteNum = calcByteEnBitNumInSim(refDataStream.byteEn);
-        //     let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
+        //     let padCnt = calcPadCnt(lastFragValidByteNum);
         //     let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
         //     let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
 

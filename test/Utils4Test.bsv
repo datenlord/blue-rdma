@@ -191,7 +191,7 @@ endfunction
 // This function should be used in simulation only
 function ByteEn addPadding2LastFragByteEn(ByteEn lastFragByteEn);
     let lastFragValidByteNum = calcByteEnBitNumInSim(lastFragByteEn);
-    let padCnt = calcPadCnt(zeroExtend(lastFragValidByteNum));
+    let padCnt = calcPadCnt(lastFragValidByteNum);
     let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
     let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
     return lastFragByteEnWithPadding;

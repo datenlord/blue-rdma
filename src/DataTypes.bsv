@@ -92,7 +92,7 @@ typedef Bit#(TAdd#(1, HEADER_MAX_DATA_WIDTH))      HeaderBitNum;
 typedef Bit#(TLog#(TAdd#(1, HEADER_MAX_FRAG_NUM))) HeaderFragNum;
 
 typedef Bit#(DATA_BUS_BYTE_NUM_WIDTH) BusByteWidthMask;
-typedef Bit#(PAD_WIDTH)               PadMask;
+// typedef Bit#(PAD_WIDTH)               PadMask;
 
 typedef Bit#(TAdd#(1, DATA_BUS_BIT_NUM_WIDTH))  BusBitNum;
 typedef Bit#(TAdd#(1, DATA_BUS_BYTE_NUM_WIDTH)) ByteEnBitNum;
