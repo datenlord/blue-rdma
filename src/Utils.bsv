@@ -283,6 +283,8 @@ endfunction
 
 function Tuple2#(HeaderFragNum, ByteEnBitNum) calcHeaderFragNumAndLastFragValidByeNum(
     HeaderByteNum headerLen
+) provisos(
+    Add#(HEADER_FRAG_NUM_WIDTH, DATA_BUS_BYTE_NUM_WIDTH, HEADER_MAX_BYTE_NUM_WIDTH)
 );
     let headerLastFragValidByteNum = calcLastFragValidByteNum(headerLen);
     // BusByteWidthMask busByteWidthMask = maxBound;
@@ -294,7 +296,7 @@ function Tuple2#(HeaderFragNum, ByteEnBitNum) calcHeaderFragNumAndLastFragValidB
     Bit#(TSub#(HEADER_MAX_BYTE_NUM_WIDTH, DATA_BUS_BYTE_NUM_WIDTH)) truncatedHeaderLen =
         truncateLSB(headerLen);
     HeaderFragNum headerFragNum =
-        truncatedHeaderLen + zeroExtend(pack(!isZero(headerLastFragByteNumResidue)));
+        truncatedHeaderLen + zeroExtend(pack(!isZeroR(headerLastFragByteNumResidue)));
     return tuple2(headerFragNum, headerLastFragValidByteNum);
 endfunction
 
