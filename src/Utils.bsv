@@ -798,9 +798,13 @@ function Bool isSupportedReqOpCodeRQ(TypeQP qpt, RdmaOpCode opcode);
     endcase
 endfunction
 
-function PAD calcPadCnt(Length len);
-    PadMask padMask = maxBound;
-    PAD tmpCnt = truncate(len) & padMask;
+// function PAD calcPadCnt(Length len);
+function PAD calcPadCnt(Bit#(nSz) len) provisos(
+    Add#(PAD_WIDTH, anysize, nSz)
+);
+    // PadMask padMask = maxBound;
+    // PAD tmpCnt = truncate(len) & padMask;
+    PAD tmpCnt = truncate(len);
     PAD padCnt = (1 << valueOf(PAD_WIDTH)) - tmpCnt;
     return padCnt;
 endfunction
