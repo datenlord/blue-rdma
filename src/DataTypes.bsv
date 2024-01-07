@@ -39,15 +39,15 @@ typedef TAdd#(1, TLog#(MAX_SGE)) SGE_NUM_WIDTH;
 // 12 + 4 + 28 = 44 bytes
 typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
 
-typedef TDiv#(DATA_BUS_WIDTH, 8)   DATA_BUS_BYTE_WIDTH;
-typedef TLog#(DATA_BUS_BYTE_WIDTH) DATA_BUS_BYTE_NUM_WIDTH;
-typedef TLog#(DATA_BUS_WIDTH)      DATA_BUS_BIT_NUM_WIDTH;
+typedef TDiv#(DATA_BUS_WIDTH, 8)   DATA_BUS_BYTE_WIDTH; // 32
+typedef TLog#(DATA_BUS_BYTE_WIDTH) DATA_BUS_BYTE_NUM_WIDTH; // 5
+typedef TLog#(DATA_BUS_WIDTH)      DATA_BUS_BIT_NUM_WIDTH; // 8
 
 typedef TDiv#(HEADER_MAX_BYTE_LENGTH, DATA_BUS_BYTE_WIDTH) HEADER_MAX_FRAG_NUM; // 2 (bus 256b), 1 (bus 512b)
 typedef TMul#(DATA_BUS_WIDTH, HEADER_MAX_FRAG_NUM)         HEADER_MAX_DATA_WIDTH; // 512
 typedef TMul#(DATA_BUS_BYTE_WIDTH, HEADER_MAX_FRAG_NUM)    HEADER_MAX_BYTE_EN_WIDTH; // 64
-// typedef TLog#(TAdd#(1, HEADER_MAX_BYTE_LENGTH))            HEADER_MAX_BYTE_NUM_WIDTH; // 6
 typedef TLog#(TAdd#(1, HEADER_MAX_BYTE_EN_WIDTH))          HEADER_MAX_BYTE_NUM_WIDTH; // 7
+typedef TLog#(TAdd#(1, HEADER_MAX_FRAG_NUM))               HEADER_FRAG_NUM_WIDTH; // 2 (bus 256b), 1 (bus 512b)
 
 typedef TLog#(MAX_PMTU)                      MAX_PMTU_WIDTH; // 12
 // typedef TLog#(TLog#(MAX_PMTU))               PMTU_VALUE_MAX_WIDTH; // 4
@@ -89,7 +89,7 @@ typedef Bit#(HEADER_MAX_BYTE_EN_WIDTH)             HeaderByteEn;
 typedef Bit#(HEADER_MAX_BYTE_NUM_WIDTH)            HeaderByteNum;
 // typedef Bit#(TLog#(TAdd#(1, HEADER_MAX_BYTE_EN_WIDTH))) HeaderByteNum;
 typedef Bit#(TAdd#(1, HEADER_MAX_DATA_WIDTH))      HeaderBitNum;
-typedef Bit#(TLog#(TAdd#(1, HEADER_MAX_FRAG_NUM))) HeaderFragNum;
+typedef Bit#(HEADER_FRAG_NUM_WIDTH)                HeaderFragNum;
 
 typedef Bit#(DATA_BUS_BYTE_NUM_WIDTH) BusByteWidthMask;
 // typedef Bit#(PAD_WIDTH)               PadMask;
