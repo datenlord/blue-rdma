@@ -46,6 +46,10 @@ function Bool isTwo(Bit#(nSz) bits) provisos(Add#(2, anysize, nSz));
     return isZero(bits >> 2) && unpack(bits[1]) && !unpack(lsb(bits));
 endfunction
 
+function Bool isTwoR(Bit#(nSz) bits) provisos(Add#(2, anysize, nSz));
+    return isZero(bits >> 2) && unpack(bits[1]) && !unpack(lsb(bits));
+endfunction
+
 // function Bool isAllOnes(Bit#(nSz) bits);
 //     Bool ret = unpack(&bits);
 //     return ret;
