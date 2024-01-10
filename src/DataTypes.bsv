@@ -34,7 +34,8 @@ typedef 8 QP_CAP_CNT_WIDTH;
 // Derived settings
 typedef AETH_VALUE_WIDTH TIMER_WIDTH;
 
-typedef TAdd#(1, TLog#(MAX_SGE)) SGE_NUM_WIDTH;
+typedef TLog#(MAX_SGE)          SGE_IDX_WIDTH;
+typedef TAdd#(1, SGE_IDX_WIDTH) SGE_NUM_WIDTH;
 
 // 12 + 4 + 28 = 44 bytes
 typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
@@ -82,20 +83,21 @@ typedef TSub#(TSub#(ADDR_WIDTH, TLB_CACHE_INDEX_WIDTH), PAGE_OFFSET_WIDTH) TLB_C
 typedef Bit#(DATA_BUS_WIDTH)      DATA;
 typedef Bit#(DATA_BUS_BYTE_WIDTH) ByteEn;
 
-typedef Bit#(SGE_NUM_WIDTH) ScatterGatherListIdx;
+typedef Bit#(SGE_IDX_WIDTH) IdxSGL;
+typedef Bit#(SGE_NUM_WIDTH) NumSGE;
 
-typedef Bit#(HEADER_MAX_DATA_WIDTH)                HeaderData;
-typedef Bit#(HEADER_MAX_BYTE_EN_WIDTH)             HeaderByteEn;
-typedef Bit#(HEADER_MAX_BYTE_NUM_WIDTH)            HeaderByteNum;
-// typedef Bit#(TLog#(TAdd#(1, HEADER_MAX_BYTE_EN_WIDTH))) HeaderByteNum;
-typedef Bit#(TAdd#(1, HEADER_MAX_DATA_WIDTH))      HeaderBitNum;
-typedef Bit#(HEADER_FRAG_NUM_WIDTH)                HeaderFragNum;
+typedef Bit#(HEADER_MAX_DATA_WIDTH)           HeaderData;
+typedef Bit#(HEADER_MAX_BYTE_EN_WIDTH)        HeaderByteEn;
+typedef Bit#(HEADER_MAX_BYTE_NUM_WIDTH)       HeaderByteNum;
+typedef Bit#(TAdd#(1, HEADER_MAX_DATA_WIDTH)) HeaderBitNum;
+typedef Bit#(HEADER_FRAG_NUM_WIDTH)           HeaderFragNum;
 
-typedef Bit#(DATA_BUS_BYTE_NUM_WIDTH) BusByteWidthMask;
+typedef Bit#(DATA_BUS_BIT_NUM_WIDTH)  BusBitWidthMask; // 8
+typedef Bit#(DATA_BUS_BYTE_NUM_WIDTH) BusByteWidthMask; // 5
 // typedef Bit#(PAD_WIDTH)               PadMask;
 
-typedef Bit#(TAdd#(1, DATA_BUS_BIT_NUM_WIDTH))  BusBitNum;
-typedef Bit#(TAdd#(1, DATA_BUS_BYTE_NUM_WIDTH)) ByteEnBitNum;
+typedef Bit#(TAdd#(1, DATA_BUS_BIT_NUM_WIDTH))  BusBitNum; // 9
+typedef Bit#(TAdd#(1, DATA_BUS_BYTE_NUM_WIDTH)) ByteEnBitNum; // 6
 
 // typedef Bit#(TLog#(TAdd#(1, MAX_QP_WR)))        PendingReqCnt;
 // typedef Bit#(TLog#(TAdd#(1, MAX_QP_RD_ATOM)))   PendingReadAtomicReqCnt;
