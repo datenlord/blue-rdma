@@ -487,7 +487,7 @@ module mkReqGenSQ#(
 
     // Pipeline FIFO
     FIFOF#(Tuple7#(
-        PendingWorkReq, PktNum, PmtuResidue, Bool, Bool, Bool, Bool
+        PendingWorkReq, PktNum, ResiduePMTU, Bool, Bool, Bool, Bool
     )) workReqPayloadGenQ <- mkFIFOF;
     FIFOF#(Tuple3#(PendingWorkReq, PktNum, WorkReqInfo)) workReqPktNumQ <- mkFIFOF;
     FIFOF#(Tuple2#(PendingWorkReq, WorkReqInfo))            workReqPsnQ <- mkFIFOF;

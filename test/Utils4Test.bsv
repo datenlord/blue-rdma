@@ -215,7 +215,7 @@ module mkSegmentDataStreamByPmtu#(
         if (!setFirstReg && curData.isFirst) begin
             let pmtu = pmtuPipeIn.first;
             pmtuPipeIn.deq;
-            let pktFragNum = calcFragNumByPmtu(pmtu);
+            let pktFragNum = calcFragNumByPMTU(pmtu);
             pktFragNumReg <= pktFragNum;
             fragCntReg <= pktFragNum - 2;
         end

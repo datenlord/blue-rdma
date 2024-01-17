@@ -40,7 +40,7 @@ module mkTestAddrChunkSrv(Empty);
     let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
     let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
 
-    Reg#(PmtuResidue) residueReg <- mkRegU;
+    Reg#(ResiduePMTU) residueReg <- mkRegU;
     Reg#(PktNum)       pktNumReg <- mkRegU;
     Reg#(ADDR)       nextAddrReg <- mkRegU;
     Reg#(Length)     totalLenReg <- mkRegU;
@@ -389,7 +389,7 @@ module mkTestDmaWriteCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         let totalPktNum = calcPktNumByLenOnly(payloadLen, pmtu);
         let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
             calcTotalFragNumByLength(payloadLen);
-        let pktFragNum = calcFragNumByPmtu(pmtu);
+        let pktFragNum = calcFragNumByPMTU(pmtu);
         pendingReqStatsQ.enq(tuple3(totalFragNum, lastFragByteEn, pktFragNum));
         // $display(
         //     "time=%0t: issueReq", $time,
@@ -810,7 +810,7 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);
 
-        let maxPktFragNum = calcFragNumByPmtu(pmtu);
+        let maxPktFragNum = calcFragNumByPMTU(pmtu);
         let { totalFragNum, lastFragByteEn, lastFragValidByteNum } =
             calcTotalFragNumByLength(payloadLen);
         let lastFragByteEnWithPadding = addPadding2LastFragByteEn(lastFragByteEn);
