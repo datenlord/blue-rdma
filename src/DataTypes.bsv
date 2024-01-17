@@ -107,7 +107,7 @@ typedef Bit#(QP_CAP_CNT_WIDTH) InlineDataSize;
 typedef Bit#(QP_CAP_CNT_WIDTH) ScatterGatherElemCnt;
 
 // typedef Bit#(PMTU_VALUE_MAX_WIDTH) PmtuValueWidth;
-typedef Bit#(MAX_PMTU_WIDTH)       PmtuResidue;
+typedef Bit#(MAX_PMTU_WIDTH)       ResiduePMTU;
 typedef Bit#(TOTAL_FRAG_NUM_WIDTH) TotalFragNum;
 typedef Bit#(PMTU_FRAG_NUM_WIDTH)  PktFragNum;
 typedef Bit#(PKT_NUM_WIDTH)        PktNum;
@@ -170,7 +170,7 @@ typedef enum {
     RETRY_REASON_TIMEOUT
 } RetryReason deriving(Bits, Eq, FShow);
 
-// DATA and ByteEn are left algined
+// DATA and ByteEn are left aligned
 typedef struct {
     DATA data;
     ByteEn byteEn;

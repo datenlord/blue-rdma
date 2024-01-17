@@ -37,7 +37,7 @@ module mkAddrChunkSrv#(Bool clearAll, Bool isSQ)(AddrChunkSrv);
     FIFOF#(AddrChunkResp) respQ <- mkFIFOF;
 
     Reg#(PktLen)   fullPktLenReg <- mkRegU;
-    Reg#(PmtuResidue) residueReg <- mkRegU;
+    Reg#(ResiduePMTU) residueReg <- mkRegU;
     Reg#(Bool)  isZeroResidueReg <- mkRegU;
 
     Reg#(PktNum)  pktNumReg <- mkRegU;
@@ -667,7 +667,7 @@ module mkPayloadGenerator#(
         let lastFragValidByteNum = calcLastFragValidByteNum(totalDmaLen);
         let lastFragValidByteNumWithPadding = lastFragValidByteNum + zeroExtend(padCnt);
         let lastFragByteEnWithPadding = genByteEn(lastFragValidByteNumWithPadding);
-        let pktFragNum = calcFragNumByPmtu(payloadGenReq.pmtu);
+        let pktFragNum = calcFragNumByPMTU(payloadGenReq.pmtu);
         immAssert(
             !isZero(lastFragValidByteNumWithPadding),
             "lastFragValidByteNumWithPadding assertion @ mkPayloadGenerator",

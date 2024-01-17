@@ -265,7 +265,7 @@ function Bool pktLenGtPMTU(PktLen pktLen, PMTU pmtu);
     endcase;
 endfunction
 
-function PktFragNum calcFragNumByPmtu(PMTU pmtu) provisos(
+function PktFragNum calcFragNumByPMTU(PMTU pmtu) provisos(
     // Check DATA_BUS_BYTE_WIDTH must be power of 2
     Add#(TLog#(DATA_BUS_BYTE_WIDTH), 1, TLog#(TAdd#(1, DATA_BUS_BYTE_WIDTH)))
 );
@@ -1256,9 +1256,40 @@ function Bool containWorkReqFlag(
     // return !isZero(pack(flags & enum2Flag(flag)));
 endfunction
 
+function ResiduePMTU truncateByPMTU(Bit#(nSz) bits, PMTU pmtu) provisos(
+    Add#(MAX_PMTU_WIDTH, anysizeJ, nSz),
+    Add#(TSub#(MAX_PMTU_WIDTH, 1), anysizeK, nSz),
+    Add#(TSub#(MAX_PMTU_WIDTH, 2), anysizeL, nSz),
+    Add#(TSub#(MAX_PMTU_WIDTH, 3), anysizeM, nSz),
+    Add#(TSub#(MAX_PMTU_WIDTH, 4), anysizeN, nSz)
+);
+    return case (pmtu)
+        IBV_MTU_256 : begin
+            Bit#(TSub#(MAX_PMTU_WIDTH, 4)) residue = truncate(bits); // [7 : 0]
+            zeroExtend(residue);
+        end
+        IBV_MTU_512 : begin
+            Bit#(TSub#(MAX_PMTU_WIDTH, 3)) residue = truncate(bits); // [8 : 0]
+            zeroExtend(residue);
+        end
+        IBV_MTU_1024: begin
+            Bit#(TSub#(MAX_PMTU_WIDTH, 2)) residue = truncate(bits); // [9 : 0]
+            zeroExtend(residue);
+        end
+        IBV_MTU_2048: begin
+            Bit#(TSub#(MAX_PMTU_WIDTH, 1)) residue = truncate(bits); // [10 : 0]
+            zeroExtend(residue);
+        end
+        IBV_MTU_4096: begin
+            Bit#(MAX_PMTU_WIDTH) residue = truncate(bits); // [11 : 0]
+            zeroExtend(residue);
+        end
+    endcase;
+endfunction
+
 // TODO: remove this function, it should consider start address to calculate PktNum
 // The returned PktNum might be zero or one less than actual PktNum
-function Tuple2#(PktNum, PmtuResidue) truncateLenByPMTU(Length len, PMTU pmtu);
+function Tuple2#(PktNum, ResiduePMTU) truncateLenByPMTU(Length len, PMTU pmtu);
     return case (pmtu)
         IBV_MTU_256 : begin
             Bit#(8) residue = truncate(len); // [7 : 0]

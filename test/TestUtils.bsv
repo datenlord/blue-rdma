@@ -32,7 +32,7 @@ module mkTestSegmentDataStream(Empty);
         let refDataStream = refDataStreamPipeOut.first;
         refDataStreamPipeOut.deq;
 
-        let maxPktFragNum = calcFragNumByPmtu(pmtu);
+        let maxPktFragNum = calcFragNumByPMTU(pmtu);
         if (refDataStream.isLast) begin
             pmtuFragCntReg <= 0;
         end
