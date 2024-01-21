@@ -170,7 +170,7 @@ function ByteEnBitNum calcLastFragValidByteNum(Bit#(nSz) len) provisos(
     Bit#(TSub#(nSz, DATA_BUS_BYTE_NUM_WIDTH)) truncatedLen = truncateLSB(len);
 
     ByteEnBitNum lastFragValidByteNum = zeroExtend(lastFragByteNumResidue);
-    if (isZero(lastFragByteNumResidue) && !isZero(truncatedLen)) begin
+    if (isZeroR(lastFragByteNumResidue) && !isZeroR(truncatedLen)) begin
     // BusByteWidthMask busByteWidthMask = maxBound;
     // ByteEnBitNum lastFragValidByteNum = zeroExtend(truncate(len) & busByteWidthMask);
     // if (isZero(lastFragValidByteNum) && !isZero(len)) begin
