@@ -72,7 +72,7 @@ typedef TLog#(MAX_RNR_WAIT_CYCLES)              RNR_WAIT_CYCLE_CNT_WIDTH;
 typedef TDiv#(MAX_TIMEOUT_NS, TARGET_CYCLE_NS)  MAX_TIMEOUT_CYCLES;
 typedef TAdd#(1, TLog#(MAX_TIMEOUT_CYCLES))     TIMEOUT_CYCLE_CNT_WIDTH;
 
-typedef 48        PHYSICAL_ADDR_WIDTH; // X86 physical address width
+typedef 48   PHYSICAL_ADDR_WIDTH; // X86 physical address width
 typedef TExp#(14) TLB_CACHE_SIZE; // TLB cache size 16K
 typedef TLog#(PAGE_SIZE_CAP)  PAGE_OFFSET_WIDTH;
 typedef TLog#(TLB_CACHE_SIZE) TLB_CACHE_INDEX_WIDTH; // 14
