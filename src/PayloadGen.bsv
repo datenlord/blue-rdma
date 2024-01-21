@@ -1151,8 +1151,8 @@ module mkMergePayloadAllSGE#(
             let sumInvalidByteNum = nextInvalidByteNumReg + lastFragInvalidByteNum;
             let sumInvalidBitNum  = nextInvalidBitNumReg  + lastFragInvalidBitNum;
 
-            // let hasLessFrag = !sgeIsOnlyReg && !(sumValidByteNum > fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
-            let hasLessFrag = !sgeIsOnlyReg && (sumInvalidByteNum >= fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
+            let hasLessFrag = nextInvalidByteNumReg >= lastFragValidByteNum;
+            // let hasLessFrag = !sgeIsOnlyReg && (sumInvalidByteNum >= fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
             hasLessFragReg <= hasLessFrag;
 
             // let curValidByteNum   = nextValidByteNumReg;
@@ -1411,10 +1411,11 @@ module mkAdjustPayloadSegment#(
             // lastPktLastFragInvalidBitNumReg <= lastPktLastFragInvalidBitNum;
             let sglHasOnlyPkt = isOneR(adjustedTotalPayloadMeta.adjustedPktNum);
             sglHasOnlyPktReg <= sglHasOnlyPkt;
-            let hasExtraFrag = !sglHasOnlyPkt && ((
-                { 1'b0, firstPktLastFragInvalidByteNum } +
-                { 1'b0, origLastFragValidByteNum }
-            ) > fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
+            let hasExtraFrag = firstPktLastFragValidByteNum < origLastFragValidByteNum;
+            // let hasExtraFrag = (
+            //     { 1'b0, firstPktLastFragInvalidByteNum } +
+            //     { 1'b0, origLastFragValidByteNum }
+            // ) > fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
             hasExtraFragReg <= hasExtraFrag;
 
             if (sglHasOnlyPkt) begin
