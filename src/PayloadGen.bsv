@@ -104,43 +104,24 @@ typedef struct {
 
 typedef Vector#(MAX_SGE, ScatterGatherElem) ScatterGatherList;
 
-typedef struct {
-    // The last fragment ByteEn for each packet of the SGE
-    ByteEnBitNum curPktLastFragValidByteNum;
-    PktLen       pktLen;
-    PMTU         pmtu;
-    Bool         isFirst;
-    Bool         isLast;
-    Bool         isFirstSGE;
-    Bool         isLastSGE;
-} PktMetaDataSGE deriving(Bits, FShow);
 // typedef struct {
-//     PktLen firstPktLen;
-//     PktLen lastPktLen;
-//     PktNum sgePktNum;
-//     Length sgeLen;
-//     PMTU   pmtu;
-//     Bool   isFirst;
-//     Bool   isLast;
-// } DmaReadMetaDataSGE deriving(Bits, FShow);
-// typedef struct {
-//     PktLen       firstPktLen;
-//     PktFragNum   firstPktFragNum;
-//     ByteEnBitNum firstPktLastFragValidByteNum;
-//     // PAD          firstPktPadCnt;
-//     // ByteEn       firstPktLastFragByteEn;
-//     PktLen       lastPktLen;
-//     PktFragNum   lastPktFragNum;
-//     ByteEnBitNum lastPktLastFragValidByteNum;
-//     // PAD          lastPktPadCnt;
-//     // ByteEn       lastPktLastFragByteEn;
-//     Length       sgeLen;
-//     PktNum       sgePktNum;
+//     // The last fragment ByteEn for each packet of the SGE
+//     ByteEnBitNum curPktLastFragValidByteNum;
+//     PktLen       pktLen;
 //     PMTU         pmtu;
-//     Bool         isSinglePktSGE;
+//     Bool         sgeHasJustTwoPkts;
 //     Bool         isFirst;
 //     Bool         isLast;
-// } DetailMetaDataSGE deriving(Bits, FShow);
+//     Bool         isFirstSGE;
+//     Bool         isLastSGE;
+// } PktMetaDataSGE deriving(Bits, FShow);
+
+typedef struct {
+    PktLen firstPktLen;
+    PktLen lastPktLen;
+    PktNum sgePktNum;
+    PMTU   pmtu;
+} PktMetaDataSGE deriving(Bits, FShow);
 
 typedef struct {
     // PktLen       lastPktLen;
@@ -155,11 +136,11 @@ typedef struct {
     QPN       sqpn; // TODO: remove it
     WorkReqID wrID; // TODO: remove it
     Length    totalLen;
-    NumSGE    sgeNum;
     PMTU      pmtu;
+    // NumSGE    sgeNum;
     // PktFragNum pmtuFragNum;
     // PktLen pmtuLen;
-} TotalPayloadMetaData deriving(Bits, FShow);
+} TotalPayloadLenMetaDataSGL deriving(Bits, FShow);
 
 typedef struct {
     // QPN          sqpn; // TODO: remove it
@@ -369,15 +350,14 @@ endfunction
 
 interface AddrChunkSrv;
     interface Server#(AddrChunkReq, AddrChunkResp) srvPort;
-    // interface PipeOut#(DmaReadMetaDataSGE) sgeDmaReadMetaDataPipeOut;
     interface PipeOut#(PktMetaDataSGE) sgePktMetaDataPipeOut;
     method Bool isIdle();
 endinterface
 
+// TODO: refactor AddrChunkSrv into fully pipeline
 module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     FIFOF#(AddrChunkReq)           reqQ <- mkSizedFIFOF(valueOf(MAX_SGE));
     FIFOF#(AddrChunkResp)         respQ <- mkFIFOF;
-    // FIFOF#(DmaReadMetaDataSGE) sgeDmaReadMetaDataOutQ <- mkSizedFIFOF(valueOf(MAX_SGE));
     FIFOF#(PktMetaDataSGE) sgePktMetaDataOutQ <- mkFIFOF;
 
     Reg#(PktLen)  firstPktLenReg <- mkRegU;
@@ -385,38 +365,22 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     Reg#(PktLen)   lastPktLenReg <- mkRegU;
     Reg#(Bool)    isOrigFirstReg <- mkRegU;
     Reg#(Bool)     isOrigLastReg <- mkRegU;
-    // Reg#(ResiduePMTU) residueReg <- mkRegU;
-    // Reg#(Bool)  isZeroResidueReg <- mkRegU;
 
-    Reg#(PktNum)  pktNumReg <- mkRegU;
-    Reg#(ADDR) chunkAddrReg <- mkRegU;
-    Reg#(ADDR)  nextAddrReg <- mkRegU;
-    Reg#(PMTU)      pmtuReg <- mkRegU;
-    Reg#(Bool)   isFirstReg <- mkRegU;
-    Reg#(Bool)      busyReg <- mkReg(False);
+    Reg#(PktNum) remainingPktNumReg <- mkRegU;
+
+    Reg#(ADDR)   chunkAddrReg <- mkRegU;
+    Reg#(ADDR)    nextAddrReg <- mkRegU;
+    Reg#(PMTU)        pmtuReg <- mkRegU;
+    Reg#(Bool)     isFirstReg <- mkRegU;
+    Reg#(Bool)        busyReg <- mkReg(False);
 
     PSN oneAsPSN = 1;
 
     rule resetAndClear if (clearAll);
         reqQ.clear;
         respQ.clear;
-        busyReg    <= False;
-        // isFirstReg <= False;
+        busyReg <= False;
     endrule
-
-    // rule debug;
-    //     $display(
-    //         "time=%0t: mkAddrChunkSrv debug", $time,
-    //         ", isSQ=", fshow(isSQ),
-    //         ", reqQ.notEmpty=", fshow(reqQ.notEmpty),
-    //         ", respQ.notFull=", fshow(respQ.notFull),
-    //         ", pktNumReg=%0d", pktNumReg,
-    //         ", fullPktLenReg=%h", fullPktLenReg,
-    //         ", busyReg=", fshow(busyReg),
-    //         ", isFirstReg=", fshow(isFirstReg),
-    //         ", clearAll=", fshow(clearAll)
-    //     );
-    // endrule
 
     rule recvReq if (!clearAll && !busyReg);
         let addrChunkReq = reqQ.first;
@@ -435,17 +399,11 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         } = calcPktNumAndPktLenByAddrAndPMTU(
             addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
         );
-        // let { tmpPktNum, pmtuResidue } = truncateLenByPMTU(
-        //     addrChunkReq.len, addrChunkReq.pmtu
-        // );
-        // let isZeroResidue = isZeroR(pmtuResidue);
-        // let totalPktNum = tmpPktNum + (isZeroResidue ? 0 : 1);
-        // let pmtuLen = calcPmtuLen(addrChunkReq.pmtu);
+        remainingPktNumReg <= sgePktNum - 1;
 
         firstPktLenReg   <= firstPktLen;
         fullPktLenReg    <= pmtuLen;
         lastPktLenReg    <= lastPktLen;
-        pktNumReg        <= sgePktNum;
         chunkAddrReg     <= addrChunkReq.startAddr;
         nextAddrReg      <= secondChunkStartAddr;
         pmtuReg          <= addrChunkReq.pmtu;
@@ -453,45 +411,31 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         isOrigLastReg    <= addrChunkReq.isLast;
         isFirstReg       <= True;
         busyReg          <= True;
-        // residueReg       <= pmtuResidue;
-        // isZeroResidueReg <= isZeroResidue;
 
-        // pktNumReg        <= totalPktNum - 1;
-        // chunkAddrReg     <= addrAddPsnMultiplyPMTU(addrChunkReq.startAddr, oneAsPSN, addrChunkReq.pmtu);
-        // busyReg          <= !isSinglePkt;
-        // let addrChunkResp = AddrChunkResp {
-        //     chunkAddr: addrChunkReq.startAddr,
-        //     chunkLen : firstPktLen,
-        //     isFirst  : True,
-        //     isLast   : isSinglePkt
-        // };
-        // respQ.enq(addrChunkResp);
-
-        // let sgeDmaReadMetaData = DmaReadMetaDataSGE {
-        //     firstPktLen: firstPktLen,
-        //     lastPktLen : lastPktLen,
-        //     sgePktNum  : sgePktNum,
-        //     sgeLen     : addrChunkReq.len,
-        //     pmtu       : addrChunkReq.pmtu,
-        //     isFirst    : addrChunkReq.isOrigFirst,
-        //     isLast     : addrChunkReq.isOrigLast
-        // };
-        // sgeDmaReadMetaDataOutQ.enq(sgeDmaReadMetaData);
+        let sgePktMetaData = PktMetaDataSGE {
+            firstPktLen: firstPktLen,
+            lastPktLen : lastPktLen,
+            sgePktNum  : sgePktNum,
+            pmtu       : addrChunkReq.pmtu
+        };
+        sgePktMetaDataOutQ.enq(sgePktMetaData);
 
         // $display(
         //     "time=%0t: mkAddrChunkSrv recvReq", $time,
-        //     ", isSQ=", fshow(isSQ),
+        //     ", addrChunkReq.len=%0d", addrChunkReq.len,
         //     ", sgePktNum=%0d", sgePktNum,
-        //     ", pmtuResidue=%h", pmtuResidue,
-        //     ", addrChunkReq=", fshow(addrChunkReq)
+        //     ", firstPktLen=%0d", firstPktLen,
+        //     ", lastPktLen=%0d", lastPktLen
         // );
     endrule
 
     rule genResp if (!clearAll && busyReg);
-        let isLast = isLessOrEqOneR(pktNumReg);
+        let isLast = isZeroR(remainingPktNumReg);
+        if (!isLast) begin
+            remainingPktNumReg <= remainingPktNumReg - 1;
+        end
 
         busyReg      <= !isLast;
-        pktNumReg    <= pktNumReg - 1;
         isFirstReg   <= False;
         chunkAddrReg <= nextAddrReg;
         nextAddrReg  <= addrAddPsnMultiplyPMTU(nextAddrReg, oneAsPSN, pmtuReg);
@@ -500,14 +444,13 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         let addrChunkResp = AddrChunkResp {
             chunkAddr  : chunkAddrReg,
             chunkLen   : chunkLen,
-            // chunkLen : (isLast && !isZeroResidueReg) ? zeroExtend(residueReg) : fullPktLenReg,
             isFirst    : isFirstReg,
             isLast     : isLast,
             isOrigFirst: isOrigFirstReg,
             isOrigLast : isOrigLastReg
         };
         respQ.enq(addrChunkResp);
-
+/*
         let firstPktLastFragValidByteNum = calcLastFragValidByteNum(firstPktLenReg);
         let lastPktLastFragValidByteNum = calcLastFragValidByteNum(lastPktLenReg);
         let curPktLastFragValidByteNum = isFirstReg ?
@@ -519,17 +462,18 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             curPktLastFragValidByteNum: curPktLastFragValidByteNum,
             pktLen                    : chunkLen,
             pmtu                      : pmtuReg,
+            sgeHasJustTwoPkts             : isTwoR(sgePktNumReg),
             isFirst                   : isFirstReg,
             isLast                    : isLast,
             isFirstSGE                : isOrigFirstReg,
             isLastSGE                 : isOrigLastReg
         };
         sgePktMetaDataOutQ.enq(sgePktMetaData);
-
+*/
         // $display(
         //     "time=%0t: mkAddrChunkSrv genResp", $time,
         //     ", isSQ=", fshow(isSQ),
-        //     ", pktNumReg=%0d", pktNumReg,
+        //     ", remainingPktNumReg=%0d", remainingPktNumReg,
         //     ", chunkAddrReg=%h", chunkAddrReg,
         //     ", nextAddrReg=%h", nextAddrReg,
         //     ", addrChunkResp=", fshow(addrChunkResp)
@@ -537,7 +481,6 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     endrule
 
     interface srvPort = toGPServer(reqQ, respQ);
-    // interface sgeDmaReadMetaDataPipeOut = toPipeOut(sgeDmaReadMetaDataOutQ);
     interface sgePktMetaDataPipeOut = toPipeOut(sgePktMetaDataOutQ);
     method Bool isIdle() = !busyReg &&
         !reqQ.notEmpty && !sgePktMetaDataOutQ.notEmpty && !respQ.notEmpty;
@@ -566,7 +509,7 @@ interface DmaReadCntrl;
     interface DmaCntrlReadSrv srvPort;
     interface DmaCntrl dmaCntrl;
     interface PipeOut#(PktMetaDataSGE) sgePktMetaDataPipeOut;
-    interface PipeOut#(TotalPayloadMetaData) totalPayloadMetaDataPipeOut;
+    interface PipeOut#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataPipeOut;
     interface PipeOut#(MergedMetaDataSGE) sgeMergedMetaDataPipeOut;
 endinterface
 
@@ -576,7 +519,7 @@ module mkDmaReadCntrl#(
     FIFOF#(DmaReadCntrlReq)   reqQ <- mkFIFOF;
     FIFOF#(DmaReadCntrlResp) respQ <- mkFIFOF;
     FIFOF#(MergedMetaDataSGE)       sgeMergedMetaDataOutQ <- mkSizedFIFOF(valueOf(MAX_SGE));
-    FIFOF#(TotalPayloadMetaData) totalPayloadMetaDataOutQ <- mkFIFOF;
+    FIFOF#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataOutQ <- mkFIFOF;
 
     FIFOF#(Tuple2#(QPN, WorkReqID)) pendingDmaCntrlReqQ <- mkFIFOF; // TODO: remove it
     FIFOF#(Tuple2#(Bool, Bool))     pendingDmaReadReqQ <- mkFIFOF;
@@ -689,18 +632,18 @@ module mkDmaReadCntrl#(
             reqQ.deq;
             sglIdxReg <= 0;
 
-            let totalPayloadMetaData = TotalPayloadMetaData {
+            let sglTotalPayloadLenMetaData = TotalPayloadLenMetaDataSGL {
                 sqpn    : curSQPN,
                 wrID    : curWorkReqID,
                 totalLen: totalLen,
-                sgeNum  : sgeNum,
+                // sgeNum  : sgeNum,
                 pmtu    : dmaReadCntrlReq.pmtu
             };
-            totalPayloadMetaDataOutQ.enq(totalPayloadMetaData);
+            sglTotalPayloadLenMetaDataOutQ.enq(sglTotalPayloadLenMetaData);
             // $display(
             //     "time=%0t: mkDmaReadCntrl recvReq", $time,
             //     ", sqpn=%h", curSQPN,
-            //     ", totalPayloadMetaData=", fshow(totalPayloadMetaData)
+            //     ", sglTotalPayloadLenMetaData=", fshow(sglTotalPayloadLenMetaData)
             // );
         end
         else begin
@@ -817,22 +760,18 @@ module mkDmaReadCntrl#(
         method Bool isIdle() = gracefulStopReg[0];
     endinterface;
 
-    interface totalPayloadMetaDataPipeOut = toPipeOut(totalPayloadMetaDataOutQ);
+    interface sglTotalPayloadLenMetaDataPipeOut = toPipeOut(sglTotalPayloadLenMetaDataOutQ);
     interface sgeMergedMetaDataPipeOut = toPipeOut(sgeMergedMetaDataOutQ);
     interface sgePktMetaDataPipeOut = addrChunkSrv.sgePktMetaDataPipeOut;
 endmodule
 
-// interface MergePayloadEachSGE;
-//     interface PipeOut#(MergedMetaDataSGE) sgeMergedMetaDataPipeOut;
-//     interface DataStreamPipeOut sgeMergedPayloadPipeOut;
-// endinterface
-
 typedef enum {
     MERGE_SGE_PAYLOAD_INIT,
     // MERGE_SGE_PAYLOAD_ONLY_PKT,
-    MERGE_SGE_PAYLOAD_FIRST_PKT,
-    MERGE_SGE_PAYLOAD_MID_PKT,
+    // MERGE_SGE_PAYLOAD_FIRST_PKT,
+    // MERGE_SGE_PAYLOAD_MID_PKT,
     // MERGE_SGE_PAYLOAD_LAST_PKT,
+    MERGE_SGE_PAYLOAD_FIRST_OR_MID_PKT,
     MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT
 } MergePayloadStateEachSGE deriving(Bits, Eq, FShow);
 
@@ -843,16 +782,15 @@ module mkMergePayloadEachSGE#(
 )(DataStreamPipeOut);
     FIFOF#(DataStream) pktPayloadOutQ <- mkFIFOF;
 
-    Reg#(ByteEnBitNum)   sgeFirstPktLastFragValidByteNumReg <- mkRegU;
+    // Reg#(ByteEnBitNum)   sgeFirstPktLastFragValidByteNumReg <- mkRegU;
     Reg#(ByteEnBitNum) sgeFirstPktLastFragInvalidByteNumReg <- mkRegU;
     Reg#(BusBitNum)     sgeFirstPktLastFragInvalidBitNumReg <- mkRegU;
-    // Reg#(ByteEnBitNum)  sgeLastPktLastFragInvalidByteNumReg <- mkRegU;
-    // Reg#(BusBitNum)      sgeLastPktLastFragInvalidBitNumReg <- mkRegU;
-    Reg#(Bool) isPreFragValidReg <- mkRegU;
+
     Reg#(Bool) isFirstFragReg <- mkRegU;
+    Reg#(Bool) isFirstPktReg <- mkRegU;
     Reg#(Bool) sgeHasOnlyPktReg <- mkRegU;
-    Reg#(Bool) sgePktIsLastReg <- mkRegU;
     Reg#(Bool) hasExtraFragReg <- mkRegU;
+    Reg#(PktNum) remainingPktNumReg <- mkRegU;
     Reg#(DataStream) prePayloadFragReg <- mkRegU;
     Reg#(MergePayloadStateEachSGE) stateReg <- mkReg(MERGE_SGE_PAYLOAD_INIT);
 
@@ -864,121 +802,93 @@ module mkMergePayloadEachSGE#(
         isLast: False
     };
 
-    function Action prepareNextPktSGE(PktMetaDataSGE sgeNextPktMetaData);
-        action
-            sgePktIsLastReg <= sgeNextPktMetaData.isLast;
-            // In case sgeFirstPktLastFragValidByteNumReg=32 and curPktLastFragValidByteNum=32
-            // expand extra bit for overflow case.
-            hasExtraFragReg <= !sgeHasOnlyPktReg && ((
-                { 1'b0, sgeFirstPktLastFragValidByteNumReg } +
-                { 1'b0, sgeNextPktMetaData.curPktLastFragValidByteNum }
-            ) > fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
-            // $display(
-            //     "time=%0t: prepareNextPktSGE", $time,
-            //     ", sgeHasOnlyPktReg=", fshow(sgeHasOnlyPktReg),
-            //     ", sgeFirstPktLastFragValidByteNumReg=%0d", sgeFirstPktLastFragValidByteNumReg,
-            //     ", sgeNextPktMetaData.curPktLastFragValidByteNum=%0d", sgeNextPktMetaData.curPktLastFragValidByteNum,
-            //     ", sgeNextPktMetaData.isLast=", fshow(sgeNextPktMetaData.isLast)
-            // );
-        endaction
-    endfunction
-
     function ActionValue#(DataStream) prepareNextSGE();
         actionvalue
             let sgePktMetaData = sgePktMetaDataPipeIn.first;
             sgePktMetaDataPipeIn.deq;
 
-            let curPktLastFragValidByteNum = sgePktMetaData.curPktLastFragValidByteNum;
+            let firstPktLastFragValidByteNum = calcLastFragValidByteNum(sgePktMetaData.firstPktLen);
+            let lastPktLastFragValidByteNum = calcLastFragValidByteNum(sgePktMetaData.lastPktLen);
+
             let {
-                curPktLastFragValidBitNum,
-                curPktLastFragInvalidByteNum,
-                curPktLastFragInvalidBitNum
-            } = calcFragBitNumAndByteNum(curPktLastFragValidByteNum);
-            // let {
-            //     lastPktLastFragValidBitNum,
-            //     lastPktLastFragInvalidByteNum,
-            //     lastPktLastFragInvalidBitNum
-            // } = calcFragBitNumAndByteNum(sgeDetailMetaData.lastPktLastFragValidByteNum);
+                firstPktLastFragValidBitNum,
+                firstPktLastFragInvalidByteNum,
+                firstPktLastFragInvalidBitNum
+            } = calcFragBitNumAndByteNum(firstPktLastFragValidByteNum);
+            let {
+                lastPktLastFragValidBitNum,
+                lastPktLastFragInvalidByteNum,
+                lastPktLastFragInvalidBitNum
+            } = calcFragBitNumAndByteNum(lastPktLastFragValidByteNum);
 
-            let isOnlyPktSGE = sgePktMetaData.isFirst && sgePktMetaData.isLast;
-            sgePktIsLastReg <= sgePktMetaData.isLast;
-            sgeHasOnlyPktReg <= isOnlyPktSGE;
+            let sgeHasJustTwoPkts = isTwoR(sgePktMetaData.sgePktNum);
+            let sgeHasOnlyPkt     = isLessOrEqOneR(sgePktMetaData.sgePktNum);
+            sgeHasOnlyPktReg     <= sgeHasOnlyPkt;
 
-            // if (sgePktMetaData.isLast) begin
-            //     hasExtraFragReg <= !isOnlyPktSGE && ((
-            //         sgeFirstPktLastFragValidByteNumReg +
-            //         curPktLastFragValidByteNum
-            //     ) > fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)));
-            // end
+            let hasExtraFrag = lastPktLastFragValidByteNum > firstPktLastFragInvalidByteNum;
+            hasExtraFragReg <= hasExtraFrag;
 
-            if (sgePktMetaData.isFirst) begin
-                sgeFirstPktLastFragValidByteNumReg   <= curPktLastFragValidByteNum;
-                sgeFirstPktLastFragInvalidByteNumReg <= curPktLastFragInvalidByteNum;
-                sgeFirstPktLastFragInvalidBitNumReg  <= curPktLastFragInvalidBitNum;
-                // sgeLastPktLastFragInvalidByteNumReg  <= lastPktLastFragInvalidByteNum;
-                // sgeLastPktLastFragInvalidBitNumReg   <= lastPktLastFragInvalidBitNum;
-            end
+            // sgeFirstPktLastFragValidByteNumReg   <= firstPktLastFragValidByteNum;
+            sgeFirstPktLastFragInvalidByteNumReg <= firstPktLastFragInvalidByteNum;
+            sgeFirstPktLastFragInvalidBitNumReg  <= firstPktLastFragInvalidBitNum;
 
-            // let curPayloadFrag = sgePayloadPipeIn.first;
-            // sgePayloadPipeIn.deq;
-
-            // let nextPrePayloadFrag = curPayloadFrag;
-            // if (isOnlyPktSGE) begin
-            //     stateReg <= MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT;
-            // end
-            // else begin
-            //     if (curPayloadFrag.isLast) begin // Single fragment first packet
-            //         nextPrePayloadFrag.byteEn = curPayloadFrag.byteEn >> curPktLastFragInvalidByteNum;
-            //         nextPrePayloadFrag.data   = curPayloadFrag.data   >> curPktLastFragInvalidBitNum;
-
-            //         stateReg <= MERGE_SGE_PAYLOAD_MID_PKT;
-            //     end
-            //     else begin
-            //         stateReg <= MERGE_SGE_PAYLOAD_FIRST_PKT;
-            //     end
-            // end
             let curPayloadFrag = sgePayloadPipeIn.first;
-            let nextPrePayloadFrag = curPayloadFrag;
-            if (curPayloadFrag.isLast && !isOnlyPktSGE) begin // Single fragment first packet
-                nextPrePayloadFrag = emptyDataStream;
-                isPreFragValidReg <= False;
-                // nextPrePayloadFrag.isLast = False;
-            end
-            else begin
-                sgePayloadPipeIn.deq;
-                isPreFragValidReg <= True;
-            end
+            sgePayloadPipeIn.deq;
 
-            if (isOnlyPktSGE) begin
+            let remainingPktNum = 0;
+            let isFirstPkt = True;
+            let nextPrePayloadFrag = curPayloadFrag;
+            if (sgeHasOnlyPkt) begin
                 stateReg <= MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT;
             end
             else begin
-                stateReg <= MERGE_SGE_PAYLOAD_FIRST_PKT;
+                if (curPayloadFrag.isLast) begin // Single fragment first packet
+                    nextPrePayloadFrag.isLast = False;
+                    nextPrePayloadFrag.byteEn = curPayloadFrag.byteEn >> firstPktLastFragInvalidByteNum;
+                    nextPrePayloadFrag.data   = curPayloadFrag.data   >> firstPktLastFragInvalidBitNum;
+
+                    isFirstPkt = False;
+                    if (sgeHasJustTwoPkts) begin
+                        stateReg <= MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT;
+                    end
+                    else begin
+                        stateReg <= MERGE_SGE_PAYLOAD_FIRST_OR_MID_PKT;
+                        remainingPktNum = sgePktMetaData.sgePktNum - 2;
+                    end
+                end
+                else begin
+                    stateReg <= MERGE_SGE_PAYLOAD_FIRST_OR_MID_PKT;
+                    remainingPktNum = sgePktMetaData.sgePktNum - 1;
+                end
             end
+            remainingPktNumReg <= remainingPktNum;
+            isFirstPktReg  <= isFirstPkt;
+            isFirstFragReg <= True;
 
             // $display(
             //     "time=%0t: prepareNextSGE", $time,
-            //     ", sgePktMetaData.isFirst=", fshow(sgePktMetaData.isFirst),
-            //     ", sgePktMetaData.isLast=", fshow(sgePktMetaData.isLast),
-            //     ", curPktLastFragValidByteNum=%0d", curPktLastFragValidByteNum,
-            //     ", curPktLastFragValidBitNum=%0d", curPktLastFragValidBitNum,
-            //     ", curPktLastFragInvalidByteNum=%0d", curPktLastFragInvalidByteNum,
-            //     ", curPktLastFragInvalidBitNum=%0d", curPktLastFragInvalidBitNum,
-            //     ", sgeFirstPktLastFragValidByteNumReg=%0d", sgeFirstPktLastFragValidByteNumReg,
+            //     ", sgeHasOnlyPkt=", fshow(sgeHasOnlyPkt),
+            //     ", sgeHasJustTwoPkts=", fshow(sgeHasJustTwoPkts),
+            //     ", sgePktMetaData.sgePktNum=%0d", sgePktMetaData.sgePktNum,
+            //     ", sgePktMetaData.firstPktLen=%0d", sgePktMetaData.firstPktLen,
+            //     ", sgePktMetaData.lastPktLen=%0d", sgePktMetaData.lastPktLen,
+            //     ", firstPktLastFragValidByteNum=%0d", firstPktLastFragValidByteNum,
+            //     ", firstPktLastFragValidBitNum=%0d", firstPktLastFragValidBitNum,
+            //     ", firstPktLastFragInvalidByteNum=%0d", firstPktLastFragInvalidByteNum,
+            //     ", firstPktLastFragInvalidBitNum=%0d", firstPktLastFragInvalidBitNum,
+            //     // ", sgeFirstPktLastFragValidByteNumReg=%0d", sgeFirstPktLastFragValidByteNumReg,
             //     ", sgeFirstPktLastFragInvalidByteNumReg=%0d", sgeFirstPktLastFragInvalidByteNumReg,
             //     ", sgeFirstPktLastFragInvalidBitNumReg=%0d", sgeFirstPktLastFragInvalidBitNumReg,
             //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
-            //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast)
+            //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
+            //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn
             // );
-
-            isFirstFragReg <= True;
             return nextPrePayloadFrag;
         endactionvalue
     endfunction
 
     rule resetAndClear if (clearAll);
         pktPayloadOutQ.clear;
-        // sgeMergedMetaDataOutQ.clear;
         stateReg <= MERGE_SGE_PAYLOAD_INIT;
     endrule
 
@@ -986,137 +896,52 @@ module mkMergePayloadEachSGE#(
         let nextPrePayloadFrag <- prepareNextSGE;
         prePayloadFragReg <= nextPrePayloadFrag;
     endrule
-/*
-    rule mergeOnlyPktSGE if (!clearAll && stateReg == MERGE_SGE_PAYLOAD_ONLY_PKT);
-        let nextPayloadFrag = emptyDataStream;
-        if (prePayloadFragReg.isLast) begin
-            if (
-                sgePktIsLastReg && !(
-                    sgeDetailMetaDataPipeIn.notEmpty && sgePayloadPipeIn.notEmpty
-                )
-            ) begin
-                // Wait for next SGL, if no next SGE metadata or payload
-                stateReg <= MERGE_SGE_PAYLOAD_INIT;
-            end
-            else begin
-                nextPayloadFrag <- prepareNextSGE;
-            end
-        end
-        else begin
-            nextPayloadFrag = sgePayloadPipeIn.first;
-            sgePayloadPipeIn.deq;
-        end
-        prePayloadFragReg <= nextPayloadFrag;
 
-        immAssert(
-            isOneR(sgeRemainingPktNumReg),
-            "sgeRemainingPktNumReg assertion @ mkMergePayloadEachSGE",
-            $format(
-                "sgeRemainingPktNumReg=%0d", sgeRemainingPktNumReg,
-                " should be one when stateReg=", fshow(stateReg)
-            )
-        );
-
-        pktPayloadOutQ.enq(prePayloadFragReg);
-    endrule
-*/
-    rule mergeFirstPktSGE if (!clearAll && stateReg == MERGE_SGE_PAYLOAD_FIRST_PKT);
-        let sgeNextPktMetaData = sgePktMetaDataPipeIn.first;
-
+    rule mergeFirstOrMidPktSGE if (!clearAll && stateReg == MERGE_SGE_PAYLOAD_FIRST_OR_MID_PKT);
         let curPayloadFrag = sgePayloadPipeIn.first;
         sgePayloadPipeIn.deq;
 
         let nextPrePayloadFrag = curPayloadFrag;
         if (curPayloadFrag.isLast) begin
-            sgePktMetaDataPipeIn.deq;
+            nextPrePayloadFrag.isLast = False;
 
-            // Only right shift the last fragment of the first packet
-            nextPrePayloadFrag.byteEn = curPayloadFrag.byteEn >> sgeFirstPktLastFragInvalidByteNumReg;
-            nextPrePayloadFrag.data   = curPayloadFrag.data   >> sgeFirstPktLastFragInvalidBitNumReg;
+            if (isFirstPktReg) begin
+                isFirstPktReg <= False;
+                // Only right shift the last fragment of the first packet
+                nextPrePayloadFrag.byteEn = curPayloadFrag.byteEn >> sgeFirstPktLastFragInvalidByteNumReg;
+                nextPrePayloadFrag.data   = curPayloadFrag.data   >> sgeFirstPktLastFragInvalidBitNumReg;
+            end
 
-            // sgePktIsLastReg <= sgeNextPktMetaData.isLast;
-            if (sgeNextPktMetaData.isLast) begin
+            let isLastPkt = isLessOrEqOneR(remainingPktNumReg);
+            if (isLastPkt) begin
                 stateReg <= MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT;
-                prepareNextPktSGE(sgeNextPktMetaData);
-                // hasExtraFragReg <= checkExtraFrag(sgeNextPktMetaData.curPktLastFragValidByteNum);
             end
-            else begin
-                stateReg <= MERGE_SGE_PAYLOAD_MID_PKT;
-            end
+            remainingPktNumReg <= remainingPktNumReg - 1;
         end
-        isPreFragValidReg <= True;
-        nextPrePayloadFrag.isLast = False;
         prePayloadFragReg <= nextPrePayloadFrag;
 
         immAssert(
-            !sgePktIsLastReg,
-            "sgePktIsLastReg assertion @ mkMergePayloadEachSGE",
+            !isZeroR(remainingPktNumReg),
+            "remainingPktNumReg assertion @ mkMergePayloadEachSGE",
             $format(
-                "sgePktIsLastReg=", fshow(sgePktIsLastReg),
-                " should be false when stateReg=", fshow(stateReg)
+                "remainingPktNumReg=%0d", fshow(remainingPktNumReg),
+                " should > 0 when stateReg=", fshow(stateReg)
             )
         );
-
-        if (isPreFragValidReg) begin
-            isFirstFragReg <= False;
-            let outPayloadFrag = prePayloadFragReg;
-            pktPayloadOutQ.enq(outPayloadFrag);
-            // $display(
-            //     "time=%0t: mergeFirstPktSGE", $time,
-            //     ", sgeNextPktMetaData.isFirst=", fshow(sgeNextPktMetaData.isFirst),
-            //     ", sgeNextPktMetaData.isLast=", fshow(sgeNextPktMetaData.isLast),
-            //     ", sgeNextPktMetaData.curPktLastFragValidByteNum=%0d", sgeNextPktMetaData.curPktLastFragValidByteNum,
-            //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
-            //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
-            //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
-            //     ", outPayloadFrag.isFirst=", fshow(outPayloadFrag.isFirst),
-            //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
-            //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
-            // );
-        end
-    endrule
-
-    rule mergeMidPktSGE if (!clearAll && stateReg == MERGE_SGE_PAYLOAD_MID_PKT);
-        let sgeNextPktMetaData = sgePktMetaDataPipeIn.first;
-
-        let curPayloadFrag = sgePayloadPipeIn.first;
-        sgePayloadPipeIn.deq;
-
-        if (curPayloadFrag.isLast) begin
-            sgePktMetaDataPipeIn.deq;
-            // $display(
-            //     "time=%0t: mergeMidPktSGE, sgePktMetaDataPipeIn.deq", $time,
-            //     ", sgeNextPktMetaData.curPktLastFragValidByteNum=%0d", sgeNextPktMetaData.curPktLastFragValidByteNum
-            // );
-
-            // sgePktIsLastReg <= sgeNextPktMetaData.isLast;
-            if (sgeNextPktMetaData.isLast) begin
-                stateReg <= MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT;
-                prepareNextPktSGE(sgeNextPktMetaData);
-                // hasExtraFragReg <= checkExtraFrag(sgeNextPktMetaData.curPktLastFragValidByteNum);
-            end
-        end
-        let nextPrePayloadFrag = curPayloadFrag;
-        nextPrePayloadFrag.isLast = False;
-        prePayloadFragReg <= nextPrePayloadFrag;
 
         let mergedFrag = mergeFragData(
             prePayloadFragReg, curPayloadFrag,
             sgeFirstPktLastFragInvalidByteNumReg, sgeFirstPktLastFragInvalidBitNumReg
         );
-        isFirstFragReg <= False;
-        let outPayloadFrag = mergedFrag;
+
+        let outPayloadFrag = isFirstPktReg ? prePayloadFragReg : mergedFrag;
         outPayloadFrag.isFirst = isFirstFragReg;
-        // outPayloadFrag.isLast = False;
+        isFirstFragReg <= False;
         pktPayloadOutQ.enq(outPayloadFrag);
         // $display(
-        //     "time=%0t: mergeMidPktSGE", $time,
-        //     ", sgeNextPktMetaData.isFirst=", fshow(sgeNextPktMetaData.isFirst),
-        //     ", sgeNextPktMetaData.isLast=", fshow(sgeNextPktMetaData.isLast),
-        //     ", sgeNextPktMetaData.curPktLastFragValidByteNum=%0d", sgeNextPktMetaData.curPktLastFragValidByteNum,
-        //     // ", sgeFirstPktLastFragInvalidByteNumReg=%0d", sgeFirstPktLastFragInvalidByteNumReg,
-        //     // ", sgeFirstPktLastFragInvalidBitNumReg=%0d", sgeFirstPktLastFragInvalidBitNumReg,
-        //     // ", sgeNextPktMetaData.isLast=", fshow(sgeNextPktMetaData.isLast),
+        //     "time=%0t: mergeFirstOrMidPktSGE", $time,
+        //     ", sgeFirstPktLastFragInvalidByteNumReg=%0d", sgeFirstPktLastFragInvalidByteNumReg,
+        //     ", sgeFirstPktLastFragInvalidBitNumReg=%0d", sgeFirstPktLastFragInvalidBitNumReg,
         //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
         //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
         //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
@@ -1153,12 +978,14 @@ module mkMergePayloadEachSGE#(
         end
         prePayloadFragReg <= nextPayloadFrag;
 
+        let isLastPkt = isZeroR(remainingPktNumReg);
         immAssert(
-            sgePktIsLastReg,
-            "sgePktIsLastReg assertion @ mkMergePayloadEachSGE",
+            isLastPkt,
+            "isLastPkt assertion @ mkMergePayloadEachSGE",
             $format(
-                "sgePktIsLastReg=", fshow(sgePktIsLastReg),
-                " should be true when stateReg=", fshow(stateReg)
+                "isLastPkt=", fshow(isLastPkt),
+                " should be true when stateReg=", fshow(stateReg),
+                ", and remainingPktNumReg=%0d", remainingPktNumReg
             )
         );
 
@@ -1192,9 +1019,9 @@ endmodule
 typedef enum {
     MERGE_SGL_PAYLOAD_INIT,
     MERGE_SGL_PAYLOAD_FIRST_OR_MID_SGE,
+    MERGE_SGL_PAYLOAD_LAST_OR_ONLY_SGE
     // MERGE_SGL_PAYLOAD_FIRST_SGE,
     // MERGE_SGL_PAYLOAD_MID_SGE,
-    MERGE_SGL_PAYLOAD_LAST_OR_ONLY_SGE
     // MERGE_SGL_PAYLOAD_LAST_SGE,
     // MERGE_SGL_PAYLOAD_ONLY_SGE
 } MergePayloadStateAllSGE deriving(Bits, Eq, FShow);
@@ -1974,9 +1801,9 @@ module mkPayloadGenerator#(
 
         let totalLen = 0;
         if (!isZeroPayloadLen) begin
-            let totalPayloadMetaData = dmaReadCntrl.totalPayloadMetaDataPipeOut.first;
-            dmaReadCntrl.totalPayloadMetaDataPipeOut.deq;
-            totalLen = totalPayloadMetaData.totalLen;
+            let sglTotalPayloadLenMetaData = dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.first;
+            dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.deq;
+            totalLen = sglTotalPayloadLenMetaData.totalLen;
         end
 
         let { truncatedPktNum, residue } = truncateLenByPMTU(totalLen, wqe.pmtu);

@@ -55,8 +55,6 @@ module mkTestAddrChunkSrv(Empty);
     PSN oneAsPSN = 1;
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
-    // mkSink(dut.sgePktMetaDataPipeOut);
-
     rule clearAll if (clearReg);
         clearReg <= False;
     endrule
@@ -84,15 +82,18 @@ module mkTestAddrChunkSrv(Empty);
         let { tmpPktNum, pmtuResidue } = truncateLenByPMTU(
             totalLen, pmtu
         );
-        let isOnlyPkt = isLessOrEqOne(totalPktNum);
+        let isOnlyPkt     = isLessOrEqOne(totalPktNum);
         let isZeroResidue = isZero(pmtuResidue);
-        // let totalPktNum = tmpPktNum + (isZero(pmtuResidue) ? 0 : 1);
-        // residueReg  <= pmtuResidue;
+        let firstPktLen = isOnlyPkt ? truncate(payloadLen) : tmpFirstPktLen;
+        let lastPktLen  = isOnlyPkt ? truncate(payloadLen) : (
+            isZeroResidue ? pmtuLen : zeroExtend(pmtuResidue)
+        );
+
         pktNumReg <= totalPktNum;
         pmtuReg <= pmtu;
         pmtuLenReg <= pmtuLen;
-        firstPktLenReg <= isOnlyPkt ? truncate(payloadLen) : tmpFirstPktLen;
-        lastPktLenReg <= isZeroResidue ? pmtuLen : zeroExtend(pmtuResidue);
+        firstPktLenReg <= firstPktLen;
+        lastPktLenReg <= lastPktLen;
         nextAddrReg <= alignedAddr;
         isFirstReg <= True;
         busyReg <= True;
@@ -107,6 +108,14 @@ module mkTestAddrChunkSrv(Empty);
         dut.srvPort.request.put(addrChunkReq);
         reqQ.enq(addrChunkReq);
 
+        let sgePktMetaData = PktMetaDataSGE {
+            firstPktLen: firstPktLen,
+            lastPktLen : lastPktLen,
+            sgePktNum  : totalPktNum,
+            pmtu       : addrChunkReq.pmtu
+        };
+        sgePktMetaDataRefQ.enq(sgePktMetaData);
+
         countDown.decr;
         // $display(
         //     "time=%0t: issueReq", $time,
@@ -117,6 +126,8 @@ module mkTestAddrChunkSrv(Empty);
         //     ", pmtuResidue=%0d", pmtuResidue,
         //     ", tmpFirstPktLen=%0d", tmpFirstPktLen,
         //     ", totalPktNum=%0d", totalPktNum,
+        //     ", firstPktLen=%0d", firstPktLen,
+        //     ", lastPktLen=%0d", lastPktLen,
         //     ", pmtuLen=%0d", pmtuLen,
         //     ", pmtu=", fshow(pmtu),
         //     ", isOnlyPkt=", fshow(isOnlyPkt)
@@ -128,12 +139,8 @@ module mkTestAddrChunkSrv(Empty);
 
         isFirstReg  <= False;
         pktNumReg   <= pktNumReg - 1;
-        // if (!isFirstReg) begin
         nextAddrReg <= addrAddPsnMultiplyPMTU(nextAddrReg, oneAsPSN, pmtuReg);
-        // end
 
-        // let isZeroResidue = isZero(residueReg);
-        // let isFirst = nextAddrReg == req.startAddr;
         let isLast  = isLessOrEqOne(pktNumReg);
         if (isLast) begin
             reqQ.deq;
@@ -154,16 +161,16 @@ module mkTestAddrChunkSrv(Empty);
         };
         respQ.enq(addrChunkResp);
 
-        let sgePktMetaDataRef = PktMetaDataSGE {
-            curPktLastFragValidByteNum: curPktLastFragValidByteNum,
-            pktLen                    : chunkLen,
-            pmtu                      : pmtuReg,
-            isFirst                   : isFirstReg,
-            isLast                    : isLast,
-            isFirstSGE                : req.isFirst,
-            isLastSGE                 : req.isLast
-        };
-        sgePktMetaDataRefQ.enq(sgePktMetaDataRef);
+        // let sgePktMetaDataRef = PktMetaDataSGE {
+        //     curPktLastFragValidByteNum: curPktLastFragValidByteNum,
+        //     pktLen                    : chunkLen,
+        //     pmtu                      : pmtuReg,
+        //     isFirst                   : isFirstReg,
+        //     isLast                    : isLast,
+        //     isFirstSGE                : req.isFirst,
+        //     isLastSGE                 : req.isLast
+        // };
+        // sgePktMetaDataRefQ.enq(sgePktMetaDataRef);
     endrule
 
     rule checkResp;
@@ -212,6 +219,32 @@ module mkTestAddrChunkSrv(Empty);
         sgePktMetaDataRefQ.deq;
 
         immAssert(
+            sgePktMetaData.firstPktLen == sgePktMetaDataRef.firstPktLen &&
+            sgePktMetaData.lastPktLen == sgePktMetaDataRef.lastPktLen &&
+            sgePktMetaData.sgePktNum == sgePktMetaDataRef.sgePktNum &&
+            sgePktMetaData.pmtu == sgePktMetaDataRef.pmtu,
+            "sgePktMetaData assertion @ mkTestAddrChunkSrv",
+            $format(
+                "sgePktMetaData.firstPktLen=%0d should == sgePktMetaDataRef.firstPktLen=%0d",
+                sgePktMetaData.firstPktLen, sgePktMetaDataRef.firstPktLen,
+                ", sgePktMetaData.lastPktLen=%0d should == sgePktMetaDataRef.lastPktLen=%0d",
+                sgePktMetaData.lastPktLen, sgePktMetaDataRef.lastPktLen,
+                ", sgePktMetaData.sgePktNum=%0d", sgePktMetaData.sgePktNum,
+                " should == sgePktMetaDataRef.sgePktNum=%0d", sgePktMetaDataRef.sgePktNum,
+                ", sgePktMetaData.pmtu=", fshow(sgePktMetaData.pmtu),
+                " should == sgePktMetaData.pmtu=", fshow(sgePktMetaData.pmtu)
+            )
+        );
+        // $display("time=%0t: checkPktMetaDataSGE", $time);
+    endrule
+/*
+    rule checkPktMetaDataSGE;
+        let sgePktMetaData = dut.sgePktMetaDataPipeOut.first;
+        dut.sgePktMetaDataPipeOut.deq;
+        let sgePktMetaDataRef = sgePktMetaDataRefQ.first;
+        sgePktMetaDataRefQ.deq;
+
+        immAssert(
             sgePktMetaData.curPktLastFragValidByteNum == sgePktMetaDataRef.curPktLastFragValidByteNum &&
             sgePktMetaData.pktLen == sgePktMetaDataRef.pktLen &&
             sgePktMetaData.pmtu == sgePktMetaDataRef.pmtu &&
@@ -239,6 +272,7 @@ module mkTestAddrChunkSrv(Empty);
         );
         // $display("time=%0t: checkPktMetaDataSGE", $time);
     endrule
+*/
 endmodule
 
 (* doc = "testcase" *)
@@ -290,7 +324,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     mkSink(dut.sgePktMetaDataPipeOut);
-    mkSink(dut.totalPayloadMetaDataPipeOut);
+    mkSink(dut.sglTotalPayloadLenMetaDataPipeOut);
     mkSink(dut.sgeMergedMetaDataPipeOut);
 
     rule clearAll if (stateReg == TEST_DMA_CNTRL_INIT);
@@ -585,7 +619,7 @@ module mkTestMergeNormalOrSmallPayloadEachSGE#(
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
     // mkSink(dut.sgePktMetaDataPipeOut);
-    mkSink(dmaReadCntrl.totalPayloadMetaDataPipeOut);
+    mkSink(dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut);
     mkSink(dmaReadCntrl.sgeMergedMetaDataPipeOut);
 
     rule clearAll if (stateReg == TEST_MERGE_EACH_SGE_INIT);
@@ -844,7 +878,7 @@ module mkTestMergeNormalOrSmallPayloadAllSGE#(
 
     // mkSink(dmaReadCntrl.sgePktMetaDataPipeOut);
     // mkSink(dmaReadCntrl.sgeMergedMetaDataPipeOut);
-    mkSink(dmaReadCntrl.totalPayloadMetaDataPipeOut);
+    mkSink(dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut);
 
     rule clearAll if (stateReg == TEST_MERGE_ALL_SGE_INIT);
         clearReg <= False;
@@ -1213,8 +1247,8 @@ module mkTestAdjustNormalOrSmallPayloadSegment#(
         let pmtu = pmtuQ.first;
         pmtuQ.deq;
 
-        let totalPayloadMetaData = dmaReadCntrl.totalPayloadMetaDataPipeOut.first;
-        dmaReadCntrl.totalPayloadMetaDataPipeOut.deq;
+        let totalPayloadMetaData = dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.first;
+        dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.deq;
         let totalLen = totalPayloadMetaData.totalLen;
 
         let {
