@@ -1172,7 +1172,7 @@ module mkTestAdjustNormalOrSmallPayloadSegment#(
         sgePayloadOutQ.enq(dmaReadCntrlResp.dmaReadResp.dataStream);
     endrule
 
-    rule adjustTotalPayloadMetaData if (stateReg == TEST_ADJUST_PAYLOAD_RECV);
+    rule recvTotalPayloadLenMetaData if (stateReg == TEST_ADJUST_PAYLOAD_RECV);
         let remoteAddr = remoteAddrPipeOut.first;
         remoteAddrPipeOut.deq;
 
@@ -1221,7 +1221,7 @@ module mkTestAdjustNormalOrSmallPayloadSegment#(
 
         stateReg <= TEST_ADJUST_PAYLOAD_RUN;
         // $display(
-        //     "time=%0t: adjustTotalPayloadMetaData", $time,
+        //     "time=%0t: recvTotalPayloadLenMetaData", $time,
         //     ", pmtu=", fshow(pmtu),
         //     ", totalLen=%0d", totalLen,
         //     ", firstPktLen=%0d", firstPktLen,
@@ -1431,11 +1431,13 @@ module mkTestNormalOrSmallPayloadGen#(
 
     Reg#(PayloadGenRespSG) payloadGenRespReg <- mkRegU;
     Reg#(Bool)                isFirstFragReg <- mkRegU;
+    Reg#(Bool)           isZeroPayloadLenReg <- mkRegU;
     Reg#(PktNum)          remainingPktNumReg <- mkRegU; // TODO: remove it
     Reg#(PktFragNum)     remainingFragNumReg <- mkRegU;
     Reg#(PktFragNum)      firstPktFragNumReg <- mkRegU;
     Reg#(PktFragNum)       lastPktFragNumReg <- mkRegU;
     Reg#(PktFragNum)          pmtuFragNumReg <- mkRegU;
+    Reg#(ADDR)         expectedRemoteAddrReg <- mkRegU;
     Reg#(TestAdjustPayloadState)    stateReg <- mkReg(TEST_ADJUST_PAYLOAD_INIT);
     let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
 
@@ -1521,12 +1523,13 @@ module mkTestNormalOrSmallPayloadGen#(
         let lastPktFragNum  = calcFragNumByPktLen(lastPktLen);
         let pmtuFragNum     = calcFragNumByPktLen(pmtuLen);
 
-        firstPktFragNumReg  <= firstPktFragNum;
-        lastPktFragNumReg   <= lastPktFragNum;
-        pmtuFragNumReg      <= pmtuFragNum;
-        remainingPktNumReg  <= totalPktNum - 1;
-        remainingFragNumReg <= firstPktFragNum - 1;
-        isFirstFragReg      <= True;
+        expectedRemoteAddrReg <= remoteAddr;
+        firstPktFragNumReg    <= firstPktFragNum;
+        lastPktFragNumReg     <= lastPktFragNum;
+        pmtuFragNumReg        <= pmtuFragNum;
+        remainingPktNumReg    <= totalPktNum;
+        remainingFragNumReg   <= firstPktFragNum - 1;
+        isFirstFragReg        <= True;
         // $display(
         //     "time=%0t: issueDmaReadCntrlReq", $time,
         //     ", pmtu=", fshow(pmtu),
@@ -1540,7 +1543,7 @@ module mkTestNormalOrSmallPayloadGen#(
         //     ", remoteAddr=%h", remoteAddr
         // );
 
-        stateReg <= TEST_ADJUST_PAYLOAD_RUN;
+        stateReg <= TEST_ADJUST_PAYLOAD_RECV;
         for (Integer idx = 0; idx < valueOf(MAX_SGE); idx = idx + 1) begin
             let sge = sglRegVec[idx];
             let {
@@ -1563,6 +1566,34 @@ module mkTestNormalOrSmallPayloadGen#(
         end
     endrule
 
+    rule recvReqGenTotalMetaData if (stateReg == TEST_ADJUST_PAYLOAD_RECV);
+        let reqGenTotalMetaData = dut.reqGenTotalMetaDataPipeOut.first;
+        dut.reqGenTotalMetaDataPipeOut.deq;
+
+        immAssert(
+            totalLenReg == reqGenTotalMetaData.totalLen,
+            "totalLen assertion @ mkTestNormalOrSmallPayloadGen",
+            $format(
+                "totalLenReg=%0d", totalLenReg,
+                " should == reqGenTotalMetaData.totalLen",
+                reqGenTotalMetaData.totalLen
+            )
+        );
+        immAssert(
+            remainingPktNumReg == reqGenTotalMetaData.totalPktNum,
+            "totalPktNum assertion @ mkTestNormalOrSmallPayloadGen",
+            $format(
+                "remainingPktNumReg=%0d", remainingPktNumReg,
+                " should == reqGenTotalMetaData.totalPktNum",
+                reqGenTotalMetaData.totalPktNum
+            )
+        );
+        isZeroPayloadLenReg <= reqGenTotalMetaData.isZeroPayloadLen;
+        remainingPktNumReg  <= remainingPktNumReg - 1;
+        stateReg <= TEST_ADJUST_PAYLOAD_RUN;
+        // $display("time=%0t: recvReqGenTotalMetaData", $time);
+    endrule
+
     rule checkResp if (stateReg == TEST_ADJUST_PAYLOAD_RUN);
         let payloadGenResp = payloadGenRespReg;
         let isFirstFrag = isFirstFragReg;
@@ -1574,7 +1605,19 @@ module mkTestNormalOrSmallPayloadGen#(
         let isFirstPkt = payloadGenResp.isFirst;
         let isLastPkt  = payloadGenResp.isLast;
 
-        if (payloadGenResp.isZeroPayloadLen) begin
+        let nextRemoteAddr = payloadGenResp.raddr + zeroExtend(payloadGenResp.pktLen);
+        immAssert(
+            expectedRemoteAddrReg == payloadGenResp.raddr,
+            "expectedRemoteAddrReg.raddr assertion @ mkTestNormalOrSmallPayloadGen",
+            $format(
+                "expectedRemoteAddrReg=%0d", expectedRemoteAddrReg,
+                " should == payloadGenResp.raddr=%0d", payloadGenResp.raddr,
+                " when remainingPktNumReg=%0d", remainingPktNumReg,
+                " and isFirstPkt=", fshow(isFirstPkt)
+            )
+        );
+
+        if (isZeroPayloadLenReg) begin
             stateReg <= TEST_ADJUST_PAYLOAD_INIT;
             isFirstFrag = True;
         end
@@ -1591,6 +1634,8 @@ module mkTestNormalOrSmallPayloadGen#(
             isFirstFrag            = payloadFrag.isLast;
 
             if (payloadFrag.isLast) begin
+                expectedRemoteAddrReg <= nextRemoteAddr;
+
                 if (isLastPkt) begin
                     stateReg <= TEST_ADJUST_PAYLOAD_INIT;
                 end
@@ -1637,7 +1682,8 @@ module mkTestNormalOrSmallPayloadGen#(
 
         // $display(
         //     "time=%0t: checkResp", $time,
-        //     ", isZeroPayloadLen=", fshow(payloadGenResp.isZeroPayloadLen)
+        //     ", expectedRemoteAddrReg=%h", expectedRemoteAddrReg,
+        //     ", isZeroPayloadLenReg=", fshow(isZeroPayloadLenReg)
         // );
     endrule
 endmodule
