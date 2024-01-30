@@ -240,6 +240,228 @@ module mkTestAddrChunkSrv(Empty);
 endmodule
 
 (* doc = "testcase" *)
+module mkTestDmaReadCntrlScatterGatherListCase(Empty);
+    let minPayloadLen = 2048;
+    let maxPayloadLen = 8192;
+    let qpType = IBV_QPT_XRC_SEND;
+    let pmtuVec = vec(
+        IBV_MTU_256,
+        IBV_MTU_512,
+        IBV_MTU_1024,
+        IBV_MTU_2048,
+        IBV_MTU_4096
+    );
+
+    Reg#(Bool) clearReg <- mkReg(True);
+    Reg#(IdxSGL) sglIdxReg <- mkReg(0);
+    Reg#(TotalFragNum) sglTotalFragNumReg <- mkRegU;
+    Reg#(TotalFragNum) remainingFragNumReg <- mkReg(0);
+    Reg#(Length) totalLenReg <- mkRegU;
+    Reg#(ScatterGatherList) sglReg <- mkRegU;
+
+    FIFOF#(Tuple2#(ScatterGatherList, PMTU)) sglQ <- mkFIFOF;
+    FIFOF#(TotalFragNum) sglTotalFragNumQ <- mkFIFOF;
+
+    Vector#(1, PipeOut#(NumSGE)) sgeNumPipeOutVec <-
+        mkRandomValueInRangePipeOut(fromInteger(1), fromInteger(valueOf(MAX_SGE)));
+    let sgeNumPipeOut = sgeNumPipeOutVec[0];
+
+    PipeOut#(Bool) randomCancelPipeOut <- mkGenericRandomPipeOut;
+    PipeOut#(ADDR)  startAddrPipeOut <- mkGenericRandomPipeOut;
+    let payloadLenPipeOut <- mkRandomLenPipeOut(minPayloadLen, maxPayloadLen);
+    let pmtuPipeOut <- mkRandomItemFromVec(pmtuVec);
+
+    let simDmaReadSrv <- mkSimDmaReadSrv;
+    let dut <- mkDmaReadCntrl(clearReg, simDmaReadSrv);
+
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    mkSink(dut.sgePktMetaDataPipeOut);
+    mkSink(dut.sglTotalPayloadLenMetaDataPipeOut);
+    mkSink(dut.sgeMergedMetaDataPipeOut);
+
+    rule clearAll if (clearReg);
+        clearReg  <= False;
+        sglIdxReg <= 0;
+        remainingFragNumReg <= 0;
+
+        sglQ.clear;
+        sglTotalFragNumQ.clear;
+        // $display("time=%0t: clearAll", $time);
+    endrule
+
+    rule genSGE if (!clearReg);
+        let sgeNum = sgeNumPipeOut.first;
+        let pmtu = pmtuPipeOut.first;
+
+        let startAddr = startAddrPipeOut.first;
+        startAddrPipeOut.deq;
+
+        let payloadLen = payloadLenPipeOut.first;
+        payloadLenPipeOut.deq;
+
+        let sgl = sglReg;
+        let isFirst = isZero(sglIdxReg);
+        let isLast  = isAllOnesR(sglIdxReg) || (sgeNum - 1 == zeroExtend(sglIdxReg));
+        let sge = ScatterGatherElem {
+            laddr  : startAddr,
+            len    : payloadLen,
+            lkey   : dontCareValue,
+            isFirst: isFirst,
+            isLast : isLast
+        };
+        sgl[sglIdxReg] = sge;
+        sglReg <= sgl;
+
+        let {
+            pmtuLen, firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr //, isSinglePkt
+        } = calcPktNumAndPktLenByAddrAndPMTU(startAddr, payloadLen, pmtu);
+        let {
+            firstPktFragNum, firstPktByteEn, firstPktFragValidByteNum
+        } = calcTotalFragNumByLength(zeroExtend(firstPktLen));
+        let midPktLen = payloadLen - zeroExtend(firstPktLen);
+        if (isLessOrEqOne(sgePktNum)) begin
+            lastPktLen = 0;
+        end
+        else begin
+            midPktLen = payloadLen - zeroExtend(firstPktLen) - zeroExtend(lastPktLen);
+        end
+        let {
+            lastPktFragNum, lastPktByteEn, lastPktFragValidByteNum
+        } = calcTotalFragNumByLength(zeroExtend(lastPktLen));
+        let {
+            midPktFragNum, midPktByteEn, midPktFragValidByteNum
+        } = calcTotalFragNumByLength(midPktLen);
+        let sgeTotalFragNum = firstPktFragNum + midPktFragNum + lastPktFragNum;
+
+        let totalLen = totalLenReg;
+        let sglTotalfragNum = sglTotalFragNumReg;
+        if (isFirst) begin
+            totalLen = payloadLen;
+            sglTotalfragNum = sgeTotalFragNum;
+        end
+        else begin
+            totalLen = totalLenReg + payloadLen;
+            sglTotalfragNum = sglTotalFragNumReg + sgeTotalFragNum;
+        end
+        totalLenReg <= totalLen;
+        sglTotalFragNumReg <= sglTotalfragNum;
+
+        if (isLast) begin
+            sgeNumPipeOut.deq;
+            pmtuPipeOut.deq;
+            sglQ.enq(tuple2(sgl, pmtu));
+            sglTotalFragNumQ.enq(sglTotalfragNum);
+
+            sglIdxReg <= 0;
+        end
+        else begin
+            sglIdxReg <= sglIdxReg + 1;
+        end
+
+        // $display(
+        //     "time=%0t: genSGE", $time,
+        //     ", sgeNum=%0d", sgeNum,
+        //     ", sglIdxReg=%0d", sglIdxReg,
+        //     ", startAddr=%h", startAddr,
+        //     ", payloadLen=%0d", payloadLen,
+        //     ", sgeTotalFragNum=%0d", sgeTotalFragNum,
+        //     ", isFirst=", fshow(isFirst),
+        //     ", isLast=", fshow(isLast)
+        // );
+    endrule
+
+    rule issueReq if (!clearReg);
+        let { sgl, pmtu } = sglQ.first;
+        sglQ.deq;
+
+        let dmaReadCntrlReq = DmaReadCntrlReq {
+            pmtu              : pmtu,
+            sglDmaReadMetaData: DmaReadMetaDataSGL {
+                sgl           : sgl,
+                sqpn          : getDefaultQPN,
+                wrID          : dontCareValue
+                // initiator: DMA_SRC_RQ_RD,
+                // startAddr: startAddr,
+                // len      : payloadLen,
+            }
+        };
+
+        dut.srvPort.request.put(dmaReadCntrlReq);
+        countDown.decr;
+        // $display(
+        //     "time=%0t: issueReq", $time,
+        //     ", startAddr=%h", startAddr,
+        //     ", secondChunkStartAddr=%h", secondChunkStartAddr,
+        //     ", payloadLen=%0d", payloadLen,
+        //     ", pmtu=", fshow(pmtu),
+        //     ", sgePktNum=%0d", sgePktNum,
+        //     ", firstPktLen=%0d", firstPktLen,
+        //     ", lastPktLen=%0d", lastPktLen,
+        //     ", pmtuLen=%0d", pmtuLen,
+        //     ", sgeTotalFragNum=%0d", sgeTotalFragNum,
+        //     ", firstPktFragNum=%0d", firstPktFragNum,
+        //     ", lastPktFragNum=%0d", lastPktFragNum,
+        //     ", midPktLen=%0d", midPktLen
+        //     // ", pmtuMask=%h", pmtuMask,
+        //     // ", truncatedPktNum=%0d", truncatedPktNum,
+        //     // ", addrLowPart=%0d", addrLowPart,
+        //     // ", lenLowPart=%0d", lenLowPart,
+        //     // ", tmpLastPktLen=%0d", tmpLastPktLen,
+        //     // ", hasResidue=", fshow(hasResidue),
+        //     // ", hasExtraPkt=", fshow(hasExtraPkt),
+        //     // ", notFullPkt=", fshow(notFullPkt)
+        // );
+    endrule
+
+    rule checkResp if (!clearReg);
+        let dmaReadCntrlResp <- dut.srvPort.response.get;
+        let sglFirstFrag = dmaReadCntrlResp.isOrigFirst;
+        let sglLastFrag  = dmaReadCntrlResp.isOrigLast;
+        let isFirstFrag  = dmaReadCntrlResp.dmaReadResp.dataStream.isFirst;
+        let isLastFrag   = dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
+
+        let sglTotalFragNum = sglTotalFragNumQ.first;
+        let remainingFragNum = remainingFragNumReg;
+        if (!isLessOrEqOne(sglTotalFragNum)) begin
+            if (sglFirstFrag) begin
+                remainingFragNum = sglTotalFragNum - 2;
+            end
+            else begin
+                remainingFragNum = remainingFragNumReg - 1;
+            end
+        end
+        remainingFragNumReg <= remainingFragNum;
+
+        if (sglLastFrag) begin
+            sglTotalFragNumQ.deq;
+
+            immAssert(
+                isZero(remainingFragNumReg) && isLastFrag,
+                "remaining fragNum assertion @ mkTestDmaReadCntrlScatterGatherListCase",
+                $format(
+                    "remainingFragNumReg=%0d", remainingFragNumReg,
+                    " should be zero when sglFirstFrag=", fshow(sglFirstFrag),
+                    ", sglLastFrag=", fshow(sglLastFrag),
+                    ", isFirstFrag=", fshow(isFirstFrag),
+                    " and isLastFrag=", fshow(isLastFrag)
+                )
+            );
+        end
+        // $display(
+        //     "time=%0t: checkResp", $time,
+        //     ", sglTotalFragNum=%0d", sglTotalFragNum,
+        //     ", remainingFragNum=%0d", remainingFragNum,
+        //     ", remainingFragNumReg=%0d", remainingFragNumReg,
+        //     ", isFirstFrag=", fshow(isFirstFrag),
+        //     ", isLastFrag=", fshow(isLastFrag),
+        //     ", sglFirstFrag=", fshow(sglFirstFrag),
+        //     ", sglLastFrag=", fshow(sglLastFrag)
+        // );
+    endrule
+endmodule
+
+(* doc = "testcase" *)
 module mkTestDmaReadCntrlNormalCase(Empty);
     let normalOrCancelCase = True;
     let result <- mkTestDmaReadCntrlNormalOrCancelCase(normalOrCancelCase);
@@ -393,7 +615,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
         isFinalRespLastFragReg <= dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
 
         let isFirstFrag = dmaReadCntrlResp.isOrigFirst && dmaReadCntrlResp.dmaReadResp.dataStream.isFirst;
-        let isLastFrag  = dmaReadCntrlResp.isOrigLast && dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
+        let isLastFrag  = dmaReadCntrlResp.isOrigLast  && dmaReadCntrlResp.dmaReadResp.dataStream.isLast;
 
         let totalFragNum = totalFragNumQ.first;
         let remainingFragNum = remainingFragNumReg;
@@ -539,7 +761,7 @@ module mkTestMergeNormalOrSmallPayloadEachSGE#(
         payloadLenPipeOut.deq;
 
         let isFirst = isZero(sglIdxReg);
-        let isLast = isAllOnesR(sglIdxReg);
+        let isLast  = isAllOnesR(sglIdxReg);
         let sge = ScatterGatherElem {
             laddr  : startAddr,
             len    : payloadLen,
@@ -1566,32 +1788,32 @@ module mkTestNormalOrSmallPayloadGen#(
         end
     endrule
 
-    rule recvReqGenTotalMetaData if (stateReg == TEST_ADJUST_PAYLOAD_RECV);
-        let reqGenTotalMetaData = dut.reqGenTotalMetaDataPipeOut.first;
-        dut.reqGenTotalMetaDataPipeOut.deq;
+    rule recvTotalMetaData if (stateReg == TEST_ADJUST_PAYLOAD_RECV);
+        let totalMetaData = dut.totalMetaDataPipeOut.first;
+        dut.totalMetaDataPipeOut.deq;
 
         immAssert(
-            totalLenReg == reqGenTotalMetaData.totalLen,
+            totalLenReg == totalMetaData.totalLen,
             "totalLen assertion @ mkTestNormalOrSmallPayloadGen",
             $format(
                 "totalLenReg=%0d", totalLenReg,
-                " should == reqGenTotalMetaData.totalLen",
-                reqGenTotalMetaData.totalLen
+                " should == totalMetaData.totalLen",
+                totalMetaData.totalLen
             )
         );
         immAssert(
-            remainingPktNumReg == reqGenTotalMetaData.totalPktNum,
+            remainingPktNumReg == totalMetaData.totalPktNum,
             "totalPktNum assertion @ mkTestNormalOrSmallPayloadGen",
             $format(
                 "remainingPktNumReg=%0d", remainingPktNumReg,
-                " should == reqGenTotalMetaData.totalPktNum",
-                reqGenTotalMetaData.totalPktNum
+                " should == totalMetaData.totalPktNum",
+                totalMetaData.totalPktNum
             )
         );
-        isZeroPayloadLenReg <= reqGenTotalMetaData.isZeroPayloadLen;
+        isZeroPayloadLenReg <= totalMetaData.isZeroPayloadLen;
         remainingPktNumReg  <= remainingPktNumReg - 1;
         stateReg <= TEST_ADJUST_PAYLOAD_RUN;
-        // $display("time=%0t: recvReqGenTotalMetaData", $time);
+        // $display("time=%0t: recvTotalMetaData", $time);
     endrule
 
     rule checkResp if (stateReg == TEST_ADJUST_PAYLOAD_RUN);
