@@ -505,6 +505,11 @@ function Bool rdmaReqOpCodeMatchWorkReqOpCode(RdmaOpCode rdmaOpCode, WorkReqOpCo
         SEND_LAST_WITH_INVALIDATE          ,
         SEND_ONLY_WITH_INVALIDATE          : (wrOpCode == IBV_WR_SEND_WITH_INV);
 
+        RDMA_READ_RESPONSE_FIRST           ,
+        RDMA_READ_RESPONSE_MIDDLE          ,
+        RDMA_READ_RESPONSE_LAST            ,
+        RDMA_READ_RESPONSE_ONLY            : (wrOpCode == IBV_WR_RDMA_READ_RESP);
+
         default                            : False;
     endcase;
 endfunction

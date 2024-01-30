@@ -15,18 +15,19 @@ import Utils :: *;
 
 typedef Bit#(32)  AddrIPv4;
 typedef Bit#(128) AddrIPv6;
+typedef Bit#(48)  MAC;
 
 typedef union tagged {
     AddrIPv4 IPv4;
     AddrIPv6 IPv6;
-} IP deriving(Bits);
+} IP deriving(Bits, Bounded);
 
 instance FShow#(IP);
     function Fmt fshow(IP ipAddr);
         case (ipAddr) matches
             tagged IPv4 .ipv4: begin
                 return $format(
-                    "ipv4=%d.%d.%d.%d",
+                    "ipv4=%0d.%0d.%0d.%0d",
                     ipv4[31 : 24], ipv4[23: 16], ipv4[15 : 8], ipv4[7 : 0]
                 );
             end
@@ -42,32 +43,33 @@ instance FShow#(IP);
 endinstance
 
 typedef union tagged {
-    IMM  ImmDt;
-    RKEY RKey2Inv;
-} ImmDtOrInvRKey deriving(Bits, FShow);
+    IMM  Imm;
+    RKEY RKey;
+} ImmOrRKey deriving(Bits, FShow);
 
 typedef struct {
     WorkReqID id; // TODO: remove it
     WorkReqOpCode opcode;
     FlagsType#(WorkReqSendFlag) flags;
     TypeQP qpType;
-    PSN curPSN;
+    PSN psn;
     PMTU pmtu;
     IP dqpIP;
+    MAC macAddr;
     ScatterGatherList sgl;
     ADDR raddr;
     RKEY rkey;
-    // ADDR laddr;
-    // Length len;
-    // LKEY lkey;
+    // PKEY pkey;
     QPN sqpn; // TODO: remove it
-    Bool solicited; // Relevant only for the Send and RDMA Write with immediate data
-    // Maybe#(Long) comp;
-    // Maybe#(Long) swap;
-    Maybe#(ImmDtOrInvRKey) immDtOrInvRKey;
+    QPN dqpn;
+    // Bool solicited; // Relevant only for the Send and RDMA Write with immediate data
+    Maybe#(Long) comp;
+    Maybe#(Long) swap;
+    Maybe#(ImmOrRKey) immDtOrInvRKey;
     Maybe#(QPN) srqn; // for XRC
-    Maybe#(QPN) dqpn; // for UD
     Maybe#(QKEY) qkey; // for UD
+    Bool isFirst;
+    Bool isLast;
 } WorkQueueElem deriving(Bits);
 
 instance FShow#(WorkQueueElem);
@@ -76,16 +78,18 @@ instance FShow#(WorkQueueElem);
             "WorkQueueElem { opcode=", fshow(wqe.opcode),
             ", flags=", fshow(wqe.flags),
             ", qpType=", fshow(wqe.qpType),
-            ", curPSN=%h", wqe.curPSN,
+            ", psn=%h", wqe.psn,
             ", pmtu=", fshow(wqe.pmtu),
             ", dqpIP=", fshow(wqe.dqpIP),
+            ", macAddr=%h", wqe.macAddr,
             ", sgl=", fshow(wqe.sgl),
             ", rkey=%h", wqe.rkey,
             ", raddr=%h", wqe.raddr,
-            // ", sqpn=%h", wqe.sqpn,
-            // ", sqpn=%h", wqe.sqpn,
-            ", solicited=", fshow(wqe.solicited),
-            // ", comp=", fshow(wqe.comp), ", swap=", fshow(wqe.swap),
+            ", sqpn=%h", wqe.sqpn,
+            ", dqpn=%h", wqe.dqpn,
+            // ", solicited=", fshow(wqe.solicited),
+            ", comp=", fshow(wqe.comp),
+            ", swap=", fshow(wqe.swap),
             ", immDtOrInvRKey=", fshow(wqe.immDtOrInvRKey),
             ", srqn=", fshow(wqe.srqn),
             ", dqpn=", fshow(wqe.dqpn),
@@ -354,7 +358,148 @@ interface AddrChunkSrv;
     method Bool isIdle();
 endinterface
 
-// TODO: refactor AddrChunkSrv into fully pipeline
+typedef struct {
+    PktNum remainingPktNum;
+    PktLen firstPktLen;
+    PktLen pmtuLen;
+    PktLen lastPktLen;
+    PMTU   pmtu;
+    ADDR   startAddr;
+    ADDR   nextAddr;
+    Bool   isOrigFirst;
+    Bool   isOrigLast;
+} ChunkMetaData deriving(Bits);
+
+module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
+    FIFOF#(AddrChunkReq)   reqQ <- mkSizedFIFOF(valueOf(MAX_SGE));
+    FIFOF#(AddrChunkResp) respQ <- mkFIFOF;
+    FIFOF#(PktMetaDataSGE) sgePktMetaDataOutQ <- mkFIFOF;
+
+    // Pipeline FIFOF
+    FIFOF#(ChunkMetaData) chunkMetaDataQ <- mkFIFOF;
+
+    Reg#(PktNum) remainingPktNumReg <- mkRegU;
+    Reg#(ADDR)     nextChunkAddrReg <- mkRegU;
+    Reg#(Bool)      isFirstChunkReg <- mkReg(True);
+
+    rule resetAndClear if (clearAll);
+        reqQ.clear;
+        respQ.clear;
+        sgePktMetaDataOutQ.clear;
+
+        chunkMetaDataQ.clear;
+        isFirstChunkReg <= True;
+    endrule
+
+    rule recvReq if (!clearAll);
+        let addrChunkReq = reqQ.first;
+        reqQ.deq;
+
+        immAssert(
+            !isZeroR(addrChunkReq.len),
+            "addrChunkReq.len assertion @ mkAddrChunkSrv",
+            $format(
+                "addrChunkReq.len=%0d cannot be zero", addrChunkReq.len
+            )
+        );
+
+        let {
+            pmtuLen, firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr //, isSinglePkt
+        } = calcPktNumAndPktLenByAddrAndPMTU(
+            addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
+        );
+
+        let chunkMetaData = ChunkMetaData {
+            remainingPktNum: sgePktNum - 1,
+            firstPktLen    : firstPktLen,
+            pmtuLen        : pmtuLen,
+            lastPktLen     : lastPktLen,
+            pmtu           : addrChunkReq.pmtu,
+            startAddr      : addrChunkReq.startAddr,
+            nextAddr       : secondChunkStartAddr,
+            isOrigFirst    : addrChunkReq.isFirst,
+            isOrigLast     : addrChunkReq.isLast
+        };
+        chunkMetaDataQ.enq(chunkMetaData);
+
+        let sgePktMetaData = PktMetaDataSGE {
+            firstPktLen: firstPktLen,
+            lastPktLen : lastPktLen,
+            sgePktNum  : sgePktNum,
+            pmtu       : addrChunkReq.pmtu
+        };
+        sgePktMetaDataOutQ.enq(sgePktMetaData);
+
+        // $display(
+        //     "time=%0t: mkAddrChunkSrv recvReq", $time,
+        //     ", addrChunkReq.len=%0d", addrChunkReq.len,
+        //     ", sgePktNum=%0d", sgePktNum,
+        //     ", firstPktLen=%0d", firstPktLen,
+        //     ", lastPktLen=%0d", lastPktLen
+        // );
+    endrule
+
+    rule genResp if (!clearAll);
+        let chunkMetaData = chunkMetaDataQ.first;
+
+        let firstPktLen = chunkMetaData.firstPktLen;
+        let pmtuLen     = chunkMetaData.pmtuLen;
+        let lastPktLen  = chunkMetaData.lastPktLen;
+        let pmtu        = chunkMetaData.pmtu;
+        let startAddr   = chunkMetaData.startAddr;
+        let nextAddr    = chunkMetaData.nextAddr;
+        let isOrigFirst = chunkMetaData.isOrigFirst;
+        let isOrigLast  = chunkMetaData.isOrigLast;
+
+        let oneAsPSN = 1;
+        let nextChunkAddr   = addrAddPsnMultiplyPMTU(nextChunkAddrReg, oneAsPSN, pmtu);
+        let remainingPktNum = remainingPktNumReg;
+        if (isFirstChunkReg) begin
+            nextChunkAddr   = nextAddr;
+            remainingPktNum = chunkMetaData.remainingPktNum;
+        end
+
+        let isLastChunk = isZeroR(remainingPktNum);
+        if (isLastChunk) begin
+            chunkMetaDataQ.deq;
+        end
+        else begin
+            remainingPktNumReg <= remainingPktNum - 1;
+        end
+        isFirstChunkReg  <= isLastChunk;
+        nextChunkAddrReg <= nextChunkAddr;
+
+        let chunkAddr = isFirstChunkReg ? startAddr : nextChunkAddrReg;
+        let chunkLen  = isFirstChunkReg ? firstPktLen : (isLastChunk ? lastPktLen : pmtuLen);
+        let addrChunkResp = AddrChunkResp {
+            chunkAddr  : chunkAddr,
+            chunkLen   : chunkLen,
+            isFirst    : isFirstChunkReg,
+            isLast     : isLastChunk,
+            isOrigFirst: isOrigFirst,
+            isOrigLast : isOrigLast
+        };
+        respQ.enq(addrChunkResp);
+
+        // $display(
+        //     "time=%0t: mkAddrChunkSrv genResp", $time,
+        //     ", remainingPktNumReg=%0d", remainingPktNumReg,
+        //     ", chunkAddr=%h", chunkAddr,
+        //     ", nextChunkAddr=%h", nextChunkAddr,
+        //     ", addrChunkResp=", fshow(addrChunkResp)
+        // );
+    endrule
+
+    interface srvPort = toGPServer(reqQ, respQ);
+    interface sgePktMetaDataPipeOut = toPipeOut(sgePktMetaDataOutQ);
+    method Bool isIdle() = !(
+        reqQ.notEmpty           ||
+        respQ.notEmpty          ||
+        chunkMetaDataQ.notEmpty ||
+        sgePktMetaDataOutQ.notEmpty
+    );
+endmodule
+/*
 module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     FIFOF#(AddrChunkReq)           reqQ <- mkSizedFIFOF(valueOf(MAX_SGE));
     FIFOF#(AddrChunkResp)         respQ <- mkFIFOF;
@@ -450,26 +595,7 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             isOrigLast : isOrigLastReg
         };
         respQ.enq(addrChunkResp);
-/*
-        let firstPktLastFragValidByteNum = calcLastFragValidByteNum(firstPktLenReg);
-        let lastPktLastFragValidByteNum = calcLastFragValidByteNum(lastPktLenReg);
-        let curPktLastFragValidByteNum = isFirstReg ?
-            firstPktLastFragValidByteNum : (
-                isLast ? lastPktLastFragValidByteNum : fromInteger(valueOf(DATA_BUS_BYTE_WIDTH))
-            );
 
-        let sgePktMetaData = PktMetaDataSGE {
-            curPktLastFragValidByteNum: curPktLastFragValidByteNum,
-            pktLen                    : chunkLen,
-            pmtu                      : pmtuReg,
-            sgeHasJustTwoPkts             : isTwoR(sgePktNumReg),
-            isFirst                   : isFirstReg,
-            isLast                    : isLast,
-            isFirstSGE                : isOrigFirstReg,
-            isLastSGE                 : isOrigLastReg
-        };
-        sgePktMetaDataOutQ.enq(sgePktMetaData);
-*/
         // $display(
         //     "time=%0t: mkAddrChunkSrv genResp", $time,
         //     ", isSQ=", fshow(isSQ),
@@ -485,7 +611,7 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     method Bool isIdle() = !busyReg &&
         !reqQ.notEmpty && !sgePktMetaDataOutQ.notEmpty && !respQ.notEmpty;
 endmodule
-
+*/
 typedef struct {
     // DmaReqSrcType     initiator;
     DmaReadMetaDataSGL sglDmaReadMetaData;
@@ -499,6 +625,7 @@ typedef struct {
 } DmaReadCntrlResp deriving(Bits, FShow);
 
 typedef Server#(DmaReadCntrlReq, DmaReadCntrlResp) DmaCntrlReadSrv;
+typedef Client#(DmaReadCntrlReq, DmaReadCntrlResp) DmaCntrlReadClt;
 
 interface DmaCntrl;
     method Bool isIdle();
@@ -601,21 +728,17 @@ module mkDmaReadCntrl#(
         end
         totalLenReg <= totalLen;
         sgeNumReg <= sgeNum;
-        // $display(
-        //     "time=%0t: recvReq", $time,
-        //     ", SGE sglIdx=%0d", sglIdx,
-        //     ", sge.laddr=%h", sge.laddr,
-        //     ", mergedLastPktLastFragValidByteNum=%0d", mergedLastPktLastFragValidByteNum,
-        //     ", totalLen=%0d", totalLen,
-        //     ", sgeNum=%0d", sgeNum
-        //     // ", sgePktNum=%0d", sgePktNum,
-        //     // ", firstPktLen=%0d", firstPktLen,
-        //     // ", lastPktLen=%0d", lastPktLen,
-        //     // ", pmtuLen=%0d", pmtuLen,
-        //     // ", firstPktFragNum=%0d", firstPktFragNum,
-        //     // ", lastPktFragNum=%0d", lastPktFragNum
-        // );
 
+        if (isZeroR(sglIdxReg)) begin
+            immAssert(
+                sge.isFirst,
+                "first SGE assertion @ mkDmaReadCntrl",
+                $format(
+                    "sge.isFirst=", fshow(sge.isFirst),
+                    " should be true when sglIdxReg=%d", sglIdxReg
+                )
+            );
+        end
         // if (sglIdxReg == valueOf(TSub#(MAX_SGE, 1))) begin
         if (isAllOnesR(sglIdxReg)) begin
             immAssert(
@@ -650,10 +773,20 @@ module mkDmaReadCntrl#(
             sglIdxReg <= sglIdxReg + 1;
         end
         // $display(
-        //     "time=%0t: mkDmaReadCntrl recvReq", $time,
-        //     ", sqpn=%h", curSQPN,
-        //     ", dmaReadCntrlReq=", fshow(dmaReadCntrlReq),
-        //     ", addrChunkReq=", fshow(addrChunkReq)
+        //     "time=%0t: recvReq", $time,
+        //     ", SGE sglIdx=%0d", sglIdx,
+        //     ", sge.laddr=%h", sge.laddr,
+        //     ", mergedLastPktLastFragValidByteNum=%0d", mergedLastPktLastFragValidByteNum,
+        //     ", totalLen=%0d", totalLen,
+        //     ", sgeNum=%0d", sgeNum,
+        //     ", sge.isFirst=", fshow(sge.isFirst),
+        //     ", sge.isLast=", fshow(sge.isLast)
+        //     // ", sgePktNum=%0d", sgePktNum,
+        //     // ", firstPktLen=%0d", firstPktLen,
+        //     // ", lastPktLen=%0d", lastPktLen,
+        //     // ", pmtuLen=%0d", pmtuLen,
+        //     // ", firstPktFragNum=%0d", firstPktFragNum,
+        //     // ", lastPktFragNum=%0d", lastPktFragNum
         // );
     endrule
 
@@ -1665,10 +1798,10 @@ typedef struct {
 typedef struct {
     Length totalLen;
     PktNum totalPktNum;
-    PMTU   pmtu;
+    // PMTU   pmtu;
     Bool   isOnlyPkt;
     Bool   isZeroPayloadLen;
-} ReqGenTotalMetaData deriving(Bits, FShow);
+} PayloadGenTotalMetaData deriving(Bits, FShow);
 
 typedef struct {
     ADDR   firstRemoteAddr;
@@ -1701,7 +1834,7 @@ typedef struct {
 
 interface PayloadGenerator;
     interface Server#(PayloadGenReqSG, PayloadGenRespSG) srvPort;
-    interface PipeOut#(ReqGenTotalMetaData) reqGenTotalMetaDataPipeOut;
+    interface PipeOut#(PayloadGenTotalMetaData) totalMetaDataPipeOut;
     interface DataStreamPipeOut payloadDataStreamPipeOut;
     method Bool payloadNotEmpty();
 endinterface
@@ -1709,9 +1842,9 @@ endinterface
 module mkPayloadGenerator#(
     Bool clearAll, Bool shouldAddPadding, DmaReadCntrl dmaReadCntrl
 )(PayloadGenerator);
-    FIFOF#(PayloadGenReqSG)           payloadGenReqQ <- mkFIFOF;
-    FIFOF#(PayloadGenRespSG)         payloadGenRespQ <- mkFIFOF;
-    FIFOF#(ReqGenTotalMetaData) reqGenTotalMetaDataQ <- mkFIFOF;
+    FIFOF#(PayloadGenReqSG)            payloadGenReqQ <- mkFIFOF;
+    FIFOF#(PayloadGenRespSG)          payloadGenRespQ <- mkFIFOF;
+    FIFOF#(PayloadGenTotalMetaData) totalMetaDataOutQ <- mkFIFOF;
 
     // Pipeline FIFO
     FIFOF#(DataStream) sgePayloadOutQ <- mkFIFOF;
@@ -1753,8 +1886,7 @@ module mkPayloadGenerator#(
         remainingPktNumReg <= 0;
 
         // $display(
-        //     "time=%0t: reset and clear mkPayloadGenerator", $time,
-        //     ", pendingGenReqQ.notEmpty=", fshow(pendingGenReqQ.notEmpty)
+        //     "time=%0t: reset and clear mkPayloadGenerator", $time
         // );
     endrule
 
@@ -1902,14 +2034,14 @@ module mkPayloadGenerator#(
         };
         addPadCntQ.enq(paddingMetaData);
 
-        let reqGenTotalMetaData = ReqGenTotalMetaData {
+        let totalMetaData = PayloadGenTotalMetaData {
             totalLen        : totalLen,
             totalPktNum     : totalPktNum,
-            pmtu            : pmtu,
+            // pmtu            : pmtu,
             isOnlyPkt       : isOnlyPkt,
             isZeroPayloadLen: isZeroPayloadLen
         };
-        reqGenTotalMetaDataQ.enq(reqGenTotalMetaData);
+        totalMetaDataOutQ.enq(totalMetaData);
         // $display(
         //     "time=%0t: mkPayloadGenerator calcAdjustedTotalPayloadMetaData", $time,
         //     ", adjustedTotalPayloadMetaData=", fshow(adjustedTotalPayloadMetaData)
@@ -2047,7 +2179,6 @@ module mkPayloadGenerator#(
             //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast)
             // );
         end
-
         // $display(
         //     "time=%0t: PayloadGenerator genRespAndAddPadding", $time,
         //     ", isZeroPayloadLen=", fshow(isZeroPayloadLen),
@@ -2058,7 +2189,7 @@ module mkPayloadGenerator#(
     endrule
 
     interface srvPort = toGPServer(payloadGenReqQ, payloadGenRespQ);
-    interface reqGenTotalMetaDataPipeOut = toPipeOut(reqGenTotalMetaDataQ);
+    interface totalMetaDataPipeOut = toPipeOut(totalMetaDataOutQ);
     interface payloadDataStreamPipeOut = payloadBufPipeOut;
     method Bool payloadNotEmpty() = bramQ2PipeOut.notEmpty;
 endmodule

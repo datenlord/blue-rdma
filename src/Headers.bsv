@@ -92,7 +92,8 @@ typedef enum {
     TRANS_TYPE_RD  = 3'h2, // 3'b010
     TRANS_TYPE_UD  = 3'h3, // 3'b011
     TRANS_TYPE_CNP = 3'h4, // 3'b100
-    TRANS_TYPE_XRC = 3'h5  // 3'b101
+    TRANS_TYPE_XRC = 3'h5, // 3'b101
+    TRANS_TYPE_RAW = 3'h7  // 3'b111 Not defined in rdma-core
 } TransType deriving(Bits, Bounded, Eq, FShow);
 
 typedef SizeOf#(TransType) TRANS_TYPE_WIDTH;
@@ -213,7 +214,7 @@ typedef TDiv#(ATOMIC_ACK_ETH_WIDTH, 8) ATOMIC_ACK_ETH_BYTE_WIDTH;
 // 4 bytes
 typedef struct {
     IMM data;
-} ImmDt deriving(Bits, Bounded);
+} ImmDt deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(ImmDt)         IMM_DT_WIDTH;
 typedef TDiv#(IMM_DT_WIDTH, 8) IMM_DT_BYTE_WIDTH;
@@ -221,7 +222,7 @@ typedef TDiv#(IMM_DT_WIDTH, 8) IMM_DT_BYTE_WIDTH;
 // 4 bytes
 typedef struct {
     RKEY rkey;
-} IETH deriving(Bits, Bounded);
+} IETH deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(IETH)        IETH_WIDTH;
 typedef TDiv#(IETH_WIDTH, 8) IETH_BYTE_WIDTH;

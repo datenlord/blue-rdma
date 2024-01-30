@@ -718,12 +718,13 @@ endfunction
 
 function Maybe#(TransType) qpType2TransType(TypeQP qpt);
     return case (qpt)
-        IBV_QPT_RC      : tagged Valid TRANS_TYPE_RC;
-        IBV_QPT_UC      : tagged Valid TRANS_TYPE_UC;
-        IBV_QPT_UD      : tagged Valid TRANS_TYPE_UD;
-        IBV_QPT_XRC_RECV,
-        IBV_QPT_XRC_SEND: tagged Valid TRANS_TYPE_XRC;
-        default         : tagged Invalid;
+        IBV_QPT_RC        : tagged Valid TRANS_TYPE_RC;
+        IBV_QPT_UC        : tagged Valid TRANS_TYPE_UC;
+        IBV_QPT_UD        : tagged Valid TRANS_TYPE_UD;
+        IBV_QPT_XRC_RECV  ,
+        IBV_QPT_XRC_SEND  : tagged Valid TRANS_TYPE_XRC;
+        IBV_QPT_RAW_PACKET: tagged Valid TRANS_TYPE_RAW;
+        default           : tagged Invalid;
     endcase;
 endfunction
 
@@ -737,6 +738,7 @@ function Bool transTypeMatchQpType(TransType tt, TypeQP qpt, Bool isRespPkt);
             (!isRespPkt && qpt == IBV_QPT_XRC_RECV) ||
             (isRespPkt && qpt == IBV_QPT_XRC_SEND)
         );
+        TRANS_TYPE_RAW: (qpt == IBV_QPT_RAW_PACKET);
         default: False;
     endcase;
 endfunction
@@ -1390,6 +1392,10 @@ endfunction
 
 function Bool isReadWorkReq(WorkReqOpCode opcode);
     return opcode == IBV_WR_RDMA_READ;
+endfunction
+
+function Bool isReadRespWorkReq(WorkReqOpCode opcode);
+    return opcode == IBV_WR_RDMA_READ_RESP;
 endfunction
 
 function Bool isAtomicWorkReq(WorkReqOpCode opcode);

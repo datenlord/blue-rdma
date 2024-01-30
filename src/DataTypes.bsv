@@ -299,7 +299,7 @@ typedef enum {
     DMA_SRC_SQ_ATOMIC,
     DMA_SRC_SQ_DISCARD
     // DMA_SRC_SQ_CANCEL
-} DmaReqSrcType deriving(Bits, Eq, FShow);
+} DmaReqSrcType deriving(Bits, Eq, FShow); // TODO: remove it
 
 typedef struct {
     DmaReadMetaData dmaReadMetaData;
@@ -362,16 +362,16 @@ typedef enum {
     IBV_QPS_SQE,
     IBV_QPS_ERR,
     IBV_QPS_UNKNOWN,
-    IBV_QPS_CREATE // Not defined in rdma-core
+    IBV_QPS_CREATE // TODO: remote it. Not defined in rdma-core
 } StateQP deriving(Bits, Eq, FShow);
 
 typedef enum {
-    IBV_QPT_RC = 2,
-    IBV_QPT_UC = 3,
-    IBV_QPT_UD = 4,
-    // IBV_QPT_RAW_PACKET = 8,
-    IBV_QPT_XRC_SEND = 9,
-    IBV_QPT_XRC_RECV = 10
+    IBV_QPT_RC         = 2,
+    IBV_QPT_UC         = 3,
+    IBV_QPT_UD         = 4,
+    IBV_QPT_RAW_PACKET = 8,
+    IBV_QPT_XRC_SEND   = 9,
+    IBV_QPT_XRC_RECV   = 10
     // IBV_QPT_DRIVER = 0xff
 } TypeQP deriving(Bits, Eq, FShow);
 
