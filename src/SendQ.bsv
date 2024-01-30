@@ -553,8 +553,12 @@ typedef struct {
     Bool   isOnlyPkt;
 } HeaderGenInfo deriving(Bits, FShow);
 
+typedef struct {
+    Bool hasDmaRespErr;
+} SendResp deriving(Bits, FShow);
+
 interface SendQ;
-    interface Put#(WorkQueueElem) wqeInPut;
+    interface Server#(WorkQueueElem, SendResp) srvPort;
     interface PipeOut#(PktInfo4UDP) udpInfoPipeOut;
     interface DataStreamPipeOut rdmaDataStreamPipeOut;
     method Bool isEmpty();
@@ -564,18 +568,18 @@ module mkSendQ#(
     Bool clearAll,
     PayloadGenerator payloadGenerator
 )(SendQ);
-    FIFOF#(WorkQueueElem)    wqeInQ <- mkFIFOF;
+    FIFOF#(WorkQueueElem)      reqQ <- mkFIFOF;
+    FIFOF#(SendResp)          respQ <- mkFIFOF;
     FIFOF#(PktInfo4UDP) udpInfoOutQ <- mkFIFOF;
+    FIFOF#(PktInfo4UDP) udpPktInfoOutQ <- mkFIFOF;
 
     // Pipeline FIFOF
     FIFOF#(Tuple2#(WorkQueueElem, Bool)) totalMetaDataQ <- mkFIFOF;
     FIFOF#(Tuple5#(WorkQueueElem, Length, PktNum, Bool, Bool)) psnUpdateQ <- mkFIFOF;
     FIFOF#(Tuple2#(WorkQueueElem, HeaderGenInfo)) headerPrepareQ <- mkFIFOF;
-    FIFOF#(Tuple3#(WorkQueueElem, Maybe#(PktHeaderInfo), PktLen)) pendingHeaderQ <- mkFIFOF;
-    FIFOF#(PktInfo4UDP) udpPktInfoOutQ <- mkFIFOF;
+    FIFOF#(Tuple4#(WorkQueueElem, Maybe#(PktHeaderInfo), PktLen, Bool)) pendingHeaderQ <- mkFIFOF;
     FIFOF#(RdmaHeader) pktHeaderQ <- mkFIFOF;
-    // Reg#(PktNum)   remainingPktNumReg <- mkRegU;
-    // Reg#(Bool) isFirstOrOnlyReqPktReg <- mkReg(True);
+
     Reg#(PSN)       curPsnReg <- mkRegU;
     Reg#(Bool) wqeFirstPktReg <- mkRegU;
 
@@ -591,8 +595,15 @@ module mkSendQ#(
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (clearAll);
-        wqeInQ.clear;
+        reqQ.clear;
+        respQ.clear;
         udpInfoOutQ.clear;
+
+        totalMetaDataQ.clear;
+        psnUpdateQ.clear;
+        headerPrepareQ.clear;
+        pendingHeaderQ.clear;
+        pktHeaderQ.clear;
 
         wqeFirstPktReg <= True;
         // $display("time=%0t: reset and clear mkSendQ", $time);
@@ -604,8 +615,8 @@ module mkSendQ#(
                         prepareHeader, \
                         genPktHeader" *)
     rule recvWQE if (!clearAll);
-        let wqe = wqeInQ.first;
-        wqeInQ.deq;
+        let wqe = reqQ.first;
+        reqQ.deq;
 
         let qpType = wqe.qpType;
         immAssert(
@@ -920,7 +931,8 @@ module mkSendQ#(
             )
         );
 
-        pendingHeaderQ.enq(tuple3(wqe, maybePktHeaderInfo, pktLenWithPadCnt));
+        let shouldGenResp = isOnlyPkt || isLastPkt;
+        pendingHeaderQ.enq(tuple4(wqe, maybePktHeaderInfo, pktLenWithPadCnt, shouldGenResp));
         // $display(
         //     "time=%0t: mkSendQ 4th stage prepareHeader", $time,
         //     ", sqpn=%h", wqe.sqpn,
@@ -934,7 +946,7 @@ module mkSendQ#(
     endrule
 
     rule genPktHeader if (!clearAll);
-        let { wqe, maybePktHeaderInfo, pktLenWithPadCnt } = pendingHeaderQ.first;
+        let { wqe, maybePktHeaderInfo, pktLenWithPadCnt, shouldGenResp } = pendingHeaderQ.first;
         pendingHeaderQ.deq;
 
         if (maybePktHeaderInfo matches tagged Valid .pktHeaderInfo) begin
@@ -951,6 +963,12 @@ module mkSendQ#(
 
             pktHeaderQ.enq(pktHeader);
             udpPktInfoOutQ.enq(udpPktInfo);
+            if (shouldGenResp) begin
+                let sendResp = SendResp {
+                    hasDmaRespErr: False
+                };
+                respQ.enq(sendResp);
+            end
             // $display(
             //     "time=%0t: mkSendQ 5th stage genPktHeader", $time,
             //     ", sqpn=%h", wqe.sqpn,
@@ -964,18 +982,18 @@ module mkSendQ#(
         end
     endrule
 
-    interface wqeInPut = toPut(wqeInQ);
+    interface srvPort = toGPServer(reqQ, respQ);
+    // interface wqeInPut = toPut(reqQ);
     interface rdmaDataStreamPipeOut = rdmaPktDataStreamPipeOut;
-    // interface rdmaDataStreamPipeOut = payloadGenerator.payloadDataStreamPipeOut;
     interface udpInfoPipeOut = toPipeOut(udpPktInfoOutQ);
     method Bool isEmpty() = !(
-        wqeInQ.notEmpty         ||
-        udpInfoOutQ.notEmpty    ||
+        reqQ.notEmpty           ||
+        respQ.notEmpty          ||
+        udpPktInfoOutQ.notEmpty ||
         totalMetaDataQ.notEmpty ||
         psnUpdateQ.notEmpty     ||
         headerPrepareQ.notEmpty ||
         pendingHeaderQ.notEmpty ||
-        udpPktInfoOutQ.notEmpty ||
         pktHeaderQ.notEmpty
     );
 endmodule
