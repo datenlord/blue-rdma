@@ -21,7 +21,6 @@ import Utils4Test :: *;
 
 module mkSimGenWorkQueueElemByOpCode#(
     PipeOut#(WorkReqOpCode) workReqOpCodePipeIn,
-    // PipeOut#(PSN) psnPipeIn,
     Length minLength,
     Length maxLength,
     TypeQP qpType,
@@ -294,7 +293,7 @@ module mkTestSendQueueNormalAndZeroLenCase#(
     let payloadGenerator <- mkPayloadGenerator(clearReg, shouldAddPadding, dmaReadCntrl);
 
     let dut <- mkSendQ(clearReg, payloadGenerator);
-    mkConnection(dut.wqeInPut, toGet(wqePipeOutVec[0]));
+    mkConnection(dut.srvPort.request, toGet(wqePipeOutVec[0]));
     let wqePipeOut4Ref <- mkBufferN(getMaxFragBufSize, wqePipeOutVec[1]);
 
     // Extract header DataStream, HeaderMetaData and payload DataStream
@@ -379,8 +378,8 @@ module mkTestSendQueueNormalAndZeroLenCase#(
         ));
 
         if (isOnlyRdmaOpCode(rdmaOpCode)) begin
+            let sendResp <- dut.srvPort.response.get;
             wqePipeOut4Ref.deq;
-            // dut.udpInfoPipeOut.deq;
             psnIsValidReg <= False;
 
             // let isReadWR = isReadWorkReq(refWQE.opcode);
@@ -408,6 +407,7 @@ module mkTestSendQueueNormalAndZeroLenCase#(
             // end
         end
         else if (isLastRdmaOpCode(rdmaOpCode)) begin
+            let sendResp <- dut.srvPort.response.get;
             wqePipeOut4Ref.deq;
             psnIsValidReg <= False;
 
@@ -418,7 +418,6 @@ module mkTestSendQueueNormalAndZeroLenCase#(
             // );
         end
         else if (isFirstRdmaOpCode(rdmaOpCode)) begin
-            // dut.udpInfoPipeOut.deq;
             psnIsValidReg <= True;
 
             immAssert(
@@ -530,22 +529,4 @@ module mkTestSendQueueNormalAndZeroLenCase#(
             );
         end
     endrule
-/*
-    rule compareRdmaReqPayload;
-        let payloadDataStream = filteredPayloadDataStreamPipeOut.first;
-        filteredPayloadDataStreamPipeOut.deq;
-
-        let refDataStream = dataStreamWithPaddingPipeOut4Ref.first;
-        dataStreamWithPaddingPipeOut4Ref.deq;
-
-        immAssert(
-            payloadDataStream == refDataStream,
-            "payloadDataStream assertion @ mkTestSendQueueNormalAndZeroLenCase",
-            $format(
-                "payloadDataStream=", fshow(payloadDataStream),
-                " should == refDataStream=", fshow(refDataStream)
-            )
-        );
-    endrule
-*/
 endmodule
