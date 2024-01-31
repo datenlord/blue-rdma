@@ -10,15 +10,13 @@ import PrimUtils :: *;
 import Settings :: *;
 import Utils :: *;
 
-function Bool isZeroByteEn(Bit#(nSz) byteEn); // provisos(Add#(1, anysize, nSz));
-    return isZero({ msb(byteEn), lsb(byteEn) });
-endfunction
-
 interface HeaderDataStreamAndMetaDataPipeOut;
     interface DataStreamPipeOut headerDataStream;
     interface PipeOut#(HeaderMetaData) headerMetaData;
 endinterface
 
+// If header is empty, then only output headerMetaData,
+// and no headerDataStream
 module mkHeader2DataStream#(
     Bool clearAll,
     PipeOut#(RdmaHeader) headerPipeIn
@@ -62,7 +60,7 @@ module mkHeader2DataStream#(
 
         Bool isFirst = !headerValidReg;
         Bool isLast = False;
-        if (isZero(remainingHeaderFragNum)) begin
+        if (curHeader.headerMetaData.isEmptyHeader || isZero(remainingHeaderFragNum)) begin
             headerPipeIn.deq;
             headerValidReg <= False;
             isLast = True;
@@ -77,7 +75,8 @@ module mkHeader2DataStream#(
                     headerLen           : remainingHeaderLen,
                     headerFragNum       : remainingHeaderFragNum,
                     lastFragValidByteNum: curHeader.headerMetaData.lastFragValidByteNum,
-                    hasPayload          : curHeader.headerMetaData.hasPayload
+                    hasPayload          : curHeader.headerMetaData.hasPayload,
+                    isEmptyHeader       : curHeader.headerMetaData.isEmptyHeader
                 }
             };
         end
@@ -99,10 +98,13 @@ module mkHeader2DataStream#(
         //         ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode)
         //     );
         // end
-        headerDataStreamOutQ.enq(dataStream);
+        if (!curHeader.headerMetaData.isEmptyHeader) begin
+            headerDataStreamOutQ.enq(dataStream);
+        end
         let bth = extractBTH(curHeader.headerData);
         // $display(
-        //     "time=%0t: outputHeader, start output packet", $time,
+        //     "time=%0t: mkHeader2DataStream outputHeader", $time,
+        //     ", start output packet, isEmptyHeader=", fshow(curHeader.headerMetaData.isEmptyHeader),
         //     ", bth.dqpn=%h", bth.dqpn,
         //     ", bth.opcode=", fshow(bth.opcode),
         //     ", bth.psn=%h", bth.psn
@@ -231,7 +233,6 @@ typedef enum {
 // headerLen cannot be zero, but dataPipeIn can have empty DataStream.
 // If header has no payload, then it will not dequeue dataPipeIn.
 module mkPrependHeader2PipeOut#(
-    // CntrlStatus cntrlStatus,
     Bool clearAll,
     DataStreamPipeOut headerPipeIn,
     PipeOut#(HeaderMetaData) headerMetaDataPipeIn,
@@ -273,30 +274,48 @@ module mkPrependHeader2PipeOut#(
     rule popHeaderMetaData if (!clearAll && stageReg == HEADER_META_DATA_POP);
         let headerMetaData = headerMetaDataPipeIn.first;
         headerMetaDataPipeIn.deq;
-        // $display("time=%0t: headerMetaData=", $time, fshow(headerMetaData));
-        immAssert(
-            !isZero(headerMetaData.headerLen),
-            "headerMetaData.headerLen non-zero assertion @ mkPrependHeader2PipeOut",
-            $format(
-                "headerMetaData.headerLen=%h should not be zero",
-                headerMetaData.headerLen
-            )
-        );
+        // $display(
+        //     "time=%0t: mkPrependHeader2PipeOut popHeaderMetaData", $time,
+        //     ", headerMetaData=", fshow(headerMetaData)
+        // );
 
         let headerFragNum = headerMetaData.headerFragNum;
         let headerLastFragValidByteNum = headerMetaData.lastFragValidByteNum;
         let { headerLastFragValidBitNum, headerLastFragInvalidByteNum, headerLastFragInvalidBitNum } =
             calcFragBitNumAndByteNum(headerLastFragValidByteNum);
+        if (headerMetaData.isEmptyHeader) begin
+            immAssert(
+                isZero(headerLastFragValidBitNum) && isZero(headerLastFragValidByteNum),
+                "empty header assertion @ mkPrependHeader2PipeOut",
+                $format(
+                    "headerLastFragValidBitNum=%0d", headerLastFragValidBitNum,
+                    " and headerLastFragValidByteNum=%0d", headerLastFragValidByteNum,
+                    " should be zero when isEmptyHeader=",
+                    fshow(headerMetaData.isEmptyHeader)
+                )
+            );
+        end
+        else begin
+            immAssert(
+                !isZero(headerMetaData.headerLen),
+                "headerMetaData.headerLen non-zero assertion @ mkPrependHeader2PipeOut",
+                $format(
+                    "headerLen=%0d", headerMetaData.headerLen,
+                    " should not be zero when isEmptyHeader=",
+                    fshow(headerMetaData.isEmptyHeader)
+                )
+            );
+        end
 
         headerLastFragValidByteNumReg   <= headerLastFragValidByteNum;
         headerLastFragValidBitNumReg    <= headerLastFragValidBitNum;
         headerLastFragInvalidByteNumReg <= headerLastFragInvalidByteNum;
         headerLastFragInvalidBitNumReg  <= headerLastFragInvalidBitNum;
 
-        headerFragCntReg    <= headerFragNum - 1;
+        headerFragCntReg    <= headerMetaData.isEmptyHeader ? 0 : (headerFragNum - 1);
         headerHasPayloadReg <= headerMetaData.hasPayload;
+        stageReg   <= headerMetaData.isEmptyHeader ? DATA_OUTPUT : HEADER_OUTPUT;
         isFirstReg <= True;
-        stageReg   <= HEADER_OUTPUT;
     endrule
 
     rule outputHeader if (!clearAll && stageReg == HEADER_OUTPUT);
@@ -332,8 +351,8 @@ module mkPrependHeader2PipeOut#(
             };
             preDataStreamReg <= headerLastFragDataStream;
             // $display(
-            //     "time=%0t:", $time,
-            //     " headerHasPayloadReg=%b", headerHasPayloadReg,
+            //     "time=%0t: mkPrependHeader2PipeOut outputHeader", $time,
+            //     ", headerHasPayloadReg=%b", headerHasPayloadReg,
             //     ", headerLastFragValidByteNum=%0d", headerLastFragValidByteNumReg,
             //     ", headerLastFragValidBitNum=%0d", headerLastFragValidBitNumReg,
             //     ", headerLastFragInvalidByteNum=%0d", headerLastFragInvalidByteNumReg,
@@ -376,14 +395,6 @@ module mkPrependHeader2PipeOut#(
             isFirst: isFirstReg,
             isLast: curDataStreamFrag.isLast && noExtraLastFrag
         };
-        // $display(
-        //     "time=%0t", $time,
-        //     " prepend: headerLastFragInvalidByteNumReg=%0d, noExtraLastFrag=%b",
-        //     headerLastFragInvalidByteNumReg, noExtraLastFrag,
-        //     ", preDataStreamReg=", fshow(preDataStreamReg),
-        //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
-        //     ", outDataStream=", fshow(outDataStream)
-        // );
         dataStreamOutQ.enq(outDataStream);
 
         if (curDataStreamFrag.isLast) begin
@@ -394,6 +405,14 @@ module mkPrependHeader2PipeOut#(
                 stageReg <= EXTRA_LAST_FRAG_OUTPUT;
             end
         end
+        // $display(
+        //     "time=%0t: mkPrependHeader2PipeOut outputData", $time,
+        //     ", headerLastFragInvalidByteNumReg=%0d, noExtraLastFrag=",
+        //     headerLastFragInvalidByteNumReg, fshow(noExtraLastFrag),
+        //     ", preDataStreamReg=", fshow(preDataStreamReg),
+        //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
+        //     ", outDataStream=", fshow(outDataStream)
+        // );
     endrule
 
     rule extraLastFrag if (!clearAll && stageReg == EXTRA_LAST_FRAG_OUTPUT);
@@ -592,7 +611,7 @@ module mkExtractHeaderFromDataStreamPipeOut#(
         //     "time=%0t:", $time,
         //     " extract headerLastFragValidByteNumReg=%0d", headerLastFragValidByteNumReg,
         //     ", headerLastFragInvalidByteNumReg=%0d", headerLastFragInvalidByteNumReg,
-        //     ", noExtraLastFrag=%b", noExtraLastFrag,
+        //     ", noExtraLastFrag=", fshow(noExtraLastFrag),
         //     ", preDataStreamReg=", fshow(preDataStreamReg),
         //     ", curDataStreamFrag=", fshow(curDataStreamFrag),
         //     ", outDataStream=", fshow(outDataStream),

@@ -1792,7 +1792,6 @@ typedef struct {
     PAD    padCnt;
     Bool   isFirst;
     Bool   isLast;
-    Bool   isRespErr; // TODO: handle DMA read error
 } PayloadGenRespSG deriving(Bits, FShow);
 
 typedef struct {
@@ -1931,8 +1930,6 @@ module mkPayloadGenerator#(
     rule recvDmaReadCntrlResp if (!clearAll);
         let dmaReadCntrlResp <- dmaReadCntrl.srvPort.response.get;
         sgePayloadOutQ.enq(dmaReadCntrlResp.dmaReadResp.dataStream);
-        // TODO: handle DMA read error
-        let hasDmaRespErr = dmaReadCntrlResp.dmaReadResp.isRespErr;
     endrule
 
     rule adjustFirstAndLastPktLen if (!clearAll);
@@ -2118,8 +2115,7 @@ module mkPayloadGenerator#(
                 pktLen          : 0,
                 padCnt          : 0,
                 isFirst         : True,
-                isLast          : True,
-                isRespErr       : False
+                isLast          : True
             };
             payloadGenRespQ.enq(payloadGenResp);
         end
@@ -2148,15 +2144,15 @@ module mkPayloadGenerator#(
                 pktRemoteAddrReg   <= nextRemoteAddr;
                 remainingPktNumReg <= remainingPktNum;
             end
+            // Generate response by the end of the payload
             // Every segmented payload has a payloadGenResp
-            if (curPayloadFrag.isFirst) begin
+            if (curPayloadFrag.isLast) begin
                 let payloadGenResp = PayloadGenRespSG {
                     raddr           : remoteAddr,
                     pktLen          : pktLen,
                     padCnt          : padCnt,
                     isFirst         : isFirstPkt,
-                    isLast          : isLastPkt,
-                    isRespErr       : False
+                    isLast          : isLastPkt
                 };
                 payloadGenRespQ.enq(payloadGenResp);
                 // $display(

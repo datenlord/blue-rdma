@@ -23,6 +23,10 @@ function Bool isZeroR(Bit#(nSz) bits) provisos(
     end
 endfunction
 
+function Bool isZeroByteEn(Bit#(nSz) byteEn); // provisos(Add#(1, anysize, nSz));
+    return isZero({ msb(byteEn), lsb(byteEn) });
+endfunction
+
 function Bool isLessOrEqOne(Bit#(nSz) bits); // provisos(Add#(1, anysize, nSz));
     Bool ret = isZero(bits >> 1);
     // Bool ret = isZero(bits >> 1) && unpack(bits[0]);

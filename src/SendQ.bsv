@@ -8,6 +8,7 @@ import ExtractAndPrependPipeOut :: *;
 import Headers :: *;
 import PayloadGen :: *;
 import PrimUtils :: *;
+import Reserved :: *;
 import Settings :: *;
 import Utils :: *;
 
@@ -24,16 +25,23 @@ typedef struct {
     Bool          hasHeader;
 } PktHeaderInfo deriving(Bits, FShow);
 
-// TODO: support hasHeader
 function PktHeaderInfo genPktHeaderInfo(
     HeaderData headerData, HeaderByteNum headerLen, Bool hasPayload
 );
-    let hasHeader = True;
     return PktHeaderInfo {
         headerData: headerData,
         headerLen : headerLen,
         hasPayload: hasPayload,
-        hasHeader : hasHeader
+        hasHeader : True
+    };
+endfunction
+
+function PktHeaderInfo genEmptyPktHeaderInfo(Bool hasPayload);
+    return PktHeaderInfo {
+        headerData: dontCareValue,
+        headerLen : 0,
+        hasPayload: hasPayload,
+        hasHeader : False
     };
 endfunction
 
@@ -100,6 +108,18 @@ function Maybe#(RETH) genRETH(
     endcase;
 endfunction
 
+function Maybe#(LETH) genLETH(WorkQueueElem wqe, Length dlen);
+    let firstIdxSGE = 0;
+    return case (wqe.opcode)
+        IBV_WR_RDMA_READ: tagged Valid LETH {
+            va  : wqe.sgl[firstIdxSGE].laddr,
+            lkey: wqe.sgl[firstIdxSGE].lkey,
+            dlen: dlen
+        };
+        default         : tagged Invalid;
+    endcase;
+endfunction
+
 // TODO: check fetch add needs both swap and comp?
 function Maybe#(AtomicEth) genAtomicEth(WorkQueueElem wqe);
     if (wqe.swap matches tagged Valid .swap &&& wqe.comp matches tagged Valid .comp) begin
@@ -136,13 +156,6 @@ function Maybe#(ImmDt) genImmDt(WorkQueueElem wqe);
             end
         default                   : return tagged Invalid;
     endcase
-    // return case (wqe.opcode)
-    //     IBV_WR_RDMA_WRITE_WITH_IMM,
-    //     IBV_WR_SEND_WITH_IMM      : tagged Valid ImmDt {
-    //         data: unwrapMaybe(wqe.immDtOrInvRKey)
-    //     };
-    //     default                   : tagged Invalid;
-    // endcase;
 endfunction
 
 function Maybe#(IETH) genIETH(WorkQueueElem wqe);
@@ -158,12 +171,6 @@ function Maybe#(IETH) genIETH(WorkQueueElem wqe);
     else begin
         return tagged Invalid;
     end
-    // return case (wqe.opcode)
-    //     IBV_WR_SEND_WITH_INV: tagged Valid IETH {
-    //         rkey: unwrapMaybe(wqe.immDtOrInvRKey)
-    //     };
-    //     default             : tagged Invalid;
-    // endcase;
 endfunction
 
 function Maybe#(PktHeaderInfo) genFirstOrOnlyPktHeader(
@@ -198,6 +205,7 @@ function Maybe#(PktHeaderInfo) genFirstOrOnlyPktHeader(
         let xrceth = genXRCETH(wqe);
         let deth = genDETH(wqe);
         let reth = genRETH(wqe.opcode, remoteAddr, wqe.rkey, dlen);
+        let leth = genLETH(wqe, dlen);
         let atomicEth = genAtomicEth(wqe);
         let immDt = genImmDt(wqe);
         let ieth = genIETH(wqe);
@@ -322,13 +330,13 @@ function Maybe#(PktHeaderInfo) genFirstOrOnlyPktHeader(
             IBV_WR_RDMA_READ: begin
                 return case (wqe.qpType)
                     IBV_QPT_RC: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)), pack(unwrapMaybe(leth)) }),
+                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         False // Read requests have no payload
                     );
                     IBV_QPT_XRC_SEND: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)), pack(unwrapMaybe(leth)) }),
+                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         False // Read requests have no payload
                     );
                     default: tagged Invalid;
@@ -551,10 +559,11 @@ typedef struct {
     Bool   isFirstPkt;
     Bool   isLastPkt;
     Bool   isOnlyPkt;
+    Bool   qpRawPkt;
 } HeaderGenInfo deriving(Bits, FShow);
 
 typedef struct {
-    Bool hasDmaRespErr;
+    ReservedZero#(0) rsvd;
 } SendResp deriving(Bits, FShow);
 
 interface SendQ;
@@ -574,10 +583,10 @@ module mkSendQ#(
     FIFOF#(PktInfo4UDP) udpPktInfoOutQ <- mkFIFOF;
 
     // Pipeline FIFOF
-    FIFOF#(Tuple2#(WorkQueueElem, Bool)) totalMetaDataQ <- mkFIFOF;
-    FIFOF#(Tuple5#(WorkQueueElem, Length, PktNum, Bool, Bool)) psnUpdateQ <- mkFIFOF;
+    FIFOF#(Tuple3#(WorkQueueElem, Bool, Bool)) totalMetaDataQ <- mkFIFOF;
+    FIFOF#(Tuple6#(WorkQueueElem, Length, PktNum, Bool, Bool, Bool)) psnUpdateQ <- mkFIFOF;
     FIFOF#(Tuple2#(WorkQueueElem, HeaderGenInfo)) headerPrepareQ <- mkFIFOF;
-    FIFOF#(Tuple4#(WorkQueueElem, Maybe#(PktHeaderInfo), PktLen, Bool)) pendingHeaderQ <- mkFIFOF;
+    FIFOF#(Tuple6#(MAC, IP, Maybe#(PktHeaderInfo), PktLen, Bool, Bool)) pendingHeaderQ <- mkFIFOF;
     FIFOF#(RdmaHeader) pktHeaderQ <- mkFIFOF;
 
     Reg#(PSN)       curPsnReg <- mkRegU;
@@ -620,8 +629,12 @@ module mkSendQ#(
 
         let qpType = wqe.qpType;
         immAssert(
-            qpType == IBV_QPT_RC || qpType == IBV_QPT_UC ||
-            qpType == IBV_QPT_XRC_SEND || qpType == IBV_QPT_UD,
+            qpType == IBV_QPT_RC       ||
+            qpType == IBV_QPT_XRC_RECV ||
+            qpType == IBV_QPT_XRC_SEND ||
+            qpType == IBV_QPT_UC       ||
+            qpType == IBV_QPT_UD       ||
+            qpType == IBV_QPT_RAW_PACKET,
             "qpType assertion @ mkSendQ",
             $format(
                 "qpType=", fshow(qpType), " unsupported"
@@ -704,32 +717,39 @@ module mkSendQ#(
             // TODO: check immDtOrInvRKey is RKey
         end
 
+        let qpRawPkt = isRawPktTypeQP(wqe.qpType);
         let isSendWR = isSendWorkReq(wqe.opcode);
-        let needPayloadGen = workReqNeedPayloadGen(wqe.opcode);
+        let needPayloadGen = qpRawPkt || workReqNeedPayloadGen(wqe.opcode);
+
+        let remoteAddr = wqe.raddr;
+        if (qpRawPkt || isSendWR) begin
+            remoteAddr = 0;
+        end
         if (needPayloadGen) begin
             let payloadGenReq = PayloadGenReqSG {
                 wrID : wqe.id,
                 sqpn : wqe.sqpn,
                 sgl  : wqe.sgl,
-                raddr: isSendWR ? 0 : wqe.raddr,
+                raddr: remoteAddr,
                 pmtu : wqe.pmtu
             };
             payloadGenerator.srvPort.request.put(payloadGenReq);
         end
-        totalMetaDataQ.enq(tuple2(wqe, needPayloadGen));
+        totalMetaDataQ.enq(tuple3(wqe, qpRawPkt, needPayloadGen));
         // TODO: handle pending read/atomic request number limit
 
         // $display(
         //     "time=%0t: mkSendQ 1st stage recvWQE", $time,
         //     ", sqpn=%h", wqe.sqpn,
         //     ", id=%h", wqe.id,
+        //     ", macAddr=%h", wqe.macAddr,
         //     ", pmtu=", fshow(wqe.pmtu),
         //     ", needPayloadGen=", fshow(needPayloadGen)
         // );
     endrule
 
     rule recvTotalMetaData if (!clearAll);
-        let { wqe, needPayloadGen } = totalMetaDataQ.first;
+        let { wqe, qpRawPkt, needPayloadGen } = totalMetaDataQ.first;
         totalMetaDataQ.deq;
 
         let sglZeroIdx  = 0;
@@ -773,25 +793,26 @@ module mkSendQ#(
                 );
             end
         end
-        psnUpdateQ.enq(tuple5(
-            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt
+        psnUpdateQ.enq(tuple6(
+            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt, qpRawPkt
         ));
-        $display(
-            "time=%0t: mkSendQ 2nd stage recvTotalMetaData", $time,
-            ", sqpn=%h", wqe.sqpn,
-            ", id=%h", wqe.id,
-            ", psn=%h", wqe.psn,
-            ", totalLen=%0d", totalLen,
-            ", totalPktNum=%0d", totalPktNum,
-            ", hasPayload=", fshow(hasPayload),
-            ", isOnlyPkt=", fshow(isOnlyPkt),
-            ", needPayloadGen=", fshow(needPayloadGen)
-        );
+        // $display(
+        //     "time=%0t: mkSendQ 2nd stage recvTotalMetaData", $time,
+        //     ", sqpn=%h", wqe.sqpn,
+        //     ", id=%h", wqe.id,
+        //     ", psn=%h", wqe.psn,
+        //     ", totalLen=%0d", totalLen,
+        //     ", totalPktNum=%0d", totalPktNum,
+        //     ", qpRawPkt=", fshow(qpRawPkt),
+        //     ", hasPayload=", fshow(hasPayload),
+        //     ", isOnlyPkt=", fshow(isOnlyPkt),
+        //     ", needPayloadGen=", fshow(needPayloadGen)
+        // );
     endrule
 
     rule updatePSN if (!clearAll);
         let {
-            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt
+            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt, qpRawPkt
         } = psnUpdateQ.first;
 
         let curPSN = curPsnReg;
@@ -806,10 +827,10 @@ module mkSendQ#(
         let wqeLastPkt = isOnlyPkt;
         if (hasPayload) begin
             let payloadGenResp <- payloadGenerator.srvPort.response.get;
-            remoteAddr = payloadGenResp.raddr;
+            remoteAddr    = payloadGenResp.raddr;
             pktPayloadLen = payloadGenResp.pktLen;
-            padCnt = payloadGenResp.padCnt;
-            wqeLastPkt = payloadGenResp.isLast;
+            padCnt        = payloadGenResp.padCnt;
+            wqeLastPkt    = payloadGenResp.isLast;
         end
         wqeFirstPktReg <= wqeLastPkt;
 
@@ -819,7 +840,6 @@ module mkSendQ#(
 
         let isFirstPkt = wqeFirstPktReg && wqe.isFirst;
         let isLastPkt  = wqeLastPkt && wqe.isLast;
-
         if (!isLastPkt) begin
             immAssert(
                 !isOnlyPkt,
@@ -843,6 +863,19 @@ module mkSendQ#(
             );
         end
 
+        if (qpRawPkt) begin
+            immAssert(
+                hasPayload && isZero(padCnt),
+                "qpRawPkt assertion @ mkSendQ",
+                $format(
+                    "hasPayload=", fshow(hasPayload),
+                    " should be true, and pacCnt=%0d", padCnt,
+                    " should be zero when qpRawPkt=", fshow(qpRawPkt),
+                    " and wqe.qpType=", fshow(wqe.qpType)
+                )
+            );
+        end
+
         let ackReq = containWorkReqFlag(wqe.flags, IBV_SEND_SIGNALED);
         let solicited = containWorkReqFlag(wqe.flags, IBV_SEND_SOLICITED);
         let headerGenInfo = HeaderGenInfo {
@@ -856,7 +889,8 @@ module mkSendQ#(
             solicited : solicited,
             isFirstPkt: isFirstPkt,
             isLastPkt : isLastPkt,
-            isOnlyPkt : isOnlyPkt
+            isOnlyPkt : isOnlyPkt,
+            qpRawPkt  : qpRawPkt
         };
         headerPrepareQ.enq(tuple2(wqe, headerGenInfo));
         // $display(
@@ -887,11 +921,16 @@ module mkSendQ#(
         let isFirstPkt    = headerGenInfo.isFirstPkt;
         let isLastPkt     = headerGenInfo.isLastPkt;
         let isOnlyPkt     = headerGenInfo.isOnlyPkt;
+        let qpRawPkt      = headerGenInfo.qpRawPkt;
 
-        let maybePktHeaderInfo  = dontCareValue;
-        if (isFirstPkt) begin
+        let maybePktHeaderInfo = dontCareValue;
+        if (qpRawPkt) begin
+            maybePktHeaderInfo = tagged Valid genEmptyPktHeaderInfo(hasPayload);
+        end
+        else if (isFirstPkt) begin
             let maybeFirstOrOnlyPktHeaderInfo = genFirstOrOnlyPktHeader(
-                wqe, isOnlyPkt, solicited, curPSN, padCnt, ackReq, remoteAddr, totalLen, hasPayload
+                wqe, isOnlyPkt, solicited, curPSN, padCnt,
+                ackReq, remoteAddr, totalLen, hasPayload
             );
             immAssert(
                 isValid(maybeFirstOrOnlyPktHeaderInfo),
@@ -906,7 +945,8 @@ module mkSendQ#(
         end
         else begin
             let maybeMiddleOrLastPktHeaderInfo = genMiddleOrLastPktHeader(
-                wqe, isLastPkt, solicited, curPSN, padCnt, ackReq, remoteAddr, pktPayloadLen
+                wqe, isLastPkt, solicited, curPSN, padCnt,
+                ackReq, remoteAddr, pktPayloadLen
             );
             immAssert(
                 isValid(maybeMiddleOrLastPktHeaderInfo),
@@ -921,18 +961,22 @@ module mkSendQ#(
         end
 
         let pktLenWithPadCnt = pktPayloadLen + zeroExtend(padCnt);
+        PAD zeroPad = truncate(pktLenWithPadCnt);
         immAssert(
-            isZero(pktLenWithPadCnt[1:0]),
-            "pktLenWithPadCnt assertion @ mkSendQ",
+            isZero(zeroPad),
+            "zeroPad assertion @ mkSendQ",
             $format(
-                "pktLenWithPadCnt=%0d", pktLenWithPadCnt,
-                " should be multiple of four, when padCnt=%0d", padCnt,
-                " pktPayloadLen=%0d", pktPayloadLen
+                "zeroPad=%0d", zeroPad,
+                " should be zero, when padCnt=%0d", padCnt,
+                ", pktPayloadLen=%0d", pktPayloadLen,
+                " and pktLenWithPadCnt=%0d", pktLenWithPadCnt
             )
         );
 
-        let shouldGenResp = isOnlyPkt || isLastPkt;
-        pendingHeaderQ.enq(tuple4(wqe, maybePktHeaderInfo, pktLenWithPadCnt, shouldGenResp));
+        let isSendDone = isOnlyPkt || isLastPkt;
+        pendingHeaderQ.enq(tuple6(
+            wqe.macAddr, wqe.dqpIP, maybePktHeaderInfo, pktLenWithPadCnt, qpRawPkt, isSendDone
+        ));
         // $display(
         //     "time=%0t: mkSendQ 4th stage prepareHeader", $time,
         //     ", sqpn=%h", wqe.sqpn,
@@ -946,33 +990,37 @@ module mkSendQ#(
     endrule
 
     rule genPktHeader if (!clearAll);
-        let { wqe, maybePktHeaderInfo, pktLenWithPadCnt, shouldGenResp } = pendingHeaderQ.first;
+        let {
+            macAddr, ipAddr, maybePktHeaderInfo, pktLenWithPadCnt, qpRawPkt, isSendDone
+        } = pendingHeaderQ.first;
         pendingHeaderQ.deq;
 
         if (maybePktHeaderInfo matches tagged Valid .pktHeaderInfo) begin
             let headerData = pktHeaderInfo.headerData;
             let headerLen  = pktHeaderInfo.headerLen;
             let hasPayload = pktHeaderInfo.hasPayload;
-            let pktHeader  = genRdmaHeader(headerData, headerLen, hasPayload);
+            let pktHeader  = qpRawPkt ?
+                genEmptyRdmaHeader(hasPayload) :
+                genRdmaHeader(headerData, headerLen, hasPayload);
 
             let udpPktInfo = PktInfo4UDP {
-                macAddr: wqe.macAddr,
-                ipAddr : wqe.dqpIP,
+                macAddr: macAddr,
+                ipAddr : ipAddr,
                 pktLen : pktLenWithPadCnt + zeroExtend(headerLen)
             };
 
             pktHeaderQ.enq(pktHeader);
             udpPktInfoOutQ.enq(udpPktInfo);
-            if (shouldGenResp) begin
+            if (isSendDone) begin
                 let sendResp = SendResp {
-                    hasDmaRespErr: False
+                    rsvd: unpack(0)
                 };
                 respQ.enq(sendResp);
             end
             // $display(
             //     "time=%0t: mkSendQ 5th stage genPktHeader", $time,
-            //     ", sqpn=%h", wqe.sqpn,
-            //     ", id=%h", wqe.id,
+            //     // ", sqpn=%h", wqe.sqpn,
+            //     // ", id=%h", wqe.id,
             //     ", pktLenWithPadCnt=%0d", pktLenWithPadCnt,
             //     ", headerLen=%0d", headerLen,
             //     ", udpPktInfo.macAddr=%h", udpPktInfo.macAddr,

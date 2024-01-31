@@ -223,10 +223,11 @@ module mkTestExtractHeaderLongerThanDataStream(Empty);
     let { headerFragNum, headerLastFragValidByteNum } =
         calcHeaderFragNumAndLastFragValidByeNum(headerLen);
     let headerMetaData = HeaderMetaData {
-        headerLen: headerLen,
-        headerFragNum: headerFragNum,
+        headerLen           : headerLen,
+        headerFragNum       : headerFragNum,
         lastFragValidByteNum: headerLastFragValidByteNum,
-        hasPayload: True
+        hasPayload          : True,
+        isEmptyHeader       : False
     };
 
     Vector#(2, DataStreamPipeOut) dataStreamPipeOutVec <-

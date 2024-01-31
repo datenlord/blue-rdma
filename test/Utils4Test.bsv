@@ -412,11 +412,12 @@ module mkFixedLenHeaderMetaPipeOut#(
         let { headerFragNum, headerLastFragValidByteNum } =
             calcHeaderFragNumAndLastFragValidByeNum(headerLen);
         let headerMetaData = HeaderMetaData {
-            headerLen: headerLen,
-            headerFragNum: headerFragNum,
+            headerLen           : headerLen,
+            headerFragNum       : headerFragNum,
             lastFragValidByteNum: headerLastFragValidByteNum,
             // Use the last bit of HeaderLen to randomize hasPayload
-            hasPayload: alwaysHasPayload || unpack(headerLen[0])
+            hasPayload          : alwaysHasPayload || unpack(headerLen[0]),
+            isEmptyHeader       : False
         };
         headerMetaDataQ.enq(headerMetaData);
         // $display("time=%0t: headerMetaData=", $time, fshow(headerMetaData));

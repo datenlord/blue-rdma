@@ -92,8 +92,7 @@ typedef enum {
     TRANS_TYPE_RD  = 3'h2, // 3'b010
     TRANS_TYPE_UD  = 3'h3, // 3'b011
     TRANS_TYPE_CNP = 3'h4, // 3'b100
-    TRANS_TYPE_XRC = 3'h5, // 3'b101
-    TRANS_TYPE_RAW = 3'h7  // 3'b111 Not defined in rdma-core
+    TRANS_TYPE_XRC = 3'h5  // 3'b101
 } TransType deriving(Bits, Bounded, Eq, FShow);
 
 typedef SizeOf#(TransType) TRANS_TYPE_WIDTH;
@@ -187,10 +186,20 @@ typedef struct {
     ADDR va;
     RKEY rkey;
     Length dlen;
-} RETH deriving(Bits, Bounded);
+} RETH deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(RETH)        RETH_WIDTH;
 typedef TDiv#(RETH_WIDTH, 8) RETH_BYTE_WIDTH;
+
+// 16 bytes
+typedef struct {
+    ADDR va;
+    LKEY lkey;
+    Length dlen;
+} LETH deriving(Bits, Bounded, FShow);
+
+typedef SizeOf#(LETH)        LETH_WIDTH;
+typedef TDiv#(LETH_WIDTH, 8) LETH_BYTE_WIDTH;
 
 // 28 bytes
 typedef struct {
@@ -198,7 +207,7 @@ typedef struct {
     RKEY rkey;
     Long swap;
     Long comp;
-} AtomicEth deriving(Bits, Bounded);
+} AtomicEth deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(AtomicEth)         ATOMIC_ETH_WIDTH;
 typedef TDiv#(ATOMIC_ETH_WIDTH, 8) ATOMIC_ETH_BYTE_WIDTH;
@@ -206,7 +215,7 @@ typedef TDiv#(ATOMIC_ETH_WIDTH, 8) ATOMIC_ETH_BYTE_WIDTH;
 // 8 byes
 typedef struct {
     Long orig;
-} AtomicAckEth deriving(Bits, Bounded);
+} AtomicAckEth deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(AtomicAckEth)          ATOMIC_ACK_ETH_WIDTH;
 typedef TDiv#(ATOMIC_ACK_ETH_WIDTH, 8) ATOMIC_ACK_ETH_BYTE_WIDTH;
@@ -232,7 +241,7 @@ typedef struct {
     QKEY qkey;
     ReservedZero#(8) rsvd;
     QPN sqpn;
-} DETH deriving(Bits, Bounded);
+} DETH deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(DETH)        DETH_WIDTH;
 typedef TDiv#(DETH_WIDTH, 8) DETH_BYTE_WIDTH;
@@ -241,7 +250,7 @@ typedef TDiv#(DETH_WIDTH, 8) DETH_BYTE_WIDTH;
 typedef struct {
     ReservedZero#(8) rsvd;
     QPN srqn;
-} XRCETH deriving(Bits, Bounded);
+} XRCETH deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(XRCETH)        XRCETH_WIDTH;
 typedef TDiv#(XRCETH_WIDTH, 8) XRCETH_BYTE_WIDTH;
@@ -250,13 +259,14 @@ typedef TDiv#(XRCETH_WIDTH, 8) XRCETH_BYTE_WIDTH;
 typedef struct {
     ReservedZero#(LONG_WIDTH) rsvd1;
     ReservedZero#(LONG_WIDTH) rsvd2;
-} PayloadCNP deriving(Bits, Bounded);
+} PayloadCNP deriving(Bits, Bounded, FShow);
 
 typedef SizeOf#(PayloadCNP)         CNP_PAYLOAD_WIDTH;
 typedef TDiv#(CNP_PAYLOAD_WIDTH, 8) CNP_PAYLOAD_BYTE_WIDTH;
 
 // RC headers:
 // BTH + IETH = 20 bytes
+// BTH + RETH + LETH = 44 bytes
 // BTH + RETH + ImmDT = 32 bytes
 // BTH + AtomicEth = 40 bytes
 // BTH + AETH + AtomicAckEth = 24 bytes
@@ -264,6 +274,7 @@ typedef TDiv#(CNP_PAYLOAD_WIDTH, 8) CNP_PAYLOAD_BYTE_WIDTH;
 // XRC headers:
 // BTH + XRCETH + IETH = 24 bytes
 // BTH + XRCETH + RETH = 32 bytes
+// BTH + XRCETH + RETH + LETH = 48 bytes
 // BTH + XRCETH + RETH + ImmDT = 36 bytes
 // BTH + XRCETH + AtomicEth = 44 bytes
 // BTH + AETH + AtomicAckEth = 24 bytes
@@ -328,10 +339,71 @@ function Integer calcHeaderLenByTransTypeAndRdmaOpCode(
 
         // CNP notification
         fromInteger(valueOf(ROCE_CNP)): valueOf(BTH_BYTE_WIDTH) + valueOf(CNP_PAYLOAD_BYTE_WIDTH);
-        default: 0; // error("invalid transType and rdmaOpCode in calcHeaderLenByTransTypeAndRdmaOpCode()");
+        default: 0;
     endcase;
 endfunction
+/*
+// TODO: enable this after refactor
+function Integer calcHeaderLenByTransTypeAndRdmaOpCode(
+    TransType transType, RdmaOpCode rdmaOpCode
+);
+    return case ({ pack(transType), pack(rdmaOpCode) } )
+        // RC requests
+        fromInteger(valueOf(RC_SEND_FIRST))                    : valueOf(BTH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_MIDDLE))                   : valueOf(BTH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_LAST))                     : valueOf(BTH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_LAST_WITH_IMMEDIATE))      : valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_ONLY))                     : valueOf(BTH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_ONLY_WITH_IMMEDIATE))      : valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_FIRST))              : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_MIDDLE))             : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_LAST))               : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_LAST_WITH_IMMEDIATE)): valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_ONLY))               : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_WRITE_ONLY_WITH_IMMEDIATE)): valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_READ_REQUEST))             : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(LETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_COMPARE_SWAP))                  : valueOf(BTH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_FETCH_ADD))                     : valueOf(BTH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_LAST_WITH_INVALIDATE))     : valueOf(BTH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_SEND_ONLY_WITH_INVALIDATE))     : valueOf(BTH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH);
 
+        // RC and XRC responses
+        fromInteger(valueOf(RC_RDMA_READ_RESPONSE_FIRST)),  fromInteger(valueOf(XRC_RDMA_READ_RESPONSE_FIRST)) : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_READ_RESPONSE_MIDDLE)), fromInteger(valueOf(XRC_RDMA_READ_RESPONSE_MIDDLE)): valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_READ_RESPONSE_LAST)),   fromInteger(valueOf(XRC_RDMA_READ_RESPONSE_LAST))  : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_RDMA_READ_RESPONSE_ONLY)),   fromInteger(valueOf(XRC_RDMA_READ_RESPONSE_ONLY))  : valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_ACKNOWLEDGE)),               fromInteger(valueOf(XRC_ACKNOWLEDGE))              : valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH);
+        fromInteger(valueOf(RC_ATOMIC_ACKNOWLEDGE)),        fromInteger(valueOf(XRC_ATOMIC_ACKNOWLEDGE))       : valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH) + valueOf(ATOMIC_ACK_ETH_BYTE_WIDTH);
+
+        // XRC requests
+        fromInteger(valueOf(XRC_SEND_FIRST))                    : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_MIDDLE))                   : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_LAST))                     : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_LAST_WITH_IMMEDIATE))      : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_ONLY))                     : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_ONLY_WITH_IMMEDIATE))      : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_FIRST))              : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_MIDDLE))             : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_LAST))               : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_LAST_WITH_IMMEDIATE)): valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_ONLY))               : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_WRITE_ONLY_WITH_IMMEDIATE)): valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_RDMA_READ_REQUEST))             : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(LETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_COMPARE_SWAP))                  : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_FETCH_ADD))                     : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(ATOMIC_ETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_LAST_WITH_INVALIDATE))     : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH);
+        fromInteger(valueOf(XRC_SEND_ONLY_WITH_INVALIDATE))     : valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IETH_BYTE_WIDTH);
+
+        // UD requests
+        fromInteger(valueOf(UD_SEND_ONLY))               : valueOf(BTH_BYTE_WIDTH) + valueOf(DETH_BYTE_WIDTH);
+        fromInteger(valueOf(UD_SEND_ONLY_WITH_IMMEDIATE)): valueOf(BTH_BYTE_WIDTH) + valueOf(DETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH);
+
+        // CNP notification
+        fromInteger(valueOf(ROCE_CNP)): valueOf(BTH_BYTE_WIDTH) + valueOf(CNP_PAYLOAD_BYTE_WIDTH);
+        default: 0;
+    endcase;
+endfunction
+*/
 function Bool rdmaOpCodeHasPayload(RdmaOpCode opcode);
     return case (opcode)
         SEND_FIRST                    ,

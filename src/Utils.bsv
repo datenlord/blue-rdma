@@ -310,7 +310,8 @@ function HeaderMetaData genHeaderMetaData(
         headerLen: headerLen,
         headerFragNum: headerFragNum,
         lastFragValidByteNum: lastFragValidByteNum,
-        hasPayload: hasPayload
+        hasPayload: hasPayload,
+        isEmptyHeader : False
     };
     return headerMetaData;
 endfunction
@@ -323,9 +324,24 @@ function RdmaHeader genRdmaHeader(
     let headerByteEn = genHeaderByteEn(headerLen);
     let headerMetaData = genHeaderMetaData(headerLen, hasPayload);
     return RdmaHeader {
-        headerData: headerData,
-        headerByteEn: headerByteEn,
+        headerData    : headerData,
+        headerByteEn  : headerByteEn,
         headerMetaData: headerMetaData
+    };
+endfunction
+
+function RdmaHeader genEmptyRdmaHeader(Bool hasPayload);
+    let emptyHeaderMetaData = HeaderMetaData {
+        headerLen           : 0,
+        headerFragNum       : 0,
+        lastFragValidByteNum: 0,
+        hasPayload          : hasPayload,
+        isEmptyHeader       : True
+    };
+    return RdmaHeader {
+        headerData    : dontCareValue,
+        headerByteEn  : 0,
+        headerMetaData: emptyHeaderMetaData
     };
 endfunction
 
@@ -723,22 +739,20 @@ function Maybe#(TransType) qpType2TransType(TypeQP qpt);
         IBV_QPT_UD        : tagged Valid TRANS_TYPE_UD;
         IBV_QPT_XRC_RECV  ,
         IBV_QPT_XRC_SEND  : tagged Valid TRANS_TYPE_XRC;
-        IBV_QPT_RAW_PACKET: tagged Valid TRANS_TYPE_RAW;
         default           : tagged Invalid;
     endcase;
 endfunction
 
-function Bool transTypeMatchQpType(TransType tt, TypeQP qpt, Bool isRespPkt);
+function Bool transTypeMatchQpType(TransType tt, TypeQP qpt, Bool isRecvSide);
     return case (tt)
         TRANS_TYPE_CNP: True;
         TRANS_TYPE_RC : (qpt == IBV_QPT_RC);
         TRANS_TYPE_UC : (qpt == IBV_QPT_UC);
         TRANS_TYPE_UD : (qpt == IBV_QPT_UD);
         TRANS_TYPE_XRC: (
-            (!isRespPkt && qpt == IBV_QPT_XRC_RECV) ||
-            (isRespPkt && qpt == IBV_QPT_XRC_SEND)
+            (!isRecvSide && qpt == IBV_QPT_XRC_RECV) ||
+            (isRecvSide && qpt == IBV_QPT_XRC_SEND)
         );
-        TRANS_TYPE_RAW: (qpt == IBV_QPT_RAW_PACKET);
         default: False;
     endcase;
 endfunction
@@ -752,6 +766,10 @@ function Bool qpNeedGenResp(TransType transType);
         // TRANS_TYPE_UD ,
         default       : False;
     endcase;
+endfunction
+
+function Bool isRawPktTypeQP(TypeQP qpType);
+    return qpType == IBV_QPT_RAW_PACKET;
 endfunction
 
 function Bool isSupportedReqOpCodeRQ(TypeQP qpt, RdmaOpCode opcode);
@@ -869,6 +887,20 @@ function RETH extractRETH(HeaderData headerData, TransType transType);
         default: unpack(headerData[
             valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) -1 :
             valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) - valueOf(RETH_WIDTH)
+        ]);
+    endcase;
+    return reth;
+endfunction
+
+function LETH extractLETH(HeaderData headerData, TransType transType);
+    let reth = case (transType)
+        TRANS_TYPE_XRC: unpack(headerData[
+            valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) - valueOf(XRCETH_WIDTH) - valueOf(RETH_WIDTH) -1 :
+            valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) - valueOf(XRCETH_WIDTH) - valueOf(RETH_WIDTH) - valueOf(LETH_WIDTH)
+        ]);
+        default: unpack(headerData[
+            valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) - valueOf(RETH_WIDTH) -1 :
+            valueOf(HEADER_MAX_DATA_WIDTH) - valueOf(BTH_WIDTH) - valueOf(RETH_WIDTH) - valueOf(LETH_WIDTH)
         ]);
     endcase;
     return reth;

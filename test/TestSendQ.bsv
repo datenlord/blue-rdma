@@ -222,32 +222,210 @@ module mkRandomWorkQueueElemWithPayload#(
     return resultPipeOutVec;
 endmodule
 /*
-module mkRandomWorkQueueElemRawPkt#(
-    Length minLength, Length maxLength
-)(Vector#(vSz, PipeOut#(WorkQueueElem)));
-    Vector#(6, WorkReqOpCode) workReqOpCodeVec = vec(
+module mkRandomWorkQueueElemRawPkt#(Length fixedLen)(Vector#(vSz, PipeOut#(WorkQueueElem)));
+    Vector#(9, WorkReqOpCode) workReqOpCodeVec = vec(
         IBV_WR_SEND,
         IBV_WR_SEND_WITH_IMM,
         IBV_WR_SEND_WITH_INV,
         IBV_WR_RDMA_WRITE,
         IBV_WR_RDMA_WRITE_WITH_IMM,
+        IBV_WR_RDMA_READ,
+        IBV_WR_ATOMIC_CMP_AND_SWP,
+        IBV_WR_ATOMIC_FETCH_AND_ADD,
         IBV_WR_RDMA_READ_RESP
     );
     let qpType = IBV_QPT_RAW_PACKET;
-    let wrFlags = IBV_SEND_SIGNALED;
+    let wrFlags = IBV_SEND_NO_FLAGS;
     let workReqOpCodePipeOut <- mkRandomItemFromVec(workReqOpCodeVec);
     let resultPipeOutVec <- mkSimGenWorkQueueElemByOpCode(
-        workReqOpCodeVec, minLength, maxLength, qpType, wrFlags
+        workReqOpCodePipeOut, fixedLen, fixedLen, qpType, wrFlags
     );
     return resultPipeOutVec;
 endmodule
 */
 (* doc = "testcase" *)
+module mkTestSendQueueRawPktCase(Empty);
+    let pmtu = IBV_MTU_256;
+    let pmtuLen = calcPmtuLen(pmtu);
+    let fixedLength = calcPmtuLen(pmtu);
+
+    Reg#(Bool) clearReg <- mkReg(True);
+
+    // WQE generation
+    PipeOut#(IP)   ipAddrPipeOut <- mkGenericRandomPipeOut;
+    PipeOut#(MAC) macAddrPipeOut <- mkGenericRandomPipeOut;
+    FIFOF#(WorkQueueElem) wqeQ <- mkFIFOF;
+    FIFOF#(WorkQueueElem) wqeRefQ <- mkSizedFIFOF(getMaxFragBufSize);
+    let wqePipeOut4Ref = toPipeOut(wqeRefQ);
+    // Vector#(2, PipeOut#(WorkQueueElem)) wqePipeOutVec <- mkRandomWorkQueueElemRawPkt(fixedLength);
+    // let wqePipeOut4Ref <- mkBufferN(getMaxFragBufSize, wqePipeOutVec[1]);
+
+    // Request payload DataStream generation
+    let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
+    // let dataStreamWithPaddingPipeOut <- mkDataStreamAddPadding(
+    //     simDmaReadSrv.dataStream
+    // );
+    let dataStreamPipeOut4Ref <- mkBufferN(getMaxFragBufSize, simDmaReadSrv.dataStream);
+
+    let dmaReadCntrl <- mkDmaReadCntrl(clearReg, simDmaReadSrv.dmaReadSrv);
+    let shouldAddPadding = False;
+    let payloadGenerator <- mkPayloadGenerator(clearReg, shouldAddPadding, dmaReadCntrl);
+
+    let dut <- mkSendQ(clearReg, payloadGenerator);
+    mkConnection(dut.srvPort.request, toGet(wqeQ));
+
+    Reg#(PktLen) payloadLenReg <- mkRegU;
+    let countDown <- mkCountDown(valueOf(MAX_CMP_CNT));
+
+    // mkSink(dut.rdmaDataStreamPipeOut);
+    // mkSink(dataStreamPipeOut4Ref);
+    // mkSink(dut.udpInfoPipeOut);
+    // mkSink(wqePipeOut4Ref);
+
+    rule clearAll if (clearReg);
+        clearReg <= False;
+        // $display("time=%0t: clearAll", $time);
+    endrule
+
+    rule genWQE if (!clearReg);
+        let ipAddr = ipAddrPipeOut.first;
+        ipAddrPipeOut.deq;
+        let macAddr = macAddrPipeOut.first;
+        macAddrPipeOut.deq;
+
+        let sge = ScatterGatherElem {
+            laddr  : 0,
+            len    : zeroExtend(fixedLength),
+            lkey   : dontCareValue,
+            isFirst: True,
+            isLast : True
+        };
+        let dummySGE = sge;
+        let sgl = vec(sge, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE);
+
+        let wqe = WorkQueueElem {
+            id     : dontCareValue,
+            opcode : IBV_WR_RDMA_READ, // dontCareValue
+            flags  : enum2Flag(IBV_SEND_NO_FLAGS),
+            qpType : IBV_QPT_RAW_PACKET,
+            psn    : 0,
+            pmtu   : pmtu,
+            dqpIP  : ipAddr,
+            macAddr: macAddr,
+            sgl    : sgl,
+            raddr  : dontCareValue,
+            rkey   : dontCareValue,
+            // pkey   : dontCareValue,
+            sqpn   : getDefaultQPN,
+            dqpn   : getDefaultQPN,
+            comp   : tagged Invalid,
+            swap   : tagged Invalid,
+            immDtOrInvRKey: tagged Invalid,
+            srqn   : tagged Invalid,
+            qkey   : tagged Invalid,
+            isFirst: True,
+            isLast : True
+        };
+        wqeQ.enq(wqe);
+        wqeRefQ.enq(wqe);
+    endrule
+
+    rule discardSendResp if (!clearReg);
+        let sendResp <- dut.srvPort.response.get;
+        // countDown.decr;
+    endrule
+
+    rule checkAddr if (!clearReg);
+        let udpPktInfo = dut.udpInfoPipeOut.first;
+        dut.udpInfoPipeOut.deq;
+
+        let wqe = wqePipeOut4Ref.first;
+        wqePipeOut4Ref.deq;
+
+        immAssert(
+            udpPktInfo.macAddr == wqe.macAddr,
+            "macAddr assertion @ mkTestSendQueueRawPktCase",
+            $format(
+                "udpPktInfo.macAddr=%h shoud == wqe.macAddr=%h",
+                udpPktInfo.macAddr, wqe.macAddr
+            )
+        );
+        immAssert(
+            udpPktInfo.pktLen == pmtuLen,
+            "udpPktInfo.pktLen assertion @ mkTestSendQueueRawPktCase",
+            $format(
+                "udpPktInfo.pktLen=%0d", udpPktInfo.pktLen,
+                " should == pmtuLen=%0d", pmtuLen
+            )
+        );
+    endrule
+
+    rule checkPktFrag if (!clearReg);
+        let pktFrag = dut.rdmaDataStreamPipeOut.first;
+        dut.rdmaDataStreamPipeOut.deq;
+
+        let expectedPktFrag = dataStreamPipeOut4Ref.first;
+        dataStreamPipeOut4Ref.deq;
+
+        immAssert(
+            pktFrag.data == expectedPktFrag.data &&
+            pktFrag.byteEn == expectedPktFrag.byteEn,
+            "payload assertion @ mkTestSendQueueRawPktCase",
+            $format(
+                "pktFrag.data=%h", pktFrag.data,
+                " should == expectedPktFrag.data=%h", expectedPktFrag.data,
+                " and pktFrag.byteEn=%h", pktFrag.byteEn,
+                " should == expectedPktFrag.byteEn=%h", expectedPktFrag.byteEn
+            )
+        );
+
+        let maybePktFragLen = calcFragByteNumFromByteEn(pktFrag.byteEn);
+        immAssert(
+            isValid(maybePktFragLen),
+            "maybePktFragLen assertion @ mkTestSendQueueRawPktCase",
+            $format(
+                "isValid(maybePktFragLen)=", fshow(isValid(maybePktFragLen)),
+                " should be valid"
+            )
+        );
+
+        let pktFragLen = unwrapMaybe(maybePktFragLen);
+        let totalPayloadLen = payloadLenReg;
+        if (pktFrag.isFirst) begin
+            totalPayloadLen = zeroExtend(pktFragLen);
+        end
+        else begin
+            totalPayloadLen = payloadLenReg + zeroExtend(pktFragLen);
+        end
+        payloadLenReg <= totalPayloadLen;
+
+        if (pktFrag.isLast) begin
+            immAssert(
+                totalPayloadLen == fixedLength,
+                "totalPayloadLen assertion @ mkTestSendQueueRawPktCase",
+                $format(
+                    "totalPayloadLen=%0d", totalPayloadLen,
+                    " should == fixedLength=%0d", fixedLength
+                )
+            );
+            // $display(
+            //     "time=%0t: checkOutput", $time,
+            //     ", fixedLength=%0d", fixedLength,
+            //     ", totalPayloadLen=%0d", totalPayloadLen,
+            //     ", pktFrag.isFirst=", fshow(pktFrag.isFirst),
+            //     ", pktFrag.isLast=", fshow(pktFrag.isLast)
+            // );
+        end
+        countDown.decr;
+    endrule
+endmodule
+
+(* doc = "testcase" *)
 module mkTestSendQueueNormalCase(Empty);
     let minDmaLength = 1;
     let maxDmaLength = 10241;
     let genPayload = True;
-    let result <- mkTestSendQueueNormalAndZeroLenCase(
+    let result <- mkTestSendQueueNormalAndNoPayloadCase(
         genPayload, minDmaLength, maxDmaLength
     );
 endmodule
@@ -257,35 +435,20 @@ module mkTestSendQueueNoPayloadCase(Empty);
     let minDmaLength = 1;
     let maxDmaLength = 10241;
     let genPayload = False;
-    let result <- mkTestSendQueueNormalAndZeroLenCase(
+    let result <- mkTestSendQueueNormalAndNoPayloadCase(
         genPayload, minDmaLength, maxDmaLength
     );
 endmodule
 
-module mkTestSendQueueNormalAndZeroLenCase#(
+module mkTestSendQueueNormalAndNoPayloadCase#(
     Bool genPayload, Length minDmaLength, Length maxDmaLength
 )(Empty);
-    let pmtuVec = vec(
-        IBV_MTU_256,
-        IBV_MTU_512,
-        IBV_MTU_1024,
-        IBV_MTU_2048,
-        IBV_MTU_4096
-    );
-
     Reg#(Bool) clearReg <- mkReg(True);
 
     // WQE generation
     Vector#(2, PipeOut#(WorkQueueElem)) wqePipeOutVec <- genPayload ?
         mkRandomWorkQueueElemWithPayload(minDmaLength, maxDmaLength) :
         mkRandomWorkQueueElemWithOutPayload(minDmaLength, maxDmaLength);
-
-    // Request payload DataStream generation
-    // let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
-    // let dataStreamWithPaddingPipeOut <- mkDataStreamAddPadding(
-    //     simDmaReadSrv.dataStream
-    // );
-    // let dataStreamWithPaddingPipeOut4Ref <- mkBufferN(getMaxFragBufSize, dataStreamWithPaddingPipeOut);
 
     let simDmaReadSrv <- mkSimDmaReadSrv;
     let dmaReadCntrl <- mkDmaReadCntrl(clearReg, simDmaReadSrv);
@@ -327,43 +490,26 @@ module mkTestSendQueueNormalAndZeroLenCase#(
     rule clearAll if (clearReg);
         clearReg <= False;
         psnIsValidReg <= False;
-        $display("time=%0t: clearAll", $time);
+        // $display("time=%0t: clearAll", $time);
     endrule
-/*
-    rule compareWorkReq;
-        let pendingWR = pendingWorkReqPipeOut4Comp.first;
-        pendingWorkReqPipeOut4Comp.deq;
 
-        let refWorkReq = workReqPipeOut4Ref.first;
-        workReqPipeOut4Ref.deq;
-
-        immAssert(
-            pendingWR.wr.id == refWorkReq.id &&
-            pendingWR.wr.opcode == refWorkReq.opcode,
-            "pendingWR.wr assertion @ mkTestSendQueueNormalAndZeroLenCase",
-            $format(
-                "pendingWR.wr=", fshow(pendingWR.wr),
-                " should == refWorkReq=", fshow(refWorkReq)
-            )
-        );
-        // $display("time=%0t: WR=", $time, fshow(pendingWR.wr));
-    endrule
-*/
     rule compareRdmaReqHeader if (!clearReg);
         let rdmaHeader = rdmaHeaderPipeOut.first;
         rdmaHeaderPipeOut.deq;
 
         let { transType, rdmaOpCode } =
             extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
-        let bth = extractBTH(rdmaHeader.headerData);
-        $display("time=%0t: BTH=", $time, fshow(bth));
+        let bth  = extractBTH(rdmaHeader.headerData);
+        let reth = extractRETH(rdmaHeader.headerData, transType);
+        let leth = extractLETH(rdmaHeader.headerData, transType);
+        // $display("time=%0t: BTH=", $time, fshow(bth));
 
         if (psnIsValidReg) begin
             curPsnReg <= curPsnReg + 1;
 
             immAssert(
                 bth.psn == curPsnReg,
-                "bth.psn correctness assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "bth.psn correctness assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format("bth.psn=%h shoud == curPsnReg=%h", bth.psn, curPsnReg)
             );
         end
@@ -382,83 +528,78 @@ module mkTestSendQueueNormalAndZeroLenCase#(
             wqePipeOut4Ref.deq;
             psnIsValidReg <= False;
 
-            // let isReadWR = isReadWorkReq(refWQE.opcode);
-            // if (isReadWR) begin
             immAssert(
                 bth.psn == wrStartPSN,
-                "bth.psn read request packet assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "bth.psn read request packet assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format(
                     "bth.psn=%h should == wrStartPSN=%h when refWQE.opcode=",
                     bth.psn, wrStartPSN, fshow(refWQE.opcode)
                 )
             );
-            // end
-            // else begin
-            //     immAssert(
-            //         bth.psn == wrStartPSN && bth.psn == wrEndPSN,
-            //         "bth.psn only request packet assertion @ mkTestSendQueueNormalAndZeroLenCase",
-            //         $format(
-            //             "bth.psn=%h should == wrStartPSN=%h and bth.psn=%h should == wrEndPSN=%h",
-            //             bth.psn, wrStartPSN, bth.psn, wrEndPSN,
-            //             ", when refWQE.opcode=",
-            //             fshow(refWQE.opcode)
-            //         )
-            //     );
-            // end
+            let isReadWR = isReadWorkReq(refWQE.opcode);
+            if (isReadWR) begin
+                let firstIdxSGE = 0;
+                immAssert(
+                    // TODO: enable LETH check after update calcHeaderLenByTransTypeAndRdmaOpCode()
+                    reth.rkey == refWQE.rkey && reth.va == refWQE.raddr,
+                    // leth.lkey  == refWQE.sgl[firstIdxSGE].lkey  &&
+                    // leth.va    == refWQE.sgl[firstIdxSGE].laddr &&
+                    // leth.dlen  == refWQE.sgl[firstIdxSGE].len,
+                    "read request assertion @ mkTestSendQueueNormalAndNoPayloadCase",
+                    $format(
+                        "reth.rkey=%h should == refWQE.rkey=%h", reth.rkey, refWQE.rkey,
+                        ", reth.va=%h should == refWQE.raddr=%h", reth.va, refWQE.raddr,
+                        ", leth.lkey=%h should == refWQE.sgl[0].lkey=%h", leth.lkey, refWQE.sgl[firstIdxSGE].lkey,
+                        ", leth.va=%h should == refWQE.sgl[0].laddr=%h", leth.va, refWQE.sgl[firstIdxSGE].laddr,
+                        ", leth.dlen=%0d should == refWQE.sgl[0].len=%0d", leth.dlen, refWQE.sgl[firstIdxSGE].len,
+                        ", when refWQE.opcode=", fshow(refWQE.opcode)
+                    )
+                );
+                // $display(
+                //     "time=%0t: check read request", $time,
+                //     ", RETH=", fshow(reth),
+                //     ", LETH=", fshow(leth),
+                //     ", refWQE=", fshow(refWQE)
+                // );
+            end
         end
         else if (isLastRdmaOpCode(rdmaOpCode)) begin
             let sendResp <- dut.srvPort.response.get;
             wqePipeOut4Ref.deq;
             psnIsValidReg <= False;
-
-            // immAssert(
-            //     bth.psn == wrEndPSN,
-            //     "bth.psn last request packet assertion @ mkTestSendQueueNormalAndZeroLenCase",
-            //     $format("bth.psn=%h shoud == wrEndPSN=%h", bth.psn, wrEndPSN)
-            // );
         end
         else if (isFirstRdmaOpCode(rdmaOpCode)) begin
             psnIsValidReg <= True;
 
             immAssert(
                 bth.psn == wrStartPSN,
-                "bth.psn first request packet assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "bth.psn first request packet assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format("bth.psn=%h shoud == wrStartPSN=%h", bth.psn, wrStartPSN)
             );
         end
         else begin
             immAssert(
                 isMiddleRdmaOpCode(rdmaOpCode),
-                "rdmaOpCode middle request packet assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "rdmaOpCode middle request packet assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format(
                     "rdmaOpCode=", fshow(rdmaOpCode), " should be middle RDMA request opcode"
                 )
             );
-            // immAssert(
-            //     psnInRangeExclusive(bth.psn, wrStartPSN, wrEndPSN),
-            //     "bth.psn between wrStartPSN and wrEndPSN assertion @ mkTestSendQueueNormalAndZeroLenCase",
-            //     $format(
-            //         "bth.psn=%h should > wrStartPSN=%h and bth.psn=%h should < wrEndPSN=%h",
-            //         bth.psn, wrStartPSN, bth.psn, wrEndPSN,
-            //         ", when refWQE.opcode=", fshow(refWQE.opcode),
-            //         " and rdmaOpCode=", fshow(rdmaOpCode)
-            //     )
-            // );
         end
 
-        let isRespPkt = True;
+        let isRecvSide = True;
         immAssert(
-            transTypeMatchQpType(transType, refWQE.qpType, isRespPkt),
-            "transTypeMatchQpType assertion @ mkTestSendQueueNormalAndZeroLenCase",
+            transTypeMatchQpType(transType, refWQE.qpType, isRecvSide),
+            "transTypeMatchQpType assertion @ mkTestSendQueueNormalAndNoPayloadCase",
             $format(
                 "transType=", fshow(transType),
                 " should match qpType=", fshow(refWQE.qpType),
-                " and isRespPkt=", fshow(isRespPkt)
+                " and isRecvSide=", fshow(isRecvSide)
             )
         );
         immAssert(
             rdmaReqOpCodeMatchWorkReqOpCode(rdmaOpCode, refWQE.opcode),
-            "rdmaReqOpCodeMatchWorkReqOpCode assertion @ mkTestSendQueueNormalAndZeroLenCase",
+            "rdmaReqOpCodeMatchWorkReqOpCode assertion @ mkTestSendQueueNormalAndNoPayloadCase",
             $format(
                 "RDMA request opcode=", fshow(rdmaOpCode),
                 " should match workReqOpCode=", fshow(refWQE.opcode)
@@ -477,7 +618,7 @@ module mkTestSendQueueNormalAndZeroLenCase#(
         let maybePktFragLen = calcFragByteNumFromByteEn(pktFrag.byteEn);
         immAssert(
             isValid(maybePktFragLen),
-            "maybePktFragLen assertion @ mkTestSendQueueNormalAndZeroLenCase",
+            "maybePktFragLen assertion @ mkTestSendQueueNormalAndNoPayloadCase",
             $format(
                 "isValid(maybePktFragLen)=", fshow(isValid(maybePktFragLen)),
                 " should be valid"
@@ -503,7 +644,7 @@ module mkTestSendQueueNormalAndZeroLenCase#(
 
             immAssert(
                 udpPktInfo.macAddr == expectedMacAddr,
-                "macAddr assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "macAddr assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format(
                     "udpPktInfo.macAddr=%h shoud == expectedMacAddr=%h",
                     udpPktInfo.macAddr, expectedMacAddr
@@ -512,21 +653,21 @@ module mkTestSendQueueNormalAndZeroLenCase#(
 
             immAssert(
                 udpPktInfo.pktLen == totalPayloadLen + zeroExtend(headerLen),
-                "udpPktInfo.pktLen assertion @ mkTestSendQueueNormalAndZeroLenCase",
+                "udpPktInfo.pktLen assertion @ mkTestSendQueueNormalAndNoPayloadCase",
                 $format(
                     "udpPktInfo.pktLen=%0d", udpPktInfo.pktLen,
                     " should == totalPayloadLen=%0d", totalPayloadLen,
                     " + headerLen=%0d", headerLen
                 )
             );
-            $display(
-                "time=%0t: checkPktLen", $time,
-                ", udpPktInfo.pktLen=%0d", udpPktInfo.pktLen,
-                ", totalPayloadLen=%0d", totalPayloadLen,
-                ", headerLen=%0d", headerLen,
-                ", udpPktInfo.macAddr=%h", udpPktInfo.macAddr,
-                ", udpPktInfo.ipAddr=", fshow(udpPktInfo.ipAddr)
-            );
+            // $display(
+            //     "time=%0t: checkPktLen", $time,
+            //     ", udpPktInfo.pktLen=%0d", udpPktInfo.pktLen,
+            //     ", totalPayloadLen=%0d", totalPayloadLen,
+            //     ", headerLen=%0d", headerLen,
+            //     ", udpPktInfo.macAddr=%h", udpPktInfo.macAddr,
+            //     ", udpPktInfo.ipAddr=", fshow(udpPktInfo.ipAddr)
+            // );
         end
     endrule
 endmodule

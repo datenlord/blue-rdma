@@ -151,6 +151,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
 
         if (isOnlyRdmaOpCode(rdmaOpCode)) begin
             pendingWorkReqPipeOut4Ref.deq;
+            validPsnReg <= False;
 
             let isReadWR = isReadWorkReq(refPendingWR.wr.opcode);
             if (isReadWR) begin
@@ -178,6 +179,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
         end
         else if (isLastRdmaOpCode(rdmaOpCode)) begin
             pendingWorkReqPipeOut4Ref.deq;
+            validPsnReg <= False;
 
             immAssert(
                 bth.psn == wrEndPSN,
@@ -186,6 +188,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
             );
         end
         else if (isFirstRdmaOpCode(rdmaOpCode)) begin
+            validPsnReg <= True;
             immAssert(
                 bth.psn == wrStartPSN,
                 "bth.psn first request packet assertion @ mkTestReqGenNormalCase",
