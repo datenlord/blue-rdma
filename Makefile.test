@@ -20,7 +20,9 @@ TESTBENCHS = \
             TestSpecialFIFOF.bsv \
             TestTransportLayer.bsv \
             TestUtils.bsv \
-            TestWorkCompGen.bsv
+            TestWorkCompGen.bsv \
+            TestPayloadGen.bsv \
+            TestSendQ.bsv
 
 SimDma.bsv                       = mkTestFixedPktLenDataStreamPipeOut \
                                     mkTestDmaReadAndWriteSrv
@@ -102,6 +104,24 @@ TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \
                                     mkTestWorkCompGenErrFlushCaseRQ \
                                     mkTestWorkCompGenNormalCaseSQ \
                                     mkTestWorkCompGenErrFlushCaseSQ
+
+TestPayloadGen.bsv               = mkTestAddrChunkSrv \
+                                    mkTestDmaReadCntrlScatterGatherListCase \
+                                    mkTestDmaReadCntrlNormalCase \
+                                    mkTestDmaReadCntrlCancelCase \
+                                    mkTestMergeNormalPayloadEachSGE \
+                                    mkTestMergeSmallPayloadEachSGE \
+                                    mkTestMergeNormalPayloadAllSGE \
+                                    mkTestMergeSmallPayloadAllSGE \
+                                    mkTestAdjustNormalPayloadSegmentCase \
+                                    mkTestAdjustSmallPayloadSegmentCase \
+                                    mkTestPayloadGenNormalCase \
+                                    mkTestPayloadGenSmallCase \
+                                    mkTestPayloadGenZeroCase
+
+TestSendQ.bsv                    = mkTestSendQueueRawPktCase \
+                                    mkTestSendQueueNormalCase \
+                                    mkTestSendQueueNoPayloadCase
 
 all: $(TESTBENCHS)
 

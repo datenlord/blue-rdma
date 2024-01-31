@@ -370,7 +370,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         let payloadFrag = payloadPipeIn.first;
         payloadPipeIn.deq;
         let payloadHasSingleFrag = payloadFrag.isFirst && payloadFrag.isLast;
-        let fragHasNoData = isZero(payloadFrag.byteEn);
+        let fragHasNoData = isZeroByteEn(payloadFrag.byteEn);
 
         if (payloadFrag.isFirst) begin
             let rdmaHeader = rdmaHeaderPipeOut.first;
@@ -662,7 +662,7 @@ module mkInputRdmaPktBufAndHeaderValidation#(
             )
         );
         let fragLen         = unwrapMaybe(payloadFragLen);
-        let isByteEnNonZero = !isZeroR(fragLen);
+        let isByteEnNonZero = !isZeroByteEn(payloadFrag.byteEn);
         let isByteEnAllOne  = isAllOnesR(payloadFrag.byteEn);
         ByteEnBitNum fragLenWithOutPad = fragLen - zeroExtend(bthPadCnt);
 

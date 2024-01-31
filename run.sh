@@ -116,6 +116,24 @@ mkdir -p $LOG_DIR
 # make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseSQ 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseSQ 2>&1 | tee -a $ALL_LOG
 
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestAddrChunkSrv
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestDmaReadCntrlScatterGatherListCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestDmaReadCntrlNormalCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestDmaReadCntrlCancelCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestMergeNormalPayloadEachSGE
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestMergeSmallPayloadEachSGE
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestMergeNormalPayloadAllSGE
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestMergeSmallPayloadAllSGE
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestAdjustNormalPayloadSegmentCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestAdjustSmallPayloadSegmentCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestPayloadGenNormalCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestPayloadGenSmallCase
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestPayloadGenZeroCase
+
+# make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueRawPktCase
+# make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueNormalCase
+# make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueNoPayloadCase
+
 make -j8 -f Makefile.test all TESTDIR=$TEST_DIR LOGDIR=$LOG_DIR
 cat $LOG_DIR/*.log | tee $ALL_LOG
 

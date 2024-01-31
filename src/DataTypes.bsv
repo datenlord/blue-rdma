@@ -37,8 +37,10 @@ typedef AETH_VALUE_WIDTH TIMER_WIDTH;
 typedef TLog#(MAX_SGE)          SGE_IDX_WIDTH;
 typedef TAdd#(1, SGE_IDX_WIDTH) SGE_NUM_WIDTH;
 
-// 12 + 4 + 28 = 44 bytes
-typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
+// 12 + 4 + 16 + 16 = 48 bytes
+typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), TAdd#(RETH_BYTE_WIDTH, LETH_BYTE_WIDTH)) HEADER_MAX_BYTE_LENGTH;
+// // 12 + 4 + 28 = 44 bytes
+// typedef TAdd#(TAdd#(BTH_BYTE_WIDTH, XRCETH_BYTE_WIDTH), ATOMIC_ETH_BYTE_WIDTH) HEADER_MAX_BYTE_LENGTH;
 
 typedef TDiv#(DATA_BUS_WIDTH, 8)   DATA_BUS_BYTE_WIDTH; // 32
 typedef TLog#(DATA_BUS_BYTE_WIDTH) DATA_BUS_BYTE_NUM_WIDTH; // 5
@@ -183,6 +185,7 @@ typedef struct {
     HeaderFragNum headerFragNum;
     ByteEnBitNum lastFragValidByteNum;
     Bool hasPayload;
+    Bool isEmptyHeader;
 } HeaderMetaData deriving(Bits, Bounded, Eq);
 
 instance FShow#(HeaderMetaData);
@@ -196,8 +199,8 @@ endinstance
 
 // HeaderData and HeaderByteEn are left aligned
 typedef struct {
-    HeaderData headerData;
-    HeaderByteEn headerByteEn;
+    HeaderData     headerData;
+    HeaderByteEn   headerByteEn;
     HeaderMetaData headerMetaData;
 } RdmaHeader deriving(Bits, Bounded, FShow);
 
