@@ -91,16 +91,11 @@ module mkHeader2DataStream#(
         //     "time=%0t: dataStream.data=%h, dataStream.byteEn=%h, leftShiftHeaderData=%h, leftShiftHeaderByteEn=%h",
         //     $time, dataStream.data, dataStream.byteEn, leftShiftHeaderData, leftShiftHeaderByteEn
         // );
-        // let bth = extractBTH(curHeader.headerData);
-        // if (bth.opcode == ACKNOWLEDGE) begin
-        //     $display(
-        //         "time=%0t: mkHeader2DataStream outputHeader", $time,
-        //         ", bth.psn=%h, bth.opcode=", bth.psn, fshow(bth.opcode)
-        //     );
-        // end
+
         if (!curHeader.headerMetaData.isEmptyHeader) begin
             headerDataStreamOutQ.enq(dataStream);
         end
+
         let bth = extractBTH(curHeader.headerData);
         // $display(
         //     "time=%0t: mkHeader2DataStream outputHeader", $time,
@@ -352,7 +347,7 @@ module mkPrependHeader2PipeOut#(
             preDataStreamReg <= headerLastFragDataStream;
             // $display(
             //     "time=%0t: mkPrependHeader2PipeOut outputHeader", $time,
-            //     ", headerHasPayloadReg=%b", headerHasPayloadReg,
+            //     ", headerHasPayloadReg=", fshow(headerHasPayloadReg),
             //     ", headerLastFragValidByteNum=%0d", headerLastFragValidByteNumReg,
             //     ", headerLastFragValidBitNum=%0d", headerLastFragValidBitNumReg,
             //     ", headerLastFragInvalidByteNum=%0d", headerLastFragInvalidByteNumReg,

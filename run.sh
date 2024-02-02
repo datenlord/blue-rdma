@@ -133,6 +133,7 @@ mkdir -p $LOG_DIR
 # make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueRawPktCase
 # make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueNormalCase
 # make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueNoPayloadCase
+# make -j8 TESTFILE=TestSendQ.bsv TOPMODULE=mkTestSendQueueZeroPayloadLenCase
 
 make -j8 -f Makefile.test all TESTDIR=$TEST_DIR LOGDIR=$LOG_DIR
 cat $LOG_DIR/*.log | tee $ALL_LOG
