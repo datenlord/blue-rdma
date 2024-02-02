@@ -57,12 +57,11 @@ typedef struct {
     IP dqpIP;
     MAC macAddr;
     ScatterGatherList sgl;
+    Length totalLen;
     ADDR raddr;
     RKEY rkey;
-    // PKEY pkey;
     QPN sqpn; // TODO: remove it
     QPN dqpn;
-    // Bool solicited; // Relevant only for the Send and RDMA Write with immediate data
     Maybe#(Long) comp;
     Maybe#(Long) swap;
     Maybe#(ImmOrRKey) immDtOrInvRKey;
@@ -83,6 +82,7 @@ instance FShow#(WorkQueueElem);
             ", dqpIP=", fshow(wqe.dqpIP),
             ", macAddr=%h", wqe.macAddr,
             ", sgl=", fshow(wqe.sgl),
+            ", totalLen=%0d", wqe.totalLen,
             ", rkey=%h", wqe.rkey,
             ", raddr=%h", wqe.raddr,
             ", sqpn=%h", wqe.sqpn,
@@ -136,19 +136,14 @@ typedef struct {
     Bool         isLast;
 } MergedMetaDataSGE deriving(Bits, FShow);
 
-typedef struct {
-    QPN       sqpn; // TODO: remove it
-    WorkReqID wrID; // TODO: remove it
-    Length    totalLen;
-    PMTU      pmtu;
-    // NumSGE    sgeNum;
-    // PktFragNum pmtuFragNum;
-    // PktLen pmtuLen;
-} TotalPayloadLenMetaDataSGL deriving(Bits, FShow);
+// typedef struct {
+//     QPN       sqpn; // TODO: remove it
+//     WorkReqID wrID; // TODO: remove it
+//     Length    totalLen;
+//     PMTU      pmtu;
+// } TotalPayloadLenMetaDataSGL deriving(Bits, FShow);
 
 typedef struct {
-    // QPN          sqpn; // TODO: remove it
-    // WorkReqID    wrID; // TODO: remove it
     PktLen       firstPktLen;
     PktFragNum   firstPktFragNum;
     ByteEnBitNum firstPktLastFragValidByteNum;
@@ -164,15 +159,12 @@ typedef struct {
     PktNum       adjustedPktNum;
     PktNum       origPktNum;
     PMTU         pmtu;
-    // Length       totalLen;
 } AdjustedTotalPayloadMetaData deriving(Bits, FShow);
 
 typedef struct {
-    // DmaReqSrcType initiator;
     ScatterGatherList sgl;
+    Length totalLen;
     QPN sqpn; // TODO: remove it
-    // ADDR startAddr;
-    // Length len;
     WorkReqID wrID; // TODO: remove it
 } DmaReadMetaDataSGL deriving(Bits, FShow);
 
@@ -613,15 +605,14 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
 endmodule
 */
 typedef struct {
-    // DmaReqSrcType     initiator;
     DmaReadMetaDataSGL sglDmaReadMetaData;
     PMTU               pmtu;
 } DmaReadCntrlReq deriving(Bits, FShow);
 
 typedef struct {
     DmaReadResp dmaReadResp;
-    Bool        isOrigFirst;
-    Bool        isOrigLast;
+    Bool        isFirstFragInSGL;
+    Bool        isLastFragInSGL;
 } DmaReadCntrlResp deriving(Bits, FShow);
 
 typedef Server#(DmaReadCntrlReq, DmaReadCntrlResp) DmaCntrlReadSrv;
@@ -636,7 +627,7 @@ interface DmaReadCntrl;
     interface DmaCntrlReadSrv srvPort;
     interface DmaCntrl dmaCntrl;
     interface PipeOut#(PktMetaDataSGE) sgePktMetaDataPipeOut;
-    interface PipeOut#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataPipeOut;
+    // interface PipeOut#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataPipeOut;
     interface PipeOut#(MergedMetaDataSGE) sgeMergedMetaDataPipeOut;
 endinterface
 
@@ -645,12 +636,13 @@ module mkDmaReadCntrl#(
 )(DmaReadCntrl);
     FIFOF#(DmaReadCntrlReq)   reqQ <- mkFIFOF;
     FIFOF#(DmaReadCntrlResp) respQ <- mkFIFOF;
-    FIFOF#(MergedMetaDataSGE)       sgeMergedMetaDataOutQ <- mkSizedFIFOF(valueOf(MAX_SGE));
-    FIFOF#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataOutQ <- mkFIFOF;
+    FIFOF#(MergedMetaDataSGE) sgeMergedMetaDataOutQ <- mkSizedFIFOF(valueOf(MAX_SGE));
+    // FIFOF#(TotalPayloadLenMetaDataSGL) sglTotalPayloadLenMetaDataOutQ <- mkFIFOF;
 
+    FIFOF#(Tuple2#(ScatterGatherElem, PMTU)) pendingScatterGatherElemQ <- mkSizedFIFOF(valueOf(MAX_SGE));
+    FIFOF#(LKEY) pendingLKeyQ <- mkFIFOF;
     FIFOF#(Tuple2#(QPN, WorkReqID)) pendingDmaCntrlReqQ <- mkFIFOF; // TODO: remove it
     FIFOF#(Tuple2#(Bool, Bool))     pendingDmaReadReqQ <- mkFIFOF;
-    FIFOF#(Tuple2#(ScatterGatherElem, PMTU)) pendingScatterGatherElemQ <- mkSizedFIFOF(valueOf(MAX_SGE));
 
     let addrChunkSrv <- mkAddrChunkSrv(clearAll);
 
@@ -664,9 +656,12 @@ module mkDmaReadCntrl#(
     rule resetAndClear if (clearAll);
         reqQ.clear;
         respQ.clear;
+        sgeMergedMetaDataOutQ.clear;
+        // sglTotalPayloadLenMetaDataOutQ.clear;
 
-        pendingDmaCntrlReqQ.clear;
         pendingScatterGatherElemQ.clear;
+        pendingLKeyQ.clear;
+        pendingDmaCntrlReqQ.clear;
         pendingDmaReadReqQ.clear;
 
         cancelReg[1]       <= False;
@@ -689,8 +684,8 @@ module mkDmaReadCntrl#(
             !isZeroR(sge.len),
             "zero SGE assertion @ mkDmaReadCntrl",
             $format(
-                "sge.len=%d", sge.len,
-                " should not be zero when sglIdxReg=%d", sglIdxReg
+                "sge.len=%0d", sge.len,
+                " should not be zero when sglIdxReg=%0d", sglIdxReg
             )
         );
 
@@ -703,14 +698,6 @@ module mkDmaReadCntrl#(
         };
         sgeMergedMetaDataOutQ.enq(sgeMergedMetaData);
         pendingScatterGatherElemQ.enq(tuple2(sge, dmaReadCntrlReq.pmtu));
-        // let addrChunkReq = AddrChunkReq {
-        //     startAddr: sge.laddr,
-        //     len      : sge.len,
-        //     pmtu     : dmaReadCntrlReq.pmtu,
-        //     isFirst  : sge.isFirst,
-        //     isLast   : sge.isLast
-        // };
-        // addrChunkSrv.srvPort.request.put(addrChunkReq);
 
         let curSQPN = dmaReadCntrlReq.sglDmaReadMetaData.sqpn;
         let curWorkReqID = dmaReadCntrlReq.sglDmaReadMetaData.wrID;
@@ -735,18 +722,17 @@ module mkDmaReadCntrl#(
                 "first SGE assertion @ mkDmaReadCntrl",
                 $format(
                     "sge.isFirst=", fshow(sge.isFirst),
-                    " should be true when sglIdxReg=%d", sglIdxReg
+                    " should be true when sglIdxReg=%0d", sglIdxReg
                 )
             );
         end
-        // if (sglIdxReg == valueOf(TSub#(MAX_SGE, 1))) begin
         if (isAllOnesR(sglIdxReg)) begin
             immAssert(
                 sge.isLast,
                 "last SGE assertion @ mkDmaReadCntrl",
                 $format(
                     "sge.isLast=", fshow(sge.isLast),
-                    " should be true when sglIdxReg=%d", sglIdxReg
+                    " should be true when sglIdxReg=%0d", sglIdxReg
                 )
             );
         end
@@ -755,14 +741,22 @@ module mkDmaReadCntrl#(
             reqQ.deq;
             sglIdxReg <= 0;
 
-            let sglTotalPayloadLenMetaData = TotalPayloadLenMetaDataSGL {
-                sqpn    : curSQPN,
-                wrID    : curWorkReqID,
-                totalLen: totalLen,
-                // sgeNum  : sgeNum,
-                pmtu    : dmaReadCntrlReq.pmtu
-            };
-            sglTotalPayloadLenMetaDataOutQ.enq(sglTotalPayloadLenMetaData);
+            // let sglTotalPayloadLenMetaData = TotalPayloadLenMetaDataSGL {
+            //     sqpn    : curSQPN,
+            //     wrID    : curWorkReqID,
+            //     totalLen: totalLen,
+            //     pmtu    : dmaReadCntrlReq.pmtu
+            // };
+            // sglTotalPayloadLenMetaDataOutQ.enq(sglTotalPayloadLenMetaData);
+            immAssert(
+                totalLen == dmaReadCntrlReq.sglDmaReadMetaData.totalLen,
+                "totalLen assertion @ mkDmaReadCntrl",
+                $format(
+                    "dmaReadCntrlReq.sglDmaReadMetaData.totalLen=%0d",
+                    dmaReadCntrlReq.sglDmaReadMetaData.totalLen,
+                    " should == totalLen=%0d", totalLen
+                )
+            );
             // $display(
             //     "time=%0t: mkDmaReadCntrl recvReq", $time,
             //     ", sqpn=%h", curSQPN,
@@ -802,13 +796,19 @@ module mkDmaReadCntrl#(
             isLast   : sge.isLast
         };
         addrChunkSrv.srvPort.request.put(addrChunkReq);
+
+        pendingLKeyQ.enq(sge.lkey);
+        // $display(
+        //     "time=%0t: mkDmaReadCntrl issueChunkReq", $time,
+        //     ", addrChunkReq=", fshow(addrChunkReq)
+        // );
     endrule
 
     rule issueDmaReq if (!clearAll && !cancelReg[1]);
         let addrChunkResp <- addrChunkSrv.srvPort.response.get;
 
+        let lkey = pendingLKeyQ.first;
         let { curSQPN, curWorkReqID } = pendingDmaCntrlReqQ.first;
-        // let pendingSGE = pendingScatterGatherElemQ.first;
 
         let dmaReadReq = DmaReadReq {
             initiator: DMA_SRC_SQ_RD,
@@ -817,19 +817,16 @@ module mkDmaReadCntrl#(
             len      : addrChunkResp.chunkLen,
             wrID     : curWorkReqID
         };
-
         dmaReadSrv.request.put(dmaReadReq);
 
-        // let curSGE = pendingScatterGatherElemQ.first;
-        // let isFirstDmaReqChunk = addrChunkResp.isFirst && curSGE.isFirst;
-        // let isLastDmaReqChunk  = addrChunkResp.isLast && curSGE.isLast;
+        let isLastChunkInSGE   = addrChunkResp.isLast;
         let isFirstDmaReqChunk = addrChunkResp.isFirst && addrChunkResp.isOrigFirst;
-        let isLastDmaReqChunk  = addrChunkResp.isLast && addrChunkResp.isOrigLast;
+        let isLastDmaReqChunk  = addrChunkResp.isLast  && addrChunkResp.isOrigLast;
         pendingDmaReadReqQ.enq(tuple2(isFirstDmaReqChunk, isLastDmaReqChunk));
 
-        // if (addrChunkResp.isLast) begin
-        //     pendingScatterGatherElemQ.deq;
-        // end
+        if (isLastChunkInSGE) begin
+            pendingLKeyQ.deq;
+        end
         if (isLastDmaReqChunk) begin
             pendingDmaCntrlReqQ.deq;
         end
@@ -847,13 +844,13 @@ module mkDmaReadCntrl#(
 
         let { isFirstDmaReqChunk, isLastDmaReqChunk } = pendingDmaReadReqQ.first;
 
-        let isOrigFirst = dmaResp.dataStream.isFirst && isFirstDmaReqChunk;
-        let isOrigLast  = dmaResp.dataStream.isLast && isLastDmaReqChunk;
+        let isFirstFragInSGL = dmaResp.dataStream.isFirst && isFirstDmaReqChunk;
+        let isLastFragInSGL  = dmaResp.dataStream.isLast && isLastDmaReqChunk;
 
         let dmaReadCntrlResp = DmaReadCntrlResp {
-            dmaReadResp: dmaResp,
-            isOrigFirst: isOrigFirst,
-            isOrigLast : isOrigLast
+            dmaReadResp     : dmaResp,
+            isFirstFragInSGL: isFirstFragInSGL,
+            isLastFragInSGL : isLastFragInSGL
         };
         respQ.enq(dmaReadCntrlResp);
 
@@ -893,7 +890,7 @@ module mkDmaReadCntrl#(
         method Bool isIdle() = gracefulStopReg[0];
     endinterface;
 
-    interface sglTotalPayloadLenMetaDataPipeOut = toPipeOut(sglTotalPayloadLenMetaDataOutQ);
+    // interface sglTotalPayloadLenMetaDataPipeOut = toPipeOut(sglTotalPayloadLenMetaDataOutQ);
     interface sgeMergedMetaDataPipeOut = toPipeOut(sgeMergedMetaDataOutQ);
     interface sgePktMetaDataPipeOut = addrChunkSrv.sgePktMetaDataPipeOut;
 endmodule
@@ -1782,6 +1779,7 @@ typedef struct {
     WorkReqID         wrID; // TODO: remote it
     QPN               sqpn; // TODO: remote it
     ScatterGatherList sgl;
+    Length            totalLen;
     ADDR              raddr;
     PMTU              pmtu;
 } PayloadGenReqSG deriving(Bits, FShow);
@@ -1795,9 +1793,8 @@ typedef struct {
 } PayloadGenRespSG deriving(Bits, FShow);
 
 typedef struct {
-    Length totalLen;
+    // Length totalLen;
     PktNum totalPktNum;
-    // PMTU   pmtu;
     Bool   isOnlyPkt;
     Bool   isZeroPayloadLen;
 } PayloadGenTotalMetaData deriving(Bits, FShow);
@@ -1895,24 +1892,27 @@ module mkPayloadGenerator#(
 
         let sglIdx = 0;
         let sge = payloadGenReq.sgl[sglIdx];
-        // If first SGE has zero length, then whole SGL has no payload
-        let isZeroPayloadLen = isZeroR(sge.len);
-        // if (isZeroPayloadLen) begin
-        //     immAssert(
-        //         sge.isLast,
-        //         "last SGE assertion @ mkDmaReadCntrl",
-        //         $format(
-        //             "sge.isLast=", fshow(sge.isLast),
-        //             " should be true when sglIdx=%d", sglIdx,
-        //             ", and sge.len=%d", sge.len
-        //         )
-        //     );
-        // end
+        // // If first SGE has zero length, then whole SGL has no payload
+        // let isZeroPayloadLen = isZeroR(sge.len);
+        let isZeroPayloadLen = isZeroR(payloadGenReq.totalLen);
+        if (isZeroPayloadLen) begin
+            immAssert(
+                sge.isLast,
+                "last SGE assertion @ mkDmaReadCntrl",
+                $format(
+                    "sge.isLast=", fshow(sge.isLast),
+                    " should be true when sglIdx=%0d", sglIdx,
+                    ", sge.len=%0d", sge.len,
+                    ", and totalLen=%0d", payloadGenReq.totalLen
+                )
+            );
+        end
 
         if (!isZeroPayloadLen) begin
             let dmaReadCntrlReq = DmaReadCntrlReq {
                 sglDmaReadMetaData: DmaReadMetaDataSGL {
                     sgl           : payloadGenReq.sgl,
+                    totalLen      : payloadGenReq.totalLen,
                     sqpn          : payloadGenReq.sqpn,
                     wrID          : payloadGenReq.wrID
                 },
@@ -1936,13 +1936,12 @@ module mkPayloadGenerator#(
         let { payloadGenReq, isZeroPayloadLen } = adjustReqPktLenQ.first;
         adjustReqPktLenQ.deq;
 
-        let totalLen = 0;
-        if (!isZeroPayloadLen) begin
-            let sglTotalPayloadLenMetaData = dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.first;
-            dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.deq;
-            totalLen = sglTotalPayloadLenMetaData.totalLen;
-        end
-
+        let totalLen = payloadGenReq.totalLen;
+        // if (!isZeroPayloadLen) begin
+        //     let sglTotalPayloadLenMetaData = dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.first;
+        //     dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.deq;
+        //     totalLen = sglTotalPayloadLenMetaData.totalLen;
+        // end
         let { truncatedPktNum, residue } = truncateLenByPMTU(totalLen, payloadGenReq.pmtu);
         let origPktNum = truncatedPktNum + (isZeroR(residue) ? 0 : 1);
 
@@ -2008,7 +2007,6 @@ module mkPayloadGenerator#(
             adjustedPktNum               : totalPktNum,
             origPktNum                   : origPktNum,
             pmtu                         : pmtu
-            // totalLen                     : totalLen
         };
         if (!isZeroPayloadLen) begin
             adjustedTotalPayloadMetaDataQ.enq(adjustedTotalPayloadMetaData);
@@ -2032,9 +2030,8 @@ module mkPayloadGenerator#(
         addPadCntQ.enq(paddingMetaData);
 
         let totalMetaData = PayloadGenTotalMetaData {
-            totalLen        : totalLen,
+            // totalLen        : totalLen,
             totalPktNum     : totalPktNum,
-            // pmtu            : pmtu,
             isOnlyPkt       : isOnlyPkt,
             isZeroPayloadLen: isZeroPayloadLen
         };
@@ -2071,12 +2068,12 @@ module mkPayloadGenerator#(
             (fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)) - zeroExtend(lastPktPadCnt)  >= lastPktLastFragValidByteNum),
             "zero SGE assertion @ mkPayloadGenerator",
             $format(
-                "firstPktLastFragValidByteNum=%d", firstPktLastFragValidByteNum,
-                " + firstPktPadCnt=%d", firstPktPadCnt,
-                " should not > DATA_BUS_BYTE_WIDTH=%d", valueOf(DATA_BUS_BYTE_WIDTH),
-                ", and lastPktLastFragValidByteNum=%d", lastPktLastFragValidByteNum,
-                " + lastPktPadCnt=%d", lastPktPadCnt,
-                " should not > DATA_BUS_BYTE_WIDTH=%d", valueOf(DATA_BUS_BYTE_WIDTH)
+                "firstPktLastFragValidByteNum=%0d", firstPktLastFragValidByteNum,
+                " + firstPktPadCnt=%0d", firstPktPadCnt,
+                " should not > DATA_BUS_BYTE_WIDTH=%0d", valueOf(DATA_BUS_BYTE_WIDTH),
+                ", and lastPktLastFragValidByteNum=%0d", lastPktLastFragValidByteNum,
+                " + lastPktPadCnt=%0d", lastPktPadCnt,
+                " should not > DATA_BUS_BYTE_WIDTH=%0d", valueOf(DATA_BUS_BYTE_WIDTH)
             )
         );
         let oneAsPSN   = 1;
@@ -2123,24 +2120,24 @@ module mkPayloadGenerator#(
             let curPayloadFrag = adjustedPayloadPipeOut.first;
             adjustedPayloadPipeOut.deq;
 
-            let isFirstPktLastFrag = curPayloadFrag.isLast && isFirstPkt;
-            let isLastPktLastFrag  = curPayloadFrag.isLast && isLastPkt;
+            let isLastFragInFirstPkt = curPayloadFrag.isLast && isFirstPkt;
+            let isLastFragInLastPkt  = curPayloadFrag.isLast && isLastPkt;
 
-            if (isLastPktLastFrag) begin
+            if (isLastFragInLastPkt) begin
                 addPadCntQ.deq;
 
                 if (shouldAddPadding) begin
                     curPayloadFrag.byteEn = lastPktLastFragByteEnWithPadding;
                 end
             end
-            if (isFirstPktLastFrag) begin
+            if (isLastFragInFirstPkt) begin
                 if (shouldAddPadding) begin
                     curPayloadFrag.byteEn = firstPktLastFragByteEnWithPadding;
                 end
             end
 
             if (curPayloadFrag.isLast) begin
-                isFirstPktReg      <= isLastPktLastFrag;
+                isFirstPktReg      <= isLastFragInLastPkt;
                 pktRemoteAddrReg   <= nextRemoteAddr;
                 remainingPktNumReg <= remainingPktNum;
             end
@@ -2167,8 +2164,8 @@ module mkPayloadGenerator#(
             //     ", remainingPktNumReg=%0d", remainingPktNumReg,
             //     ", isFirstPktReg=", fshow(isFirstPktReg),
             //     ", isOnlyPkt=", fshow(isOnlyPkt),
-            //     ", isFirstPktLastFrag=", fshow(isFirstPktLastFrag),
-            //     ", isLastPktLastFrag=", fshow(isLastPktLastFrag),
+            //     ", isLastFragInFirstPkt=", fshow(isLastFragInFirstPkt),
+            //     ", isLastFragInLastPkt=", fshow(isLastFragInLastPkt),
             //     ", isFirstPkt=", fshow(isFirstPkt),
             //     ", isLastPkt=", fshow(isLastPkt),
             //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),

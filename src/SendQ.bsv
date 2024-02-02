@@ -584,7 +584,7 @@ module mkSendQ#(
 
     // Pipeline FIFOF
     FIFOF#(Tuple3#(WorkQueueElem, Bool, Bool)) totalMetaDataQ <- mkFIFOF;
-    FIFOF#(Tuple6#(WorkQueueElem, Length, PktNum, Bool, Bool, Bool)) psnUpdateQ <- mkFIFOF;
+    FIFOF#(Tuple7#(WorkQueueElem, Length, PktNum, Bool, Bool, Bool, Bool)) psnUpdateQ <- mkFIFOF;
     FIFOF#(Tuple2#(WorkQueueElem, HeaderGenInfo)) headerPrepareQ <- mkFIFOF;
     FIFOF#(Tuple6#(MAC, IP, Maybe#(PktHeaderInfo), PktLen, Bool, Bool)) pendingHeaderQ <- mkFIFOF;
     FIFOF#(RdmaHeader) pktHeaderQ <- mkFIFOF;
@@ -719,23 +719,24 @@ module mkSendQ#(
 
         let qpRawPkt = isRawPktTypeQP(wqe.qpType);
         let isSendWR = isSendWorkReq(wqe.opcode);
-        let needPayloadGen = qpRawPkt || workReqNeedPayloadGen(wqe.opcode);
+        let shouldGenPayload = qpRawPkt || workReqNeedPayloadGen(wqe.opcode);
 
         let remoteAddr = wqe.raddr;
         if (qpRawPkt || isSendWR) begin
             remoteAddr = 0;
         end
-        if (needPayloadGen) begin
+        if (shouldGenPayload) begin
             let payloadGenReq = PayloadGenReqSG {
-                wrID : wqe.id,
-                sqpn : wqe.sqpn,
-                sgl  : wqe.sgl,
-                raddr: remoteAddr,
-                pmtu : wqe.pmtu
+                wrID    : wqe.id,
+                sqpn    : wqe.sqpn,
+                sgl     : wqe.sgl,
+                totalLen: wqe.totalLen,
+                raddr   : remoteAddr,
+                pmtu    : wqe.pmtu
             };
             payloadGenerator.srvPort.request.put(payloadGenReq);
         end
-        totalMetaDataQ.enq(tuple3(wqe, qpRawPkt, needPayloadGen));
+        totalMetaDataQ.enq(tuple3(wqe, qpRawPkt, shouldGenPayload));
         // TODO: handle pending read/atomic request number limit
 
         // $display(
@@ -744,57 +745,58 @@ module mkSendQ#(
         //     ", id=%h", wqe.id,
         //     ", macAddr=%h", wqe.macAddr,
         //     ", pmtu=", fshow(wqe.pmtu),
-        //     ", needPayloadGen=", fshow(needPayloadGen)
+        //     ", shouldGenPayload=", fshow(shouldGenPayload)
         // );
     endrule
 
     rule recvTotalMetaData if (!clearAll);
-        let { wqe, qpRawPkt, needPayloadGen } = totalMetaDataQ.first;
+        let { wqe, qpRawPkt, shouldGenPayload } = totalMetaDataQ.first;
         totalMetaDataQ.deq;
 
         let sglZeroIdx  = 0;
-        let hasPayload  =  needPayloadGen;
-        let isOnlyPkt   = !needPayloadGen;
-        let totalLen    = wqe.sgl[sglZeroIdx].len;
+        let hasPayload  =  shouldGenPayload;
+        let isOnlyPkt   = !shouldGenPayload;
+        let totalLen    = wqe.totalLen; // wqe.sgl[sglZeroIdx].len;
         let totalPktNum = 1;
-        if (needPayloadGen) begin
+
+        if (!wqe.isFirst && !wqe.isLast) begin
+            immAssert(
+                !isOnlyPkt &&
+                totalLen == fromInteger(valueOf(WQE_SLICE_MAX_SIZE)),
+                "wqe slice length assertion @ mkSendQ",
+                $format(
+                    "totalLen=%0d", totalLen,
+                    " should == WQE_SLICE_MAX_SIZE=%0d", valueOf(WQE_SLICE_MAX_SIZE),
+                    ", and isOnlyPkt=", fshow(isOnlyPkt),
+                    " should be false when wqe.isFirst=", fshow(wqe.isFirst),
+                    " and wqe.isLast=", fshow(wqe.isLast)
+                )
+            );
+        end
+        else if (!wqe.isFirst && wqe.isLast) begin
+            immAssert(
+                fromInteger(valueOf(WQE_SLICE_MAX_SIZE)) >= totalLen,
+                "wqe slice length assertion @ mkSendQ",
+                $format(
+                    "totalLen=%0d", totalLen,
+                    " should be no more than WQE_SLICE_MAX_SIZE=%0d", valueOf(WQE_SLICE_MAX_SIZE),
+                    " when wqe.isFirst=", fshow(wqe.isFirst),
+                    " and wqe.isLast=", fshow(wqe.isLast)
+                )
+            );
+        end
+
+        if (shouldGenPayload) begin
             let payloadTotalMetaData = payloadGenerator.totalMetaDataPipeOut.first;
             payloadGenerator.totalMetaDataPipeOut.deq;
 
             hasPayload  = !payloadTotalMetaData.isZeroPayloadLen;
             isOnlyPkt   =  payloadTotalMetaData.isOnlyPkt;
-            totalLen    =  payloadTotalMetaData.totalLen;
+            // totalLen    =  payloadTotalMetaData.totalLen;
             totalPktNum =  payloadTotalMetaData.totalPktNum;
-
-            if (!wqe.isFirst && !wqe.isLast) begin
-                immAssert(
-                    !isOnlyPkt &&
-                    payloadTotalMetaData.totalLen == fromInteger(valueOf(WQE_SLICE_MAX_SIZE)),
-                    "wqe slice length assertion @ mkSendQ",
-                    $format(
-                        "payloadTotalMetaData.totalLen=%0d", payloadTotalMetaData.totalLen,
-                        " should == WQE_SLICE_MAX_SIZE=%0d", valueOf(WQE_SLICE_MAX_SIZE),
-                        ", and isOnlyPkt=", fshow(isOnlyPkt),
-                        " should be false when wqe.isFirst=", fshow(wqe.isFirst),
-                        " and wqe.isLast=", fshow(wqe.isLast)
-                    )
-                );
-            end
-            else if (!wqe.isFirst && wqe.isLast) begin
-                immAssert(
-                    fromInteger(valueOf(WQE_SLICE_MAX_SIZE)) >= payloadTotalMetaData.totalLen,
-                    "wqe slice length assertion @ mkSendQ",
-                    $format(
-                        "payloadTotalMetaData.totalLen=%0d", payloadTotalMetaData.totalLen,
-                        " should be no more than WQE_SLICE_MAX_SIZE=%0d", valueOf(WQE_SLICE_MAX_SIZE),
-                        " when wqe.isFirst=", fshow(wqe.isFirst),
-                        " and wqe.isLast=", fshow(wqe.isLast)
-                    )
-                );
-            end
         end
-        psnUpdateQ.enq(tuple6(
-            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt, qpRawPkt
+        psnUpdateQ.enq(tuple7(
+            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, qpRawPkt
         ));
         // $display(
         //     "time=%0t: mkSendQ 2nd stage recvTotalMetaData", $time,
@@ -806,13 +808,13 @@ module mkSendQ#(
         //     ", qpRawPkt=", fshow(qpRawPkt),
         //     ", hasPayload=", fshow(hasPayload),
         //     ", isOnlyPkt=", fshow(isOnlyPkt),
-        //     ", needPayloadGen=", fshow(needPayloadGen)
+        //     ", shouldGenPayload=", fshow(shouldGenPayload)
         // );
     endrule
 
     rule updatePSN if (!clearAll);
         let {
-            wqe, totalLen, totalPktNum, hasPayload, isOnlyPkt, qpRawPkt
+            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, qpRawPkt
         } = psnUpdateQ.first;
 
         let curPSN = curPsnReg;
@@ -825,13 +827,18 @@ module mkSendQ#(
         let pktPayloadLen = 0;
         let padCnt = 0;
         let wqeLastPkt = isOnlyPkt;
-        if (hasPayload) begin
+        if (shouldGenPayload) begin
             let payloadGenResp <- payloadGenerator.srvPort.response.get;
             remoteAddr    = payloadGenResp.raddr;
             pktPayloadLen = payloadGenResp.pktLen;
             padCnt        = payloadGenResp.padCnt;
             wqeLastPkt    = payloadGenResp.isLast;
         end
+        // let payloadGenResp <- payloadGenerator.srvPort.response.get;
+        // let remoteAddr      = payloadGenResp.raddr;
+        // let pktPayloadLen   = payloadGenResp.pktLen;
+        // let padCnt          = payloadGenResp.padCnt;
+        // let wqeLastPkt      = payloadGenResp.isLast;
         wqeFirstPktReg <= wqeLastPkt;
 
         if (wqeLastPkt) begin
@@ -900,6 +907,7 @@ module mkSendQ#(
         //     ", curPSN=%h", curPSN,
         //     ", pktPayloadLen=%0d", pktPayloadLen,
         //     ", padCnt=%0d", padCnt,
+        //     ", hasPayload=", fshow(hasPayload),
         //     ", isFirstPkt=", fshow(isFirstPkt),
         //     ", isLastPkt=", fshow(isLastPkt),
         //     ", isOnlyPkt=", fshow(isOnlyPkt)
@@ -985,7 +993,8 @@ module mkSendQ#(
         //     ", isFirstPkt=", fshow(isFirstPkt),
         //     ", isLastPkt=", fshow(isLastPkt),
         //     ", isOnlyPkt=", fshow(isOnlyPkt),
-        //     ", isValid(maybePktHeaderInfo)=", fshow(isValid(maybePktHeaderInfo))
+        //     ", isValid(maybePktHeaderInfo)=", fshow(isValid(maybePktHeaderInfo)),
+        //     ", hasPayload=", fshow(hasPayload)
         // );
     endrule
 
@@ -1025,7 +1034,8 @@ module mkSendQ#(
             //     ", headerLen=%0d", headerLen,
             //     ", udpPktInfo.macAddr=%h", udpPktInfo.macAddr,
             //     ", udpPktInfo.ipAddr=", fshow(udpPktInfo.ipAddr),
-            //     ", udpPktInfo.pktLen=%0d", udpPktInfo.pktLen
+            //     ", udpPktInfo.pktLen=%0d", udpPktInfo.pktLen,
+            //     ", hasPayload=", fshow(hasPayload)
             // );
         end
     endrule

@@ -121,7 +121,8 @@ TestPayloadGen.bsv               = mkTestAddrChunkSrv \
 
 TestSendQ.bsv                    = mkTestSendQueueRawPktCase \
                                     mkTestSendQueueNormalCase \
-                                    mkTestSendQueueNoPayloadCase
+                                    mkTestSendQueueNoPayloadCase \
+                                    mkTestSendQueueZeroPayloadLenCase
 
 all: $(TESTBENCHS)
 

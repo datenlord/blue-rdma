@@ -34,8 +34,10 @@ module mkSimGenWorkQueueElemByOpCode#(
         IBV_MTU_4096
     );
 
+    let sgeMinNum = 1;
     Vector#(1, PipeOut#(NumSGE)) sgeNumPipeOutVec <-
-        mkRandomValueInRangePipeOut(fromInteger(1), fromInteger(valueOf(MAX_SGE)));
+        mkRandomValueInRangePipeOut(fromInteger(sgeMinNum), fromInteger(valueOf(MAX_SGE)));
+    let sgeNumPipeOut = sgeNumPipeOutVec[0];
 
     PipeOut#(WorkReqID) workReqIdPipeOut <- mkGenericRandomPipeOut;
     PipeOut#(PSN) psnPipeOut <- mkGenericRandomPipeOut;
@@ -55,8 +57,9 @@ module mkSimGenWorkQueueElemByOpCode#(
     Vector#(vSz, PipeOut#(WorkQueueElem)) resultPipeOutVec <-
         mkForkVector(toPipeOut(wqeOutQ));
 
-    Reg#(IdxSGL) sglIdxReg <- mkReg(0);
     Vector#(MAX_SGE, Reg#(ScatterGatherElem)) sglRegVec <- replicateM(mkRegU);
+    Reg#(IdxSGL) sglIdxReg <- mkReg(0);
+    Reg#(Length) totalLenReg <- mkRegU;
     Reg#(Bool) busyReg <- mkReg(True);
 
     rule genSGE if (busyReg);
@@ -68,18 +71,27 @@ module mkSimGenWorkQueueElemByOpCode#(
         let payloadLen = payloadLenPipeOut.first;
         payloadLenPipeOut.deq;
 
-        let isFirst = isZero(sglIdxReg);
-        let isLast  = isAllOnesR(sglIdxReg); // || (sgeNum - 1 == zeroExtend(sglIdxReg));
+        let isZeroPayloadLen = isZero(payloadLen);
+        let isFirstSGE = isZeroPayloadLen || isZero(sglIdxReg);
+        let isLastSGE  = isZeroPayloadLen || isAllOnesR(sglIdxReg) ||
+            (sgeNum - 1 == zeroExtend(sglIdxReg));
         let sge = ScatterGatherElem {
             laddr  : localAddr,
             len    : payloadLen,
             lkey   : dontCareValue,
-            isFirst: isFirst,
-            isLast : isLast
+            isFirst: isFirstSGE,
+            isLast : isLastSGE
         };
         sglRegVec[sglIdxReg] <= sge;
 
-        if (isLast) begin
+        if (isFirstSGE) begin
+            totalLenReg <= payloadLen;
+        end
+        else begin
+            totalLenReg <= totalLenReg + payloadLen;
+        end
+
+        if (isLastSGE) begin
             sgeNumPipeOutVec[0].deq;
             sglIdxReg <= 0;
             busyReg <= False;
@@ -94,8 +106,8 @@ module mkSimGenWorkQueueElemByOpCode#(
         //     ", sglIdxReg=%0d", sglIdxReg,
         //     ", localAddr=%h", localAddr,
         //     ", payloadLen=%0d", payloadLen,
-        //     ", isFirst=", fshow(isFirst),
-        //     ", isLast=", fshow(isLast)
+        //     ", isFirstSGE=", fshow(isFirstSGE),
+        //     ", isLastSGE=", fshow(isLastSGE)
         // );
     endrule
 
@@ -155,27 +167,27 @@ module mkSimGenWorkQueueElemByOpCode#(
         end
 
         let wqe = WorkQueueElem {
-            id     : wrID,
-            opcode : wrOpCode,
-            flags  : enum2Flag(flags),
-            qpType : qpType,
-            psn    : psn,
-            pmtu   : pmtu,
-            dqpIP  : ipAddr,
-            macAddr: macAddr,
-            sgl    : sgl,
-            raddr  : remoteAddr,
-            rkey   : dontCareValue,
-            // pkey   : dontCareValue,
-            sqpn   : sqpn,
-            dqpn   : dqpn,
-            comp   : hasComp ? (tagged Valid comp) : (tagged Invalid),
-            swap   : hasSwap ? (tagged Valid swap) : (tagged Invalid),
+            id            : wrID,
+            opcode        : wrOpCode,
+            flags         : enum2Flag(flags),
+            qpType        : qpType,
+            psn           : psn,
+            pmtu          : pmtu,
+            dqpIP         : ipAddr,
+            macAddr       : macAddr,
+            sgl           : sgl,
+            totalLen      : totalLenReg,
+            raddr         : remoteAddr,
+            rkey          : dontCareValue,
+            sqpn          : sqpn,
+            dqpn          : dqpn,
+            comp          : hasComp ? (tagged Valid comp) : (tagged Invalid),
+            swap          : hasSwap ? (tagged Valid swap) : (tagged Invalid),
             immDtOrInvRKey: hasImmDt ? tagged Valid tagged Imm immDt : (hasInv ? tagged Valid tagged RKey rkey2Inv : tagged Invalid),
-            srqn   : tagged Valid srqn, // for XRC
-            qkey   : tagged Valid qkey, // for UD
-            isFirst: True,
-            isLast : True
+            srqn          : tagged Valid srqn, // for XRC
+            qkey          : tagged Valid qkey, // for UD
+            isFirst       : True,
+            isLast        : True
         };
         wqeOutQ.enq(wqe);
         busyReg <= True;
@@ -221,28 +233,7 @@ module mkRandomWorkQueueElemWithPayload#(
     );
     return resultPipeOutVec;
 endmodule
-/*
-module mkRandomWorkQueueElemRawPkt#(Length fixedLen)(Vector#(vSz, PipeOut#(WorkQueueElem)));
-    Vector#(9, WorkReqOpCode) workReqOpCodeVec = vec(
-        IBV_WR_SEND,
-        IBV_WR_SEND_WITH_IMM,
-        IBV_WR_SEND_WITH_INV,
-        IBV_WR_RDMA_WRITE,
-        IBV_WR_RDMA_WRITE_WITH_IMM,
-        IBV_WR_RDMA_READ,
-        IBV_WR_ATOMIC_CMP_AND_SWP,
-        IBV_WR_ATOMIC_FETCH_AND_ADD,
-        IBV_WR_RDMA_READ_RESP
-    );
-    let qpType = IBV_QPT_RAW_PACKET;
-    let wrFlags = IBV_SEND_NO_FLAGS;
-    let workReqOpCodePipeOut <- mkRandomItemFromVec(workReqOpCodeVec);
-    let resultPipeOutVec <- mkSimGenWorkQueueElemByOpCode(
-        workReqOpCodePipeOut, fixedLen, fixedLen, qpType, wrFlags
-    );
-    return resultPipeOutVec;
-endmodule
-*/
+
 (* doc = "testcase" *)
 module mkTestSendQueueRawPktCase(Empty);
     let pmtu = IBV_MTU_256;
@@ -257,8 +248,6 @@ module mkTestSendQueueRawPktCase(Empty);
     FIFOF#(WorkQueueElem) wqeQ <- mkFIFOF;
     FIFOF#(WorkQueueElem) wqeRefQ <- mkSizedFIFOF(getMaxFragBufSize);
     let wqePipeOut4Ref = toPipeOut(wqeRefQ);
-    // Vector#(2, PipeOut#(WorkQueueElem)) wqePipeOutVec <- mkRandomWorkQueueElemRawPkt(fixedLength);
-    // let wqePipeOut4Ref <- mkBufferN(getMaxFragBufSize, wqePipeOutVec[1]);
 
     // Request payload DataStream generation
     let simDmaReadSrv <- mkSimDmaReadSrvAndDataStreamPipeOut;
@@ -304,27 +293,27 @@ module mkTestSendQueueRawPktCase(Empty);
         let sgl = vec(sge, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE);
 
         let wqe = WorkQueueElem {
-            id     : dontCareValue,
-            opcode : IBV_WR_RDMA_READ, // dontCareValue
-            flags  : enum2Flag(IBV_SEND_NO_FLAGS),
-            qpType : IBV_QPT_RAW_PACKET,
-            psn    : 0,
-            pmtu   : pmtu,
-            dqpIP  : ipAddr,
-            macAddr: macAddr,
-            sgl    : sgl,
-            raddr  : dontCareValue,
-            rkey   : dontCareValue,
-            // pkey   : dontCareValue,
-            sqpn   : getDefaultQPN,
-            dqpn   : getDefaultQPN,
-            comp   : tagged Invalid,
-            swap   : tagged Invalid,
+            id            : dontCareValue,
+            opcode        : IBV_WR_RDMA_READ, // dontCareValue
+            flags         : enum2Flag(IBV_SEND_NO_FLAGS),
+            qpType        : IBV_QPT_RAW_PACKET,
+            psn           : 0,
+            pmtu          : pmtu,
+            dqpIP         : ipAddr,
+            macAddr       : macAddr,
+            sgl           : sgl,
+            totalLen      : zeroExtend(fixedLength),
+            raddr         : dontCareValue,
+            rkey          : dontCareValue,
+            sqpn          : getDefaultQPN,
+            dqpn          : getDefaultQPN,
+            comp          : tagged Invalid,
+            swap          : tagged Invalid,
             immDtOrInvRKey: tagged Invalid,
-            srqn   : tagged Invalid,
-            qkey   : tagged Invalid,
-            isFirst: True,
-            isLast : True
+            srqn          : tagged Invalid,
+            qkey          : tagged Invalid,
+            isFirst       : True,
+            isLast        : True
         };
         wqeQ.enq(wqe);
         wqeRefQ.enq(wqe);
@@ -440,6 +429,16 @@ module mkTestSendQueueNoPayloadCase(Empty);
     );
 endmodule
 
+(* doc = "testcase" *)
+module mkTestSendQueueZeroPayloadLenCase(Empty);
+    let minDmaLength = 0;
+    let maxDmaLength = 0;
+    let genPayload = True;
+    let result <- mkTestSendQueueNormalAndNoPayloadCase(
+        genPayload, minDmaLength, maxDmaLength
+    );
+endmodule
+
 module mkTestSendQueueNormalAndNoPayloadCase#(
     Bool genPayload, Length minDmaLength, Length maxDmaLength
 )(Empty);
@@ -468,11 +467,7 @@ module mkTestSendQueueNormalAndNoPayloadCase#(
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData
     );
-    // // Remove empty payload DataStream
-    // let filteredPayloadDataStreamPipeOut <- mkPipeFilter(
-    //     filterEmptyDataStream,
-    //     headerAndMetaDataAndPayloadPipeOut.payload
-    // );
+
     let udpInfoPipeOut4Ref <- mkBufferN(getMaxFragBufSize, dut.udpInfoPipeOut);
     FIFOF#(Tuple2#(HeaderByteNum, MAC)) headerLenAndMacAddrQ <- mkFIFOF;
 
@@ -485,7 +480,14 @@ module mkTestSendQueueNormalAndNoPayloadCase#(
     // mkSink(wqePipeOut4Ref);
     // mkSink(dut.udpInfoPipeOut);
     // mkSink(dut.rdmaDataStreamPipeOut);
-    // mkSink(filteredPayloadDataStreamPipeOut);
+    // mkSink(rdmaHeaderPipeOut);
+    // mkSink(toPipeOut(headerLenAndMacAddrQ));
+    // mkSink(headerAndMetaDataAndPayloadPipeOut.payload);
+    // mkSink(udpInfoPipeOut4Ref);
+    // rule discardSendResp if (!clearReg);
+    //     let sendResp <- dut.srvPort.response.get;
+    //     $display("time=%0t: discardSendResp", $time);
+    // endrule
 
     rule clearAll if (clearReg);
         clearReg <= False;
