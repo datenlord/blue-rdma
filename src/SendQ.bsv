@@ -834,11 +834,6 @@ module mkSendQ#(
             padCnt        = payloadGenResp.padCnt;
             wqeLastPkt    = payloadGenResp.isLast;
         end
-        // let payloadGenResp <- payloadGenerator.srvPort.response.get;
-        // let remoteAddr      = payloadGenResp.raddr;
-        // let pktPayloadLen   = payloadGenResp.pktLen;
-        // let padCnt          = payloadGenResp.padCnt;
-        // let wqeLastPkt      = payloadGenResp.isLast;
         wqeFirstPktReg <= wqeLastPkt;
 
         if (wqeLastPkt) begin
@@ -1041,7 +1036,6 @@ module mkSendQ#(
     endrule
 
     interface srvPort = toGPServer(reqQ, respQ);
-    // interface wqeInPut = toPut(reqQ);
     interface rdmaDataStreamPipeOut = rdmaPktDataStreamPipeOut;
     interface udpInfoPipeOut = toPipeOut(udpPktInfoOutQ);
     method Bool isEmpty() = !(
