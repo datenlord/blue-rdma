@@ -393,7 +393,8 @@ module mkFixedPktLenDataStreamPipeOut#(
             sqpn     : getDefaultQPN,
             startAddr: dontCareValue,
             len      : pktLen,
-            wrID     : dontCareValue
+            wrID     : dontCareValue,
+            mrIdx    : dontCareValue
         };
         simDmaReadSrv.request.put(dmaReq);
         // $display("time=%0t: pktLen=%0d", $time, pktLen);
@@ -489,7 +490,8 @@ module mkTestDmaReadAndWriteSrv(Empty);
             sqpn     : getDefaultQPN,
             startAddr: dontCareValue,
             len      : pktLen,
-            wrID     : dontCareValue
+            wrID     : dontCareValue,
+            mrIdx    : dontCareValue
         };
         simDmaReadSrv.dmaReadSrv.request.put(dmaReadReq);
 

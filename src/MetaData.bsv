@@ -152,13 +152,6 @@ endmodule
 
 // MR related
 
-typedef TDiv#(MAX_MR, MAX_PD) MAX_MR_PER_PD;
-typedef TLog#(MAX_MR_PER_PD) MR_INDEX_WIDTH;
-typedef TSub#(KEY_WIDTH, MR_INDEX_WIDTH) MR_KEY_PART_WIDTH;
-
-typedef UInt#(MR_INDEX_WIDTH) IndexMR;
-typedef Bit#(MR_KEY_PART_WIDTH) KeyPartMR;
-
 typedef struct {
     ADDR laddr;
     Length len;
@@ -204,10 +197,6 @@ module mkMetaDataMRs(MetaDataMRs) provisos(
         RKEY rkey = { pack(mrIndex), mr.rkeyPart };
         return tuple2(lkey, rkey);
     endfunction
-
-    // function IndexMR lkey2IndexMR(LKEY lkey) = unpack(truncateLSB(lkey));
-    // function IndexMR rkey2IndexMR(RKEY rkey) = unpack(truncateLSB(rkey));
-    function IndexMR key2IndexMR(Bit#(KEY_WIDTH) key) = unpack(truncateLSB(key));
 
     interface srvPort = interface SrvPortMR;
         interface request = interface Put#(ReqMR);
