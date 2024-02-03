@@ -374,7 +374,8 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: curPendingWR.wr.laddr,
                         len      : curPendingWR.wr.len,
-                        wrID     : curPendingWR.wr.id
+                        wrID     : curPendingWR.wr.id,
+                        mrIdx    : key2IndexMR(curPendingWR.wr.lkey)
                     }
                 };
                 payloadGenerator.srvPort.request.put(payloadGenReq);

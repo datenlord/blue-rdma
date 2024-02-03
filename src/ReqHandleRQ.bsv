@@ -2353,7 +2353,8 @@ module mkReqHandleRQ#(
                         sqpn     : cntrlStatus.comm.getSQPN,
                         startAddr: permCheckReq.reqAddr, // reth.va
                         len      : permCheckReq.totalLen, // reth.dlen
-                        wrID     : dontCareValue
+                        wrID     : dontCareValue,
+                        mrIdx    : key2IndexMR(permCheckReq.rkey)
                     }
                 };
 

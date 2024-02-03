@@ -81,6 +81,10 @@ typedef TLog#(TLB_CACHE_SIZE) TLB_CACHE_INDEX_WIDTH; // 14
 typedef TSub#(PHYSICAL_ADDR_WIDTH, PAGE_OFFSET_WIDTH) TLB_CACHE_PA_DATA_WIDTH; // 48-21=27
 typedef TSub#(TSub#(ADDR_WIDTH, TLB_CACHE_INDEX_WIDTH), PAGE_OFFSET_WIDTH) TLB_CACHE_TAG_WIDTH; // 64-14-21=29
 
+typedef TDiv#(MAX_MR, MAX_PD) MAX_MR_PER_PD;
+typedef TLog#(MAX_MR_PER_PD) MR_INDEX_WIDTH;
+typedef TSub#(KEY_WIDTH, MR_INDEX_WIDTH) MR_KEY_PART_WIDTH;
+
 // Derived types
 typedef Bit#(DATA_BUS_WIDTH)      DATA;
 typedef Bit#(DATA_BUS_BYTE_WIDTH) ByteEn;
@@ -139,6 +143,9 @@ typedef struct {
 } PayloadTLB deriving(Bits);
 
 typedef SizeOf#(PayloadTLB) TLB_PAYLOAD_WIDTH;
+
+typedef UInt#(MR_INDEX_WIDTH) IndexMR;
+typedef Bit#(MR_KEY_PART_WIDTH) KeyPartMR;
 
 // Common types
 
@@ -247,19 +254,21 @@ typedef struct {
 } PermCheckReq deriving(Bits, FShow);
 
 typedef struct {
-    DmaReqSrcType initiator;
-    QPN sqpn;
+    DmaReqSrcType initiator; // TODO: remove it
+    QPN sqpn; // TODO: remove it
+    WorkReqID wrID; // TODO: remove it
     ADDR startAddr;
     Length len;
-    WorkReqID wrID;
+    IndexMR mrIdx;
 } DmaReadMetaData deriving(Bits, FShow);
 
 typedef struct {
     DmaReqSrcType initiator; // TODO: remove it
     QPN sqpn; // TODO: remove it
+    WorkReqID wrID; // TODO: remove it
     ADDR startAddr;
     PktLen len;
-    WorkReqID wrID; // TODO: remove it
+    IndexMR mrIdx;
 } DmaReadReq deriving(Bits, FShow);
 
 typedef struct {

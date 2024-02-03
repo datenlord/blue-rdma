@@ -231,7 +231,8 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: startAddr,
                 len      : payloadLen,
-                wrID     : dontCareValue
+                wrID     : dontCareValue,
+                mrIdx    : dontCareValue
             }
         };
 
@@ -663,7 +664,8 @@ module mkTestPayloadConAndGenNormalCase(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : zeroExtend(pktLen),
-                wrID     : dontCareValue
+                wrID     : dontCareValue,
+                mrIdx    : dontCareValue
             }
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);
@@ -805,7 +807,8 @@ module mkTestPayloadGenSegmentAndPaddingCase(Empty);
                 sqpn     : cntrlStatus.comm.getSQPN,
                 startAddr: dontCareValue,
                 len      : payloadLen,
-                wrID     : dontCareValue
+                wrID     : dontCareValue,
+                mrIdx    : dontCareValue
             }
         };
         payloadGenerator.srvPort.request.put(payloadGenReq);

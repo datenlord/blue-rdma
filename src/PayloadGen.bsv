@@ -815,7 +815,8 @@ module mkDmaReadCntrl#(
             sqpn     : curSQPN,
             startAddr: addrChunkResp.chunkAddr,
             len      : addrChunkResp.chunkLen,
-            wrID     : curWorkReqID
+            wrID     : curWorkReqID,
+            mrIdx    : key2IndexMR(lkey)
         };
         dmaReadSrv.request.put(dmaReadReq);
 

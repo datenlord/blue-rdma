@@ -252,16 +252,14 @@ module mkDmaReadCntrl#(
 
         let pendingDmaReadCntrlReq = pendingDmaCntrlReqQ.first;
 
-        // let dmaReadReq       = pendingDmaReadCntrlReq.dmaReadReq;
-        // dmaReadReq.startAddr = addrChunkResp.chunkAddr;
-        // dmaReadReq.len       = zeroExtend(addrChunkResp.chunkLen);
         let dmaReadMetaData = pendingDmaReadCntrlReq.dmaReadMetaData;
         let dmaReadReq = DmaReadReq {
             initiator: dmaReadMetaData.initiator,
             sqpn     : dmaReadMetaData.sqpn,
             startAddr: addrChunkResp.chunkAddr,
             len      : addrChunkResp.chunkLen,
-            wrID     : dmaReadMetaData.wrID
+            wrID     : dmaReadMetaData.wrID,
+            mrIdx    : dmaReadMetaData.mrIdx
         };
 
         dmaReadSrv.request.put(dmaReadReq);

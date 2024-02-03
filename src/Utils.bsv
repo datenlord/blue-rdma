@@ -413,6 +413,12 @@ function Bool isDefaultPKEY(PKEY pkey);
     return isAllOnesR(pkey);
 endfunction
 
+function IndexMR key2IndexMR(Bit#(nSz) key) provisos(
+    Add#(KEY_WIDTH, 0, nSz)
+);
+    return unpack(truncateLSB(key));
+endfunction
+
 function ADDR addrAddPsnMultiplyPMTU(ADDR addr, PSN psn, PMTU pmtu);
     return case (pmtu)
         IBV_MTU_256 : begin
