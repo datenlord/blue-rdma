@@ -151,8 +151,9 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
             headerMetaDataInQ.enq(headerMetaData);
             // $display(
             //     "time=%0t: extractHeader", $time,
-            //     ", headerLen=%0d, transType=", headerLen, fshow(transType),
+            //     ", headerLen=%0d", headerLen,
             //     ", rdmaOpCode=", fshow(rdmaOpCode),
+            //     ", transType=", fshow(transType),
             //     ", rdmaPktDataStream=", fshow(rdmaPktDataStream),
             //     ", headerHasPayload=", fshow(headerHasPayload),
             //     ", headerMetaData=", fshow(headerMetaData)

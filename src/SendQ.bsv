@@ -363,7 +363,7 @@ function Maybe#(PktHeaderInfo) genFirstOrOnlyPktHeader(
                     IBV_QPT_RC      ,
                     IBV_QPT_XRC_SEND,
                     IBV_QPT_XRC_RECV: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB({ pack(bth), pack(reth) }),
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
                         fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
@@ -416,14 +416,15 @@ function Maybe#(PktHeaderInfo) genMiddleOrLastPktHeader(
         case (wqe.opcode)
             IBV_WR_RDMA_WRITE:begin
                 return case (wqe.qpType)
-                    IBV_QPT_RC: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB(pack(bth)),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH)),
+                    IBV_QPT_RC,
+                    IBV_QPT_UC: tagged Valid genPktHeaderInfo(
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
+                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
                     IBV_QPT_XRC_SEND: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
-                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
+                        fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
                     default: tagged Invalid;
@@ -431,22 +432,23 @@ function Maybe#(PktHeaderInfo) genMiddleOrLastPktHeader(
             end
             IBV_WR_RDMA_WRITE_WITH_IMM: begin
                 return case (wqe.qpType)
-                    IBV_QPT_RC: tagged Valid genPktHeaderInfo(
+                    IBV_QPT_RC,
+                    IBV_QPT_UC: tagged Valid genPktHeaderInfo(
                         isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(immDt))}) :
-                            zeroExtendLSB(pack(bth)),
+                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)), pack(unwrapMaybe(immDt))}) :
+                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
                         isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH)),
+                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
+                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
                     IBV_QPT_XRC_SEND: tagged Valid genPktHeaderInfo(
                         isLastReqPkt ?
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(immDt)) }) :
-                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)) }),
+                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)), pack(unwrapMaybe(immDt)) }) :
+                            zeroExtendLSB({ pack(bth), pack(unwrapMaybe(xrceth)), pack(unwrapMaybe(reth)) }),
                         isLastReqPkt ?
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
-                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH)),
+                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH) + valueOf(IMM_DT_BYTE_WIDTH)) :
+                            fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(XRCETH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
                     default: tagged Invalid;
@@ -454,7 +456,8 @@ function Maybe#(PktHeaderInfo) genMiddleOrLastPktHeader(
             end
             IBV_WR_SEND: begin
                 return case (wqe.qpType)
-                    IBV_QPT_RC: tagged Valid genPktHeaderInfo(
+                    IBV_QPT_RC,
+                    IBV_QPT_UC: tagged Valid genPktHeaderInfo(
                         zeroExtendLSB(pack(bth)),
                         fromInteger(valueOf(BTH_BYTE_WIDTH)),
                         hasPayload
@@ -469,7 +472,8 @@ function Maybe#(PktHeaderInfo) genMiddleOrLastPktHeader(
             end
             IBV_WR_SEND_WITH_IMM: begin
                 return case (wqe.qpType)
-                    IBV_QPT_RC: tagged Valid genPktHeaderInfo(
+                    IBV_QPT_RC,
+                    IBV_QPT_UC: tagged Valid genPktHeaderInfo(
                         isLastReqPkt ?
                             zeroExtendLSB({ pack(bth), pack(unwrapMaybe(immDt)) }) :
                             zeroExtendLSB(pack(bth)),
@@ -518,7 +522,7 @@ function Maybe#(PktHeaderInfo) genMiddleOrLastPktHeader(
                     IBV_QPT_RC      ,
                     IBV_QPT_XRC_SEND,
                     IBV_QPT_XRC_RECV: tagged Valid genPktHeaderInfo(
-                        zeroExtendLSB({ pack(bth), pack(reth) }),
+                        zeroExtendLSB({ pack(bth), pack(unwrapMaybe(reth)) }),
                         fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(RETH_BYTE_WIDTH)),
                         hasPayload
                     );
@@ -1048,4 +1052,27 @@ module mkSendQ#(
         pendingHeaderQ.notEmpty ||
         pktHeaderQ.notEmpty
     );
+endmodule
+
+interface SQ;
+    interface DmaReadClt dmaReadClt;
+    interface SendQ sendQ;
+endinterface
+
+(* synthesize *)
+module mkSQ#(Bool clearAll)(SQ);
+    FIFOF#(DmaReadReq)   dmaReadReqQ <- mkFIFOF;
+    FIFOF#(DmaReadResp) dmaReadRespQ <- mkFIFOF;
+
+    let dmaReadSrv = toGPServer(dmaReadReqQ, dmaReadRespQ);
+    let dmaReadCntrl <- mkDmaReadCntrl(clearAll, dmaReadSrv);
+
+    // TODO: add shouldAddPadding to PayloadGenReqSG
+    let shouldAddPadding = True;
+    let payloadGenerator <- mkPayloadGenerator(clearAll, shouldAddPadding, dmaReadCntrl);
+
+    let sq <- mkSendQ(clearAll, payloadGenerator);
+
+    interface dmaReadClt = toGPClient(dmaReadReqQ, dmaReadRespQ);
+    interface sendQ = sq;
 endmodule

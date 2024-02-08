@@ -184,7 +184,15 @@ module mkDataStream2Header#(
             let headerLastFragByteEn = genByteEn(rdmaHeader.headerMetaData.lastFragValidByteNum);
             headerOutQ.enq(rdmaHeader);
             busyReg <= False;
-            // $display("time=%0t: rdmaHeader=", $time, fshow(rdmaHeader));
+
+            // let { transType, rdmaOpCode } =
+            //     extractTranTypeAndRdmaOpCode(rdmaHeader.headerData);
+            // $display(
+            //     "time=%0t: mkDataStream2Header", $time,
+            //     ", rdmaOpCode=", fshow(rdmaOpCode),
+            //     ", transType=", fshow(transType),
+            //     ", rdmaHeader=", fshow(rdmaHeader)
+            // );
 
             immAssert(
                 headerLastFragByteEn == curDataStreamFrag.byteEn,
