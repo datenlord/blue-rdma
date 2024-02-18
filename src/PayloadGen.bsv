@@ -187,6 +187,7 @@ function ADDR alignAddrByPMTU(ADDR addr, PMTU pmtu);
     endcase;
 endfunction
 
+// TODO: remote it
 function Tuple5#(PktLen, PktLen, PktLen, PktNum, ADDR) calcPktNumAndPktLenByAddrAndPMTU(
     ADDR startAddr, Length len, PMTU pmtu
 );
@@ -252,6 +253,91 @@ function Tuple5#(PktLen, PktLen, PktLen, PktNum, ADDR) calcPktNumAndPktLenByAddr
     // let isSinglePkt = isLessOrEqOneR(totalPktNum);
 
     return tuple5(pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
+endfunction
+
+function Tuple7#(PktLen, PktLen, PktLen, PktLen, PktLen, PktNum, ADDR) stepOneCalcPktNumAndPktLenByAddrAndPMTU(
+    ADDR startAddr, Length len, PMTU pmtu
+);
+    let pmtuAlignedStartAddr = alignAddrByPMTU(startAddr, pmtu);
+    let pmtuLen = calcPmtuLen(pmtu);
+
+    Tuple4#(PktLen, PktNum, PktLen, PktLen) tmpTuple = case (pmtu)
+        IBV_MTU_256 : begin
+            Bit#(8) addrLowPart = truncate(startAddr); // [7 : 0]
+            Bit#(8) lenLowPart = truncate(len);
+            Bit#(8) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 8)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_512 : begin
+            Bit#(9) addrLowPart = truncate(startAddr); // [8 : 0]
+            Bit#(9) lenLowPart = truncate(len);
+            Bit#(9) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 9)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_1024: begin
+            Bit#(10) addrLowPart = truncate(startAddr); // [9 : 0]
+            Bit#(10) lenLowPart = truncate(len);
+            Bit#(10) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 10)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_2048: begin
+            Bit#(11) addrLowPart = truncate(startAddr); // [10 : 0]
+            Bit#(11) lenLowPart = truncate(len);
+            Bit#(11) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 11)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_4096: begin
+            Bit#(12) addrLowPart = truncate(startAddr); // [11 : 0]
+            Bit#(12) lenLowPart = truncate(len);
+            Bit#(12) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 12)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+    endcase;
+
+    let { pmtuMask, truncatedPktNum, addrLowPart, lenLowPart } = tmpTuple;
+    let maxFirstPktLen = pmtuLen - addrLowPart;
+    let addrAndLenLowPartSum = addrLowPart + lenLowPart;
+
+    return tuple7(
+        pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
+        maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
+    );
+endfunction
+
+function Tuple4#(PktLen, PktLen, PktNum, ADDR) stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
+    PktLen pmtuMask, PktLen addrAndLenLowPartSum, PktLen pmtuLen, PktLen lenLowPart,
+    PktLen maxFirstPktLen, PktNum truncatedPktNum, ADDR pmtuAlignedStartAddr, PMTU pmtu
+);
+    let oneAsPSN = 1;
+    let secondChunkStartAddr = addrAddPsnMultiplyPMTU(pmtuAlignedStartAddr, oneAsPSN, pmtu);
+
+    ResiduePMTU residue  = truncateByPMTU(addrAndLenLowPartSum, pmtu);
+    PktLen tmpLastPktLen = zeroExtend(residue);
+
+    let pmtuInvMask   = ~pmtuMask;
+    let noResidue     = isZeroR(pmtuMask & addrAndLenLowPartSum);
+    let noExtraPkt    = isZeroR(pmtuInvMask & addrAndLenLowPartSum);
+    let hasResidue    = !noResidue;
+    let hasExtraPkt   = !noExtraPkt;
+    let residuePktNum = pack(hasResidue);
+    let extraPktNum   = pack(hasExtraPkt);
+    let notFullPkt    = isZeroR(truncatedPktNum);
+    // let residuePktNum = |(pmtuMask & addrAndLenLowPartSum);
+    // let extraPktNum = |(pmtuInvMask & addrAndLenLowPartSum);
+    // Bool hasResidue = unpack(residuePktNum);
+    // Bool hasExtraPkt = unpack(extraPktNum);
+
+    let totalPktNum = truncatedPktNum + zeroExtend(residuePktNum) + zeroExtend(extraPktNum);
+    let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
+    let lastPktLen  = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
+    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
+
+    return tuple4(firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
 endfunction
 
 function PktFragNum calcFragNumByPktLen(PktLen pktLen) provisos(
@@ -342,6 +428,9 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     FIFOF#(PktMetaDataSGE) sgePktMetaDataOutQ <- mkFIFOF;
 
     // Pipeline FIFOF
+    FIFOF#(Tuple8#(
+        PktLen, PktLen, PktLen, PktLen, PktLen, PktNum, ADDR, AddrChunkReq
+    )) calcMetaDataQ <- mkFIFOF;
     FIFOF#(ChunkMetaData) chunkMetaDataQ <- mkFIFOF;
 
     Reg#(PktNum) remainingPktNumReg <- mkRegU;
@@ -369,10 +458,36 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             )
         );
 
+        // let {
+        //     pmtuLen, firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr //, isSinglePkt
+        // } = calcPktNumAndPktLenByAddrAndPMTU(
+        //     addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
+        // );
         let {
-            pmtuLen, firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr //, isSinglePkt
-        } = calcPktNumAndPktLenByAddrAndPMTU(
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
+            maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
+        } = stepOneCalcPktNumAndPktLenByAddrAndPMTU(
             addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
+        );
+
+        calcMetaDataQ.enq(tuple8(
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
+            truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq
+        ));
+    endrule
+
+    rule genChunkMetaData if (!clearAll);
+        let {
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
+            truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq
+        } = calcMetaDataQ.first;
+        calcMetaDataQ.deq;
+
+        let {
+            firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr
+        } = stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
+            truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq.pmtu
         );
 
         let chunkMetaData = ChunkMetaData {
@@ -909,7 +1024,7 @@ module mkMergePayloadEachSGE#(
             sgePktMetaDataPipeIn.deq;
 
             let firstPktLastFragValidByteNum = calcLastFragValidByteNum(sgePktMetaData.firstPktLen);
-            let lastPktLastFragValidByteNum = calcLastFragValidByteNum(sgePktMetaData.lastPktLen);
+            let lastPktLastFragValidByteNum  = calcLastFragValidByteNum(sgePktMetaData.lastPktLen);
 
             let {
                 firstPktLastFragValidBitNum,
