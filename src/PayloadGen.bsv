@@ -187,74 +187,6 @@ function ADDR alignAddrByPMTU(ADDR addr, PMTU pmtu);
     endcase;
 endfunction
 
-// TODO: remote it
-function Tuple5#(PktLen, PktLen, PktLen, PktNum, ADDR) calcPktNumAndPktLenByAddrAndPMTU(
-    ADDR startAddr, Length len, PMTU pmtu
-);
-    let oneAsPSN = 1;
-    let pmtuAlignedStartAddr = alignAddrByPMTU(startAddr, pmtu);
-    let secondChunkStartAddr = addrAddPsnMultiplyPMTU(pmtuAlignedStartAddr, oneAsPSN, pmtu);
-    let pmtuLen = calcPmtuLen(pmtu);
-
-    Tuple4#(PktLen, PktNum, PktLen, PktLen) tmpTuple = case (pmtu)
-        IBV_MTU_256 : begin
-            Bit#(8) addrLowPart = truncate(startAddr); // [7 : 0]
-            Bit#(8) lenLowPart = truncate(len);
-            Bit#(8) pmtuMask = maxBound;
-            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 8)) truncatedLen = truncateLSB(len);
-            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
-        end
-        IBV_MTU_512 : begin
-            Bit#(9) addrLowPart = truncate(startAddr); // [8 : 0]
-            Bit#(9) lenLowPart = truncate(len);
-            Bit#(9) pmtuMask = maxBound;
-            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 9)) truncatedLen = truncateLSB(len);
-            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
-        end
-        IBV_MTU_1024: begin
-            Bit#(10) addrLowPart = truncate(startAddr); // [9 : 0]
-            Bit#(10) lenLowPart = truncate(len);
-            Bit#(10) pmtuMask = maxBound;
-            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 10)) truncatedLen = truncateLSB(len);
-            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
-        end
-        IBV_MTU_2048: begin
-            Bit#(11) addrLowPart = truncate(startAddr); // [10 : 0]
-            Bit#(11) lenLowPart = truncate(len);
-            Bit#(11) pmtuMask = maxBound;
-            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 11)) truncatedLen = truncateLSB(len);
-            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
-        end
-        IBV_MTU_4096: begin
-            Bit#(12) addrLowPart = truncate(startAddr); // [11 : 0]
-            Bit#(12) lenLowPart = truncate(len);
-            Bit#(12) pmtuMask = maxBound;
-            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 12)) truncatedLen = truncateLSB(len);
-            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
-        end
-    endcase;
-
-    let { pmtuMask, truncatedPktNum, addrLowPart, lenLowPart } = tmpTuple;
-    let maxFirstPktLen = pmtuLen - addrLowPart;
-    let tmpSum = addrLowPart + lenLowPart;
-    ResiduePMTU residue = truncateByPMTU(tmpSum, pmtu);
-    PktLen tmpLastPktLen = zeroExtend(residue);
-
-    let pmtuInvMask = ~pmtuMask;
-    let residuePktNum = |(pmtuMask & tmpSum);
-    let extraPktNum = |(pmtuInvMask & tmpSum);
-    Bool hasResidue = unpack(residuePktNum);
-    Bool hasExtraPkt = unpack(extraPktNum);
-    let notFullPkt = isZeroR(truncatedPktNum);
-
-    let totalPktNum = truncatedPktNum + zeroExtend(residuePktNum) + zeroExtend(extraPktNum);
-    let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
-    let lastPktLen = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
-    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
-
-    return tuple5(pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
-endfunction
-
 function Tuple7#(PktLen, PktLen, PktLen, PktLen, PktLen, PktNum, ADDR) stepOneCalcPktNumAndPktLenByAddrAndPMTU(
     ADDR startAddr, Length len, PMTU pmtu
 );
@@ -467,11 +399,6 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             )
         );
 
-        // let {
-        //     pmtuLen, firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr //, isSinglePkt
-        // } = calcPktNumAndPktLenByAddrAndPMTU(
-        //     addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
-        // );
         let {
             pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
             maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
@@ -2667,6 +2594,20 @@ typedef struct {
 } PayloadGenTotalMetaData deriving(Bits, FShow);
 
 typedef struct {
+    Length totalLen;
+    ADDR   origRemoteAddr;
+    PMTU   pmtu;
+    PktLen pmtuMask;
+    PktLen addrAndLenLowPartSum;
+    PktLen pmtuLen;
+    PktLen lenLowPart;
+    PktLen maxFirstPktLen;
+    PktNum truncatedPktNum;
+    ADDR   pmtuAlignedStartAddr;
+    Bool   isZeroPayloadLen;
+} TmpPayloadGenMetaData deriving(Bits);
+
+typedef struct {
     ADDR   firstRemoteAddr;
     ADDR   secondRemoteAddr;
     Length totalLen;
@@ -2711,7 +2652,7 @@ module mkPayloadGenerator#(
 
     // Pipeline FIFO
     FIFOF#(DataStream) sgePayloadOutQ <- mkFIFOF;
-    FIFOF#(Tuple2#(PayloadGenReqSG, Bool)) adjustReqPktLenQ <- mkFIFOF;
+    FIFOF#(TmpPayloadGenMetaData) adjustReqPktLenQ <- mkFIFOF;
     FIFOF#(TmpAdjustMetaData) adjustedFirstAndLastPktLenQ <- mkFIFOF;
     FIFOF#(TmpPaddingMetaData) addPadCntQ <- mkFIFOF;
     FIFOF#(AdjustedTotalPayloadMetaData) adjustedTotalPayloadMetaDataQ <- mkFIFOF;
@@ -2787,7 +2728,28 @@ module mkPayloadGenerator#(
             };
             dmaReadCntrl.srvPort.request.put(dmaReadCntrlReq);
         end
-        adjustReqPktLenQ.enq(tuple2(payloadGenReq, isZeroPayloadLen));
+
+        let {
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
+            maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
+        } = stepOneCalcPktNumAndPktLenByAddrAndPMTU(
+            payloadGenReq.raddr, payloadGenReq.totalLen, payloadGenReq.pmtu
+        );
+
+        let tmpPayloadGenMetaData = TmpPayloadGenMetaData {
+            totalLen            : payloadGenReq.totalLen,
+            origRemoteAddr      : payloadGenReq.raddr,
+            pmtu                : payloadGenReq.pmtu,
+            pmtuMask            : pmtuMask,
+            addrAndLenLowPartSum: addrAndLenLowPartSum,
+            pmtuLen             : pmtuLen,
+            lenLowPart          : lenLowPart,
+            maxFirstPktLen      : maxFirstPktLen,
+            truncatedPktNum     : truncatedPktNum,
+            pmtuAlignedStartAddr: pmtuAlignedStartAddr,
+            isZeroPayloadLen    : isZeroPayloadLen
+        };
+        adjustReqPktLenQ.enq(tmpPayloadGenMetaData);
         // $display(
         //     "time=%0t: mkPayloadGenerator recvReq", $time,
         //     ", payloadGenReq=", fshow(payloadGenReq)
@@ -2800,26 +2762,33 @@ module mkPayloadGenerator#(
     endrule
 
     rule adjustFirstAndLastPktLen if (!clearAll);
-        let { payloadGenReq, isZeroPayloadLen } = adjustReqPktLenQ.first;
+        let tmpPayloadGenMetaData = adjustReqPktLenQ.first;
         adjustReqPktLenQ.deq;
 
-        let totalLen = payloadGenReq.totalLen;
-        // if (!isZeroPayloadLen) begin
-        //     let sglTotalPayloadLenMetaData = dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.first;
-        //     dmaReadCntrl.sglTotalPayloadLenMetaDataPipeOut.deq;
-        //     totalLen = sglTotalPayloadLenMetaData.totalLen;
-        // end
-        let { truncatedPktNum, residue } = truncateLenByPMTU(totalLen, payloadGenReq.pmtu);
-        let origPktNum = truncatedPktNum + (isZeroR(residue) ? 0 : 1);
+        let totalLen             = tmpPayloadGenMetaData.totalLen;
+        let origRemoteAddr       = tmpPayloadGenMetaData.origRemoteAddr;
+        let pmtu                 = tmpPayloadGenMetaData.pmtu;
+        let pmtuMask             = tmpPayloadGenMetaData.pmtuMask;
+        let addrAndLenLowPartSum = tmpPayloadGenMetaData.addrAndLenLowPartSum;
+        let pmtuLen              = tmpPayloadGenMetaData.pmtuLen;
+        let lenLowPart           = tmpPayloadGenMetaData.lenLowPart;
+        let maxFirstPktLen       = tmpPayloadGenMetaData.maxFirstPktLen;
+        let truncatedPktNum      = tmpPayloadGenMetaData.truncatedPktNum;
+        let pmtuAlignedStartAddr = tmpPayloadGenMetaData.pmtuAlignedStartAddr;
+        let isZeroPayloadLen     = tmpPayloadGenMetaData.isZeroPayloadLen;
 
         let {
-            pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr //, isSinglePkt
-        } = calcPktNumAndPktLenByAddrAndPMTU( // TODO: fix timing
-            payloadGenReq.raddr, totalLen, payloadGenReq.pmtu
+            firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr
+        } = stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
+            truncatedPktNum, pmtuAlignedStartAddr, pmtu
         );
 
+        let { origTruncatedPktNum, origResidue } = truncateLenByPMTU(totalLen, pmtu);
+        let origPktNum = origTruncatedPktNum + (isZeroR(origResidue) ? 0 : 1);
+
         let adjustMetaData = TmpAdjustMetaData {
-            firstRemoteAddr : payloadGenReq.raddr,
+            firstRemoteAddr : origRemoteAddr,
             secondRemoteAddr: secondChunkStartAddr,
             totalLen        : totalLen,
             totalPktNum     : totalPktNum,
@@ -2827,7 +2796,7 @@ module mkPayloadGenerator#(
             firstPktLen     : firstPktLen,
             lastPktLen      : lastPktLen,
             pmtuLen         : pmtuLen,
-            pmtu            : payloadGenReq.pmtu,
+            pmtu            : pmtu,
             isZeroPayloadLen: isZeroPayloadLen
         };
         adjustedFirstAndLastPktLenQ.enq(adjustMetaData);
