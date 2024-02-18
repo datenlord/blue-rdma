@@ -16,6 +16,73 @@ import SimDma :: *;
 import Utils :: *;
 import Utils4Test :: *;
 
+function Tuple5#(PktLen, PktLen, PktLen, PktNum, ADDR) calcPktNumAndPktLenByAddrAndPMTU(
+    ADDR startAddr, Length len, PMTU pmtu
+);
+    let oneAsPSN = 1;
+    let pmtuAlignedStartAddr = alignAddrByPMTU(startAddr, pmtu);
+    let secondChunkStartAddr = addrAddPsnMultiplyPMTU(pmtuAlignedStartAddr, oneAsPSN, pmtu);
+    let pmtuLen = calcPmtuLen(pmtu);
+
+    Tuple4#(PktLen, PktNum, PktLen, PktLen) tmpTuple = case (pmtu)
+        IBV_MTU_256 : begin
+            Bit#(8) addrLowPart = truncate(startAddr); // [7 : 0]
+            Bit#(8) lenLowPart = truncate(len);
+            Bit#(8) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 8)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_512 : begin
+            Bit#(9) addrLowPart = truncate(startAddr); // [8 : 0]
+            Bit#(9) lenLowPart = truncate(len);
+            Bit#(9) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 9)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_1024: begin
+            Bit#(10) addrLowPart = truncate(startAddr); // [9 : 0]
+            Bit#(10) lenLowPart = truncate(len);
+            Bit#(10) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 10)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_2048: begin
+            Bit#(11) addrLowPart = truncate(startAddr); // [10 : 0]
+            Bit#(11) lenLowPart = truncate(len);
+            Bit#(11) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 11)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+        IBV_MTU_4096: begin
+            Bit#(12) addrLowPart = truncate(startAddr); // [11 : 0]
+            Bit#(12) lenLowPart = truncate(len);
+            Bit#(12) pmtuMask = maxBound;
+            Bit#(TSub#(RDMA_MAX_LEN_WIDTH, 12)) truncatedLen = truncateLSB(len);
+            tuple4(zeroExtend(pmtuMask), zeroExtend(truncatedLen), zeroExtend(addrLowPart), zeroExtend(lenLowPart));
+        end
+    endcase;
+
+    let { pmtuMask, truncatedPktNum, addrLowPart, lenLowPart } = tmpTuple;
+    let maxFirstPktLen = pmtuLen - addrLowPart;
+    let tmpSum = addrLowPart + lenLowPart;
+    ResiduePMTU residue = truncateByPMTU(tmpSum, pmtu);
+    PktLen tmpLastPktLen = zeroExtend(residue);
+
+    let pmtuInvMask = ~pmtuMask;
+    let residuePktNum = |(pmtuMask & tmpSum);
+    let extraPktNum = |(pmtuInvMask & tmpSum);
+    Bool hasResidue = unpack(residuePktNum);
+    Bool hasExtraPkt = unpack(extraPktNum);
+    let notFullPkt = isZeroR(truncatedPktNum);
+
+    let totalPktNum = truncatedPktNum + zeroExtend(residuePktNum) + zeroExtend(extraPktNum);
+    let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
+    let lastPktLen = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
+    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
+
+    return tuple5(pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
+endfunction
+
 (* doc = "testcase" *)
 module mkTestAddrChunkSrv(Empty);
     let minPayloadLen = 2048;
