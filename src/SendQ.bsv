@@ -581,9 +581,8 @@ module mkSendQ#(
     Bool clearAll,
     PayloadGenerator payloadGenerator
 )(SendQ);
-    FIFOF#(WorkQueueElem)      reqQ <- mkFIFOF;
-    FIFOF#(SendResp)          respQ <- mkFIFOF;
-    FIFOF#(PktInfo4UDP) udpInfoOutQ <- mkFIFOF;
+    FIFOF#(WorkQueueElem)         reqQ <- mkFIFOF;
+    FIFOF#(SendResp)             respQ <- mkFIFOF;
     FIFOF#(PktInfo4UDP) udpPktInfoOutQ <- mkFIFOF;
 
     // Pipeline FIFOF
@@ -610,7 +609,7 @@ module mkSendQ#(
     rule resetAndClear if (clearAll);
         reqQ.clear;
         respQ.clear;
-        udpInfoOutQ.clear;
+        udpPktInfoOutQ.clear;
 
         totalMetaDataQ.clear;
         psnUpdateQ.clear;
