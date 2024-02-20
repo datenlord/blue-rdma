@@ -2565,9 +2565,9 @@ typedef struct {
 } PayloadGenTotalMetaData deriving(Bits, FShow);
 
 typedef struct {
-    Length totalLen;
-    ADDR   origRemoteAddr;
-    PMTU   pmtu;
+    // Length totalLen;
+    // ADDR   origRemoteAddr;
+    // PMTU   pmtu;
     PktLen pmtuMask;
     PktLen addrAndLenLowPartSum;
     PktLen pmtuLen;
@@ -2623,7 +2623,7 @@ module mkPayloadGenerator#(
 
     // Pipeline FIFO
     FIFOF#(DataStream) sgePayloadOutQ <- mkFIFOF;
-    FIFOF#(TmpPayloadGenMetaData) adjustReqPktLenQ <- mkFIFOF;
+    FIFOF#(Tuple2#(PayloadGenReqSG, TmpPayloadGenMetaData)) adjustReqPktLenQ <- mkFIFOF;
     FIFOF#(TmpAdjustMetaData) adjustedFirstAndLastPktLenQ <- mkFIFOF;
     FIFOF#(TmpPaddingMetaData) addPadCntQ <- mkFIFOF;
     FIFOF#(AdjustedTotalPayloadMetaData) adjustedTotalPayloadMetaDataQ <- mkFIFOF;
@@ -2690,6 +2690,67 @@ module mkPayloadGenerator#(
             );
         end
 
+        // if (!isZeroPayloadLen) begin
+        //     let dmaReadCntrlReq = DmaReadCntrlReq {
+        //         sglDmaReadMetaData: DmaReadMetaDataSGL {
+        //             sgl           : payloadGenReq.sgl,
+        //             totalLen      : payloadGenReq.totalLen,
+        //             sqpn          : payloadGenReq.sqpn,
+        //             wrID          : payloadGenReq.wrID
+        //         },
+        //         pmtu              : payloadGenReq.pmtu
+        //     };
+        //     dmaReadCntrl.srvPort.request.put(dmaReadCntrlReq);
+        // end
+
+        let {
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
+            maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
+        } = stepOneCalcPktNumAndPktLenByAddrAndPMTU(
+            payloadGenReq.raddr, payloadGenReq.totalLen, payloadGenReq.pmtu
+        );
+
+        let tmpPayloadGenMetaData = TmpPayloadGenMetaData {
+            // totalLen            : payloadGenReq.totalLen,
+            // origRemoteAddr      : payloadGenReq.raddr,
+            // pmtu                : payloadGenReq.pmtu,
+            pmtuMask            : pmtuMask,
+            addrAndLenLowPartSum: addrAndLenLowPartSum,
+            pmtuLen             : pmtuLen,
+            lenLowPart          : lenLowPart,
+            maxFirstPktLen      : maxFirstPktLen,
+            truncatedPktNum     : truncatedPktNum,
+            pmtuAlignedStartAddr: pmtuAlignedStartAddr,
+            isZeroPayloadLen    : isZeroPayloadLen
+        };
+        adjustReqPktLenQ.enq(tuple2(payloadGenReq, tmpPayloadGenMetaData));
+        // $display(
+        //     "time=%0t: mkPayloadGenerator recvReq", $time,
+        //     ", payloadGenReq=", fshow(payloadGenReq)
+        // );
+    endrule
+
+    rule recvDmaReadCntrlResp if (!clearAll);
+        let dmaReadCntrlResp <- dmaReadCntrl.srvPort.response.get;
+        sgePayloadOutQ.enq(dmaReadCntrlResp.dmaReadResp.dataStream);
+    endrule
+
+    rule issueDmaReqAndAdjustFirstAndLastPktLen if (!clearAll);
+        let { payloadGenReq, tmpPayloadGenMetaData } = adjustReqPktLenQ.first;
+        adjustReqPktLenQ.deq;
+
+        // let totalLen             = tmpPayloadGenMetaData.totalLen;
+        // let origRemoteAddr       = tmpPayloadGenMetaData.origRemoteAddr;
+        // let pmtu                 = tmpPayloadGenMetaData.pmtu;
+        let pmtuMask             = tmpPayloadGenMetaData.pmtuMask;
+        let addrAndLenLowPartSum = tmpPayloadGenMetaData.addrAndLenLowPartSum;
+        let pmtuLen              = tmpPayloadGenMetaData.pmtuLen;
+        let lenLowPart           = tmpPayloadGenMetaData.lenLowPart;
+        let maxFirstPktLen       = tmpPayloadGenMetaData.maxFirstPktLen;
+        let truncatedPktNum      = tmpPayloadGenMetaData.truncatedPktNum;
+        let pmtuAlignedStartAddr = tmpPayloadGenMetaData.pmtuAlignedStartAddr;
+        let isZeroPayloadLen     = tmpPayloadGenMetaData.isZeroPayloadLen;
+
         if (!isZeroPayloadLen) begin
             let dmaReadCntrlReq = DmaReadCntrlReq {
                 sglDmaReadMetaData: DmaReadMetaDataSGL {
@@ -2704,78 +2765,32 @@ module mkPayloadGenerator#(
         end
 
         let {
-            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
-            maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
-        } = stepOneCalcPktNumAndPktLenByAddrAndPMTU(
-            payloadGenReq.raddr, payloadGenReq.totalLen, payloadGenReq.pmtu
-        );
-
-        let tmpPayloadGenMetaData = TmpPayloadGenMetaData {
-            totalLen            : payloadGenReq.totalLen,
-            origRemoteAddr      : payloadGenReq.raddr,
-            pmtu                : payloadGenReq.pmtu,
-            pmtuMask            : pmtuMask,
-            addrAndLenLowPartSum: addrAndLenLowPartSum,
-            pmtuLen             : pmtuLen,
-            lenLowPart          : lenLowPart,
-            maxFirstPktLen      : maxFirstPktLen,
-            truncatedPktNum     : truncatedPktNum,
-            pmtuAlignedStartAddr: pmtuAlignedStartAddr,
-            isZeroPayloadLen    : isZeroPayloadLen
-        };
-        adjustReqPktLenQ.enq(tmpPayloadGenMetaData);
-        // $display(
-        //     "time=%0t: mkPayloadGenerator recvReq", $time,
-        //     ", payloadGenReq=", fshow(payloadGenReq)
-        // );
-    endrule
-
-    rule recvDmaReadCntrlResp if (!clearAll);
-        let dmaReadCntrlResp <- dmaReadCntrl.srvPort.response.get;
-        sgePayloadOutQ.enq(dmaReadCntrlResp.dmaReadResp.dataStream);
-    endrule
-
-    rule adjustFirstAndLastPktLen if (!clearAll);
-        let tmpPayloadGenMetaData = adjustReqPktLenQ.first;
-        adjustReqPktLenQ.deq;
-
-        let totalLen             = tmpPayloadGenMetaData.totalLen;
-        let origRemoteAddr       = tmpPayloadGenMetaData.origRemoteAddr;
-        let pmtu                 = tmpPayloadGenMetaData.pmtu;
-        let pmtuMask             = tmpPayloadGenMetaData.pmtuMask;
-        let addrAndLenLowPartSum = tmpPayloadGenMetaData.addrAndLenLowPartSum;
-        let pmtuLen              = tmpPayloadGenMetaData.pmtuLen;
-        let lenLowPart           = tmpPayloadGenMetaData.lenLowPart;
-        let maxFirstPktLen       = tmpPayloadGenMetaData.maxFirstPktLen;
-        let truncatedPktNum      = tmpPayloadGenMetaData.truncatedPktNum;
-        let pmtuAlignedStartAddr = tmpPayloadGenMetaData.pmtuAlignedStartAddr;
-        let isZeroPayloadLen     = tmpPayloadGenMetaData.isZeroPayloadLen;
-
-        let {
             firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr
         } = stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
             pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
-            truncatedPktNum, pmtuAlignedStartAddr, pmtu
+            truncatedPktNum, pmtuAlignedStartAddr, payloadGenReq.pmtu
         );
 
-        let { origTruncatedPktNum, origResidue } = truncateLenByPMTU(totalLen, pmtu);
+        let { origTruncatedPktNum, origResidue } = truncateLenByPMTU(
+            payloadGenReq.totalLen, payloadGenReq.pmtu
+        );
         let origPktNum = origTruncatedPktNum + (isZeroR(origResidue) ? 0 : 1);
 
         let adjustMetaData = TmpAdjustMetaData {
-            firstRemoteAddr : origRemoteAddr,
+            firstRemoteAddr : payloadGenReq.raddr,
             secondRemoteAddr: secondChunkStartAddr,
-            totalLen        : totalLen,
+            totalLen        : payloadGenReq.totalLen,
             totalPktNum     : totalPktNum,
             origPktNum      : origPktNum,
             firstPktLen     : firstPktLen,
             lastPktLen      : lastPktLen,
             pmtuLen         : pmtuLen,
-            pmtu            : pmtu,
+            pmtu            : payloadGenReq.pmtu,
             isZeroPayloadLen: isZeroPayloadLen
         };
         adjustedFirstAndLastPktLenQ.enq(adjustMetaData);
         // $display(
-        //     "time=%0t: mkPayloadGenerator adjustFirstAndLastPktLen", $time,
+        //     "time=%0t: mkPayloadGenerator issueDmaReqAndAdjustFirstAndLastPktLen", $time,
         //     ", payloadGenReq=", fshow(payloadGenReq)
         // );
     endrule
