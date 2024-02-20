@@ -253,7 +253,7 @@ report_power -file $out_dir/post_route_power.rpt
 report_power_opt -file $out_dir/post_route_power_opt.rpt
 report_utilization -file $out_dir/post_route_util.rpt
 report_utilization -slr -file $out_dir/post_route_util_slr.rpt
-report_ram_utilization -detail -file $out_dir/post_route_ram_utils.rpt
+report_ram_utilization -file $out_dir/post_route_ram_utils.rpt
 # Check fanout < 25K
 report_high_fanout_nets -timing -load_type -max_nets $MAX_NET_PATH_NUM -file $out_dir/post_route_fanout.rpt
 report_carry_chains -file $out_dir/post_route_carry_chains.rpt
