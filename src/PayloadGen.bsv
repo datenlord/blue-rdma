@@ -134,7 +134,6 @@ typedef struct {
     ByteEnBitNum firstPktLastFragValidByteNum;
     ByteEnBitNum origLastFragValidByteNum;
     PktNum       adjustedPktNum;
-    PktNum       origPktNum;
     PMTU         pmtu;
 } AdjustedTotalPayloadMetaData deriving(Bits, FShow);
 
@@ -325,7 +324,7 @@ function Tuple2#(PktLen, PktNum) calcPktNumAndLastPktLenByPMTU(Length len, PMTU 
 endfunction
 
 // the output DataStream keeps isFirst and isLast from preFrag
-function DataStream mergeFragData(
+function DataStream leftShiftMergeFragData(
     DataStream preFrag,
     DataStream curFrag,
     ByteEnBitNum preFragInvalidByteNum,
@@ -333,7 +332,7 @@ function DataStream mergeFragData(
 );
     let resultFrag    = preFrag;
     resultFrag.byteEn = truncateLSB({ preFrag.byteEn, curFrag.byteEn } << preFragInvalidByteNum);
-    resultFrag.data   = truncateLSB({ preFrag.data, curFrag.data } << preFragInvalidBitNum);
+    resultFrag.data   = truncateLSB({ preFrag.data,   curFrag.data   } << preFragInvalidBitNum);
     return resultFrag;
 endfunction
 
@@ -985,16 +984,6 @@ module mkMergePayloadEachSGE#(
             )
         );
 
-        // let mergedFrag = mergeFragData(
-        //     prePayloadFragReg, curPayloadFrag,
-        //     sgeFirstPktLastFragInvalidByteNumReg, sgeFirstPktLastFragInvalidBitNumReg
-        // );
-
-        // let outPayloadFrag = isFirstPktReg ? prePayloadFragReg : mergedFrag;
-        // outPayloadFrag.isFirst = isFirstFragReg;
-        // isFirstFragReg <= False;
-        // pktPayloadOutQ.enq(outPayloadFrag);
-
         let prePayloadFrag = prePayloadFragReg;
         prePayloadFrag.isFirst = isFirstFragReg;
         isFirstFragReg <= False;
@@ -1018,7 +1007,6 @@ module mkMergePayloadEachSGE#(
 
     rule mergeLastOrOnlyPktSGE if (!clearAll && stateReg == MERGE_SGE_PAYLOAD_LAST_OR_ONLY_PKT);
         let nextPayloadFrag = genEmptyDataStream;
-        // let outPayloadFrag  = prePayloadFragReg;
 
         let isLastFrag = prePayloadFragReg.isLast;
         if (prePayloadFragReg.isLast) begin
@@ -1054,15 +1042,6 @@ module mkMergePayloadEachSGE#(
             )
         );
 
-        // if (!sgeHasOnlyPktReg) begin
-        //     outPayloadFrag = mergeFragData(
-        //         prePayloadFragReg, nextPayloadFrag,
-        //         sgeFirstPktLastFragInvalidByteNumReg, sgeFirstPktLastFragInvalidBitNumReg
-        //     );
-        //     outPayloadFrag.isLast = isLastFrag;
-        // end
-        // pktPayloadOutQ.enq(outPayloadFrag);
-
         let prePayloadFrag = prePayloadFragReg;
         prePayloadFrag.isLast = isLastFrag;
         let shouldShiftPayloadFrag = !sgeHasOnlyPktReg;
@@ -1089,15 +1068,15 @@ module mkMergePayloadEachSGE#(
     rule shiftPayloadFrag if (!clearAll);
         let {
             prePayloadFrag, curPayloadFrag, shouldShiftPayloadFrag,
-            sgeFirstPktLastFragInvalidByteNum, sgeFirstPktLastFragInvalidBitNum
+            leftShiftInvalidByteNum, leftShiftInvalidBitNum
         } = payloadFragShiftQ.first;
         payloadFragShiftQ.deq;
 
         let outPayloadFrag = prePayloadFrag;
         if (shouldShiftPayloadFrag) begin
-            outPayloadFrag = mergeFragData(
+            outPayloadFrag = leftShiftMergeFragData(
                 prePayloadFrag, curPayloadFrag,
-                sgeFirstPktLastFragInvalidByteNum, sgeFirstPktLastFragInvalidBitNum
+                leftShiftInvalidByteNum, leftShiftInvalidBitNum
             );
         end
         pktPayloadOutQ.enq(outPayloadFrag);
@@ -1252,7 +1231,7 @@ module mkMergePayloadEachSGE#(
             )
         );
 
-        let mergedFrag = mergeFragData(
+        let mergedFrag = leftShiftMergeFragData(
             prePayloadFragReg, curPayloadFrag,
             sgeFirstPktLastFragInvalidByteNumReg, sgeFirstPktLastFragInvalidBitNumReg
         );
@@ -1313,7 +1292,7 @@ module mkMergePayloadEachSGE#(
         );
 
         if (!sgeHasOnlyPktReg) begin
-            outPayloadFrag = mergeFragData(
+            outPayloadFrag = leftShiftMergeFragData(
                 prePayloadFragReg, nextPayloadFrag,
                 sgeFirstPktLastFragInvalidByteNumReg, sgeFirstPktLastFragInvalidBitNumReg
             );
@@ -1678,16 +1657,32 @@ module mkMergePayloadAllSGE#(
     rule shiftPayloadFrag if (!clearAll);
         let {
             prePayloadFrag, curPayloadFrag,
-            curInvalidByteNumReg, curInvalidBitNumReg
+            leftShiftInvalidByteNum, leftShiftInvalidBitNum
         } = payloadFragShiftQ.first;
         payloadFragShiftQ.deq;
 
         let outPayloadFrag = prePayloadFrag;
-        outPayloadFrag = mergeFragData(
+        outPayloadFrag = leftShiftMergeFragData(
             prePayloadFrag, curPayloadFrag,
-            curInvalidByteNumReg, curInvalidBitNumReg
+            leftShiftInvalidByteNum, leftShiftInvalidBitNum
         );
         pktPayloadOutQ.enq(outPayloadFrag);
+        // $display(
+        //     "time=%0t: shiftPayloadFrag", $time,
+        //     ", sgeIsOnlyReg=", fshow(sgeIsOnlyReg),
+        //     ", hasLessFragReg=", fshow(hasLessFragReg),
+        //     ", leftShiftInvalidByteNum=%0d", leftShiftInvalidByteNum,
+        //     ", leftShiftInvalidBitNum=%0d", leftShiftInvalidBitNum,
+        //     ", prePayloadFragReg.isFirst=", fshow(prePayloadFragReg.isFirst),
+        //     ", prePayloadFragReg.isLast=", fshow(prePayloadFragReg.isLast),
+        //     ", prePayloadFragReg.byteEn=%h", prePayloadFragReg.byteEn,
+        //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
+        //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
+        //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
+        //     ", outPayloadFrag.isFirst=", fshow(outPayloadFrag.isFirst),
+        //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
+        //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
+        // );
     endrule
 
     return toPipeOut(pktPayloadOutQ);
@@ -1871,7 +1866,7 @@ module mkMergePayloadAllSGE#(
         let curPayloadFrag = sgeMergedPayloadPipeIn.first;
         sgeMergedPayloadPipeIn.deq;
 
-        let mergedFrag = mergeFragData(
+        let mergedFrag = leftShiftMergeFragData(
             prePayloadFragReg, curPayloadFrag,
             curInvalidByteNumReg, curInvalidBitNumReg
         );
@@ -1947,7 +1942,7 @@ module mkMergePayloadAllSGE#(
         end
         prePayloadFragReg <= nextPayloadFrag;
 
-        outPayloadFrag = mergeFragData(
+        outPayloadFrag = leftShiftMergeFragData(
             prePayloadFragReg, nextPayloadFrag,
             curInvalidByteNumReg, curInvalidBitNumReg
         );
@@ -1991,9 +1986,12 @@ module mkAdjustPayloadSegment#(
     FIFOF#(DataStream) pktPayloadOutQ <- mkFIFOF;
 
     // Pipeline FIFO
-    FIFOF#(Tuple8#(
-        PMTU, PktFragNum, PktNum, ByteEnBitNum, BusBitNum, Bool, Bool, Bool
+    FIFOF#(Tuple7#(
+        PMTU, PktFragNum, PktNum, ByteEnBitNum, BusBitNum, Bool, Bool
     )) sglAdjustedPktMetaDataQ <- mkFIFOF;
+    FIFOF#(Tuple7#(
+        DataStream, DataStream, Bool, ByteEnBitNum, BusBitNum, Bool, ByteEn
+    )) payloadFragShiftQ <- mkFIFOF;
 
     Reg#(DataStream) prePayloadFragReg <- mkRegU;
     Reg#(ByteEn) firstPktLastFragByteEnReg <- mkRegU;
@@ -2004,7 +2002,6 @@ module mkAdjustPayloadSegment#(
     Reg#(Bool) isFirstPktReg <- mkRegU;
     Reg#(Bool) hasExtraFragReg <- mkRegU;
     Reg#(Bool) sglHasOnlyPktReg <- mkRegU;
-    Reg#(Bool) sglHasOnlyFragOnlyPktReg <- mkRegU;
 
     Reg#(PktFragNum) pmtuFragNumReg <- mkRegU;
     Reg#(PktFragNum) pktRemainingFragNumReg <- mkRegU;
@@ -2015,7 +2012,7 @@ module mkAdjustPayloadSegment#(
         actionvalue
             let {
                 pmtu, firstPktFragNum, adjustedPktNum, firstPktLastFragValidByteNum,
-                firstPktLastFragValidBitNum, sglHasOnlyPkt, hasExtraFrag, isOrigOnlyPkt
+                firstPktLastFragValidBitNum, sglHasOnlyPkt, hasExtraFrag
             } = sglAdjustedPktMetaDataQ.first;
             sglAdjustedPktMetaDataQ.deq;
 
@@ -2027,10 +2024,12 @@ module mkAdjustPayloadSegment#(
             firstPktLastFragValidByteNumReg <= firstPktLastFragValidByteNum;
             firstPktLastFragValidBitNumReg  <= firstPktLastFragValidBitNum;
 
-            firstPktLastFragByteEnReg <= genByteEn(firstPktLastFragValidByteNum);
+            let firstPktLastFragByteEn = genByteEn(firstPktLastFragValidByteNum);
+            firstPktLastFragByteEnReg <= firstPktLastFragByteEn;
 
             sglHasOnlyPktReg <= sglHasOnlyPkt;
             hasExtraFragReg  <= hasExtraFrag;
+            isFirstPktReg    <= True;
 
             if (sglHasOnlyPkt) begin
                 stateReg <= ADJUST_PAYLOAD_SEGMENT_LAST_OR_ONLY_PKT;
@@ -2042,29 +2041,20 @@ module mkAdjustPayloadSegment#(
             let curPayloadFrag = sglAllPayloadPipeIn.first;
             sglAllPayloadPipeIn.deq;
 
-            let sglHasOnlyFragOnlyPkt = isOrigOnlyPkt && curPayloadFrag.isLast;
-            sglHasOnlyFragOnlyPktReg <= sglHasOnlyFragOnlyPkt;
-
-            isFirstPktReg  <= True;
             // $display(
             //     "time=%0t: prepareNextSGL", $time,
             //     ", sglHasOnlyPkt=", fshow(sglHasOnlyPkt),
+            //     // ", hasExtraFragReg=", fshow(hasExtraFragReg),
             //     ", hasExtraFrag=", fshow(hasExtraFrag),
-            //     ", hasExtraFragReg=", fshow(hasExtraFragReg),
             //     // ", sgeMergedMetaData.isFirst=", fshow(sgeMergedMetaData.isFirst),
             //     // ", sgeMergedMetaData.isLast=", fshow(sgeMergedMetaData.isLast),
             //     ", firstPktLastFragValidByteNum=%0d", firstPktLastFragValidByteNum,
             //     ", firstPktLastFragValidBitNum=%0d", firstPktLastFragValidBitNum,
-            //     ", firstPktLastFragInvalidByteNum=%0d", firstPktLastFragInvalidByteNum,
-            //     ", firstPktLastFragInvalidBitNum=%0d", firstPktLastFragInvalidBitNum,
-            //     // ", lastPktLastFragValidByteNum=%0d", lastPktLastFragValidByteNum,
-            //     ", adjustedTotalPayloadMeta.pktNum=%0d", adjustedTotalPayloadMeta.adjustedPktNum,
+            //     ", firstPktLastFragByteEn=%h", firstPktLastFragByteEn,
+            //     ", adjustedPktNum=%0d", adjustedPktNum,
             //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
             //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
             //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn
-            //     // ", nextPrePayloadFrag.isFirst=", fshow(nextPrePayloadFrag.isFirst),
-            //     // ", nextPrePayloadFrag.isLast=", fshow(nextPrePayloadFrag.isLast),
-            //     // ", nextPrePayloadFrag.byteEn=%h", nextPrePayloadFrag.byteEn
             // );
             return curPayloadFrag;
         endactionvalue
@@ -2074,6 +2064,8 @@ module mkAdjustPayloadSegment#(
         pktPayloadOutQ.clear;
 
         sglAdjustedPktMetaDataQ.clear;
+        payloadFragShiftQ.clear;
+
         stateReg <= ADJUST_PAYLOAD_SEGMENT_INIT;
     endrule
 
@@ -2091,13 +2083,12 @@ module mkAdjustPayloadSegment#(
         } = calcFragBitNumAndByteNum(firstPktLastFragValidByteNum);
 
         let sglHasOnlyPkt = isOneR(adjustedTotalPayloadMeta.adjustedPktNum);
-        let hasExtraFrag = firstPktLastFragValidByteNum < origLastFragValidByteNum;
-        let isOrigOnlyPkt = isOneR(adjustedTotalPayloadMeta.origPktNum);
+        let hasExtraFrag  = firstPktLastFragValidByteNum < origLastFragValidByteNum;
 
-        sglAdjustedPktMetaDataQ.enq(tuple8(
+        sglAdjustedPktMetaDataQ.enq(tuple7(
             adjustedTotalPayloadMeta.pmtu, adjustedTotalPayloadMeta.firstPktFragNum,
             adjustedTotalPayloadMeta.adjustedPktNum, firstPktLastFragValidByteNum,
-            firstPktLastFragValidBitNum, sglHasOnlyPkt, hasExtraFrag, isOrigOnlyPkt
+            firstPktLastFragValidBitNum, sglHasOnlyPkt, hasExtraFrag
         ));
     endrule
 
@@ -2107,23 +2098,26 @@ module mkAdjustPayloadSegment#(
     endrule
 
     rule adjustFirstOrMidPkt if (!clearAll && stateReg == ADJUST_PAYLOAD_SEGMENT_FIRST_OR_MID_PKT);
-        let isLastFrag = isOneR(pktRemainingFragNumReg);
-        let outPayloadFrag = prePayloadFragReg;
+        let isAdjustedLastFrag = isOneR(pktRemainingFragNumReg);
+        let curPayloadFrag = genEmptyDataStream;
 
-        if (!sglHasOnlyFragOnlyPktReg) begin
-            let curPayloadFrag  = sglAllPayloadPipeIn.first;
-            let nextPayloadFrag = curPayloadFrag;
-
-            let mergedFrag = mergeFragData(
-                prePayloadFragReg, curPayloadFrag,
-                firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg
+        if (prePayloadFragReg.isLast) begin
+            immAssert(
+                isOneR(pktRemainingFragNumReg) && isTwoR(sglRemainingPktNumReg),
+                "pktRemainingFragNumReg and sglRemainingPktNumReg assertion @ mkAdjustPayloadSegment",
+                $format(
+                    "pktRemainingFragNumReg=%0d", pktRemainingFragNumReg,
+                    " should be one, and sglRemainingPktNumReg=%0d", sglRemainingPktNumReg,
+                    " should be two when prePayloadFragReg.isLast=", fshow(prePayloadFragReg.isLast),
+                    " and stateReg=", fshow(stateReg)
+                )
             );
+        end
+        else begin
+            curPayloadFrag = sglAllPayloadPipeIn.first;
 
-            if (!isFirstPktReg) begin
-                outPayloadFrag = mergedFrag;
-            end
-
-            if (!(isFirstPktReg && isLastFrag)) begin
+            let nextPayloadFrag = curPayloadFrag;
+            if (!(isFirstPktReg && isAdjustedLastFrag)) begin
                 sglAllPayloadPipeIn.deq;
             end
             else begin
@@ -2132,13 +2126,14 @@ module mkAdjustPayloadSegment#(
                 // So keep the last fragment of the first packet in prePayloadFragReg.
                 nextPayloadFrag = prePayloadFragReg;
             end
-            nextPayloadFrag.isFirst = isLastFrag;
+            nextPayloadFrag.isFirst = isAdjustedLastFrag;
             prePayloadFragReg <= nextPayloadFrag;
         end
 
-        if (isLastFrag) begin
+        let shouldChangeByteEn = False;
+        if (isAdjustedLastFrag) begin
             if (isFirstPktReg) begin
-                outPayloadFrag.byteEn = firstPktLastFragByteEnReg;
+                shouldChangeByteEn = True;
                 isFirstPktReg <= False;
             end
 
@@ -2156,13 +2151,19 @@ module mkAdjustPayloadSegment#(
             pktRemainingFragNumReg <= pktRemainingFragNumReg - 1;
         end
 
-        outPayloadFrag.isLast = isLastFrag;
-        pktPayloadOutQ.enq(outPayloadFrag);
+        let shouldShiftPayloadFrag = !isFirstPktReg;
+        let prePayloadFrag = prePayloadFragReg;
+        prePayloadFrag.isLast = isAdjustedLastFrag;
+        payloadFragShiftQ.enq(tuple7(
+            prePayloadFrag, curPayloadFrag, shouldShiftPayloadFrag,
+            firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg,
+            shouldChangeByteEn, firstPktLastFragByteEnReg
+        ));
         // $display(
         //     "time=%0t: adjustFirstOrMidPkt", $time,
-        //     ", sglHasOnlyFragOnlyPktReg=", fshow(sglHasOnlyFragOnlyPktReg),
         //     ", hasExtraFragReg=", fshow(hasExtraFragReg),
-        //     ", isLastFrag=", fshow(isLastFrag),
+        //     ", isAdjustedLastFrag=", fshow(isAdjustedLastFrag),
+        //     ", shouldShiftPayloadFrag=", fshow(shouldShiftPayloadFrag),
         //     ", pktRemainingFragNumReg=%0d", pktRemainingFragNumReg,
         //     ", sglRemainingPktNumReg=%0d", sglRemainingPktNumReg,
         //     ", firstPktLastFragValidByteNumReg=%0d", firstPktLastFragValidByteNumReg,
@@ -2170,12 +2171,9 @@ module mkAdjustPayloadSegment#(
         //     ", prePayloadFragReg.isFirst=", fshow(prePayloadFragReg.isFirst),
         //     ", prePayloadFragReg.isLast=", fshow(prePayloadFragReg.isLast),
         //     ", prePayloadFragReg.byteEn=%h", prePayloadFragReg.byteEn,
-        //     // ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
-        //     // ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
-        //     // ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
-        //     // ", mergedFrag.isFirst=", fshow(mergedFrag.isFirst),
-        //     // ", mergedFrag.isLast=", fshow(mergedFrag.isLast),
-        //     // ", mergedFrag.byteEn=%h", mergedFrag.byteEn,
+        //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
+        //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
+        //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
         //     ", outPayloadFrag.isFirst=", fshow(outPayloadFrag.isFirst),
         //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
         //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
@@ -2206,28 +2204,28 @@ module mkAdjustPayloadSegment#(
                 isLastFrag = True;
             end
         end
-
-        let mergedFrag = mergeFragData(
-            prePayloadFragReg, nextPayloadFrag,
-            firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg
-        );
         prePayloadFragReg <= nextPayloadFrag;
 
         immAssert(
             isOne(sglRemainingPktNumReg),
             "sglRemainingPktNumReg assertion @ mkAdjustPayloadSegment",
             $format(
-                "sglRemainingPktNumReg=%0d", fshow(sglRemainingPktNumReg),
+                "sglRemainingPktNumReg=%0d", sglRemainingPktNumReg,
                 " should be one when stateReg=", fshow(stateReg)
             )
         );
 
-        let outPayloadFrag = prePayloadFragReg;
-        if (!sglHasOnlyPktReg) begin
-            outPayloadFrag = mergedFrag;
-            outPayloadFrag.isLast  = isLastFrag;
-        end
-        pktPayloadOutQ.enq(outPayloadFrag);
+        let shouldChangeByteEn = False;
+        let invalidByteEn = dontCareValue;
+        let shouldShiftPayloadFrag = !sglHasOnlyPktReg;
+        let prePayloadFrag = prePayloadFragReg;
+        prePayloadFrag.isLast = isLastFrag;
+        payloadFragShiftQ.enq(tuple7(
+            prePayloadFrag, nextPayloadFrag, shouldShiftPayloadFrag,
+            firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg,
+            shouldChangeByteEn, invalidByteEn
+        ));
+
         // $display(
         //     "time=%0t: adjustLastOrOnlyPkt", $time,
         //     ", sglHasOnlyPktReg=", fshow(sglHasOnlyPktReg),
@@ -2244,267 +2242,31 @@ module mkAdjustPayloadSegment#(
         // );
     endrule
 
-    return toPipeOut(pktPayloadOutQ);
-endmodule
-/*
-module mkAdjustPayloadSegment#(
-    Bool clearAll,
-    PipeOut#(AdjustedTotalPayloadMetaData) adjustedTotalPayloadMetaDataPipeIn,
-    PipeOut#(DataStream) sglAllPayloadPipeIn
-)(DataStreamPipeOut);
-    FIFOF#(DataStream) pktPayloadOutQ <- mkFIFOF;
+    rule shiftPayloadFrag if (!clearAll);
+        let {
+            prePayloadFrag, curPayloadFrag, shouldShiftPayloadFrag,
+            firstPktLastFragValidByteNum, firstPktLastFragValidBitNum,
+            shouldChangeByteEn, firstPktLastFragByteEn
+        } = payloadFragShiftQ.first;
+        payloadFragShiftQ.deq;
 
-    Reg#(DataStream) prePayloadFragReg <- mkRegU;
-    Reg#(ByteEn) firstPktLastFragByteEnReg <- mkRegU;
-
-    Reg#(ByteEnBitNum) firstPktLastFragValidByteNumReg <- mkRegU;
-    Reg#(BusBitNum)     firstPktLastFragValidBitNumReg <- mkRegU;
-    // Reg#(ByteEnBitNum) firstPktLastFragInvalidByteNumReg <- mkRegU;
-    // Reg#(BusBitNum)     firstPktLastFragInvalidBitNumReg <- mkRegU;
-    // Reg#(ByteEnBitNum)  lastPktLastFragInvalidByteNumReg <- mkRegU;
-    // Reg#(BusBitNum)      lastPktLastFragInvalidBitNumReg <- mkRegU;
-
-    // Reg#(Bool) isFirstFragReg <- mkRegU;
-    Reg#(Bool) isFirstPktReg <- mkRegU;
-    Reg#(Bool) hasExtraFragReg <- mkRegU;
-    Reg#(Bool) sglHasOnlyPktReg <- mkRegU;
-    Reg#(Bool) sglHasOnlyFragOnlyPktReg <- mkRegU;
-
-    // Reg#(PktFragNum) lastPktFragNumReg <- mkRegU;
-    Reg#(PktFragNum) pmtuFragNumReg <- mkRegU;
-    Reg#(PktFragNum) pktRemainingFragNumReg <- mkRegU;
-    Reg#(PktNum) sglRemainingPktNumReg <- mkRegU;
-    Reg#(AdjustPayloadSegmentState) stateReg <- mkReg(ADJUST_PAYLOAD_SEGMENT_INIT);
-
-    rule resetAndClear if (clearAll);
-        pktPayloadOutQ.clear;
-        stateReg <= ADJUST_PAYLOAD_SEGMENT_INIT;
-    endrule
-
-    function ActionValue#(DataStream) prepareNextSGL();
-        actionvalue
-            let adjustedTotalPayloadMeta = adjustedTotalPayloadMetaDataPipeIn.first;
-            adjustedTotalPayloadMetaDataPipeIn.deq;
-
-            pmtuFragNumReg <= calcFragNumByPMTU(adjustedTotalPayloadMeta.pmtu);
-
-            pktRemainingFragNumReg <= adjustedTotalPayloadMeta.firstPktFragNum;
-            sglRemainingPktNumReg  <= adjustedTotalPayloadMeta.adjustedPktNum;
-            // lastPktFragNumReg <= adjustedTotalPayloadMeta.lastPktFragNum;
-
-            let origLastFragValidByteNum     = adjustedTotalPayloadMeta.origLastFragValidByteNum;
-            let firstPktLastFragValidByteNum = adjustedTotalPayloadMeta.firstPktLastFragValidByteNum;
-            // let lastPktLastFragValidByteNum  = adjustedTotalPayloadMeta.lastPktLastFragValidByteNum;
-            let {
-                firstPktLastFragValidBitNum,
-                firstPktLastFragInvalidByteNum,
-                firstPktLastFragInvalidBitNum
-            } = calcFragBitNumAndByteNum(firstPktLastFragValidByteNum);
-
-            firstPktLastFragValidByteNumReg <= firstPktLastFragValidByteNum;
-            firstPktLastFragValidBitNumReg  <= firstPktLastFragValidBitNum;
-            // firstPktLastFragInvalidByteNumReg <= firstPktLastFragInvalidByteNum;
-            // firstPktLastFragInvalidBitNumReg <= firstPktLastFragInvalidBitNum;
-            firstPktLastFragByteEnReg <= genByteEn(firstPktLastFragValidByteNum);
-
-            // let {
-            //     lastPktLastFragValidBitNum,
-            //     lastPktLastFragInvalidByteNum,
-            //     lastPktLastFragInvalidBitNum
-            // } = calcFragBitNumAndByteNum(lastPktLastFragValidByteNum);
-            // lastPktLastFragInvalidByteNumReg <= lastPktLastFragInvalidByteNum;
-            // lastPktLastFragInvalidBitNumReg <= lastPktLastFragInvalidBitNum;
-            let sglHasOnlyPkt = isOneR(adjustedTotalPayloadMeta.adjustedPktNum);
-            sglHasOnlyPktReg <= sglHasOnlyPkt;
-            let hasExtraFrag = firstPktLastFragValidByteNum < origLastFragValidByteNum;
-            hasExtraFragReg <= hasExtraFrag;
-
-            if (sglHasOnlyPkt) begin
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_LAST_OR_ONLY_PKT;
-            end
-            else begin
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_FIRST_OR_MID_PKT;
-            end
-
-            let curPayloadFrag = sglAllPayloadPipeIn.first;
-            sglAllPayloadPipeIn.deq;
-
-            let isOrigOnlyPkt = isOneR(adjustedTotalPayloadMeta.origPktNum);
-            let sglHasOnlyFragOnlyPkt = isOrigOnlyPkt && curPayloadFrag.isLast;
-            sglHasOnlyFragOnlyPktReg <= sglHasOnlyFragOnlyPkt;
-
-            isFirstPktReg  <= True;
-            // $display(
-            //     "time=%0t: prepareNextSGL", $time,
-            //     ", sglHasOnlyPkt=", fshow(sglHasOnlyPkt),
-            //     ", hasExtraFrag=", fshow(hasExtraFrag),
-            //     ", hasExtraFragReg=", fshow(hasExtraFragReg),
-            //     // ", sgeMergedMetaData.isFirst=", fshow(sgeMergedMetaData.isFirst),
-            //     // ", sgeMergedMetaData.isLast=", fshow(sgeMergedMetaData.isLast),
-            //     ", firstPktLastFragValidByteNum=%0d", firstPktLastFragValidByteNum,
-            //     ", firstPktLastFragValidBitNum=%0d", firstPktLastFragValidBitNum,
-            //     ", firstPktLastFragInvalidByteNum=%0d", firstPktLastFragInvalidByteNum,
-            //     ", firstPktLastFragInvalidBitNum=%0d", firstPktLastFragInvalidBitNum,
-            //     // ", lastPktLastFragValidByteNum=%0d", lastPktLastFragValidByteNum,
-            //     ", adjustedTotalPayloadMeta.pktNum=%0d", adjustedTotalPayloadMeta.adjustedPktNum,
-            //     ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
-            //     ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
-            //     ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn
-            //     // ", nextPrePayloadFrag.isFirst=", fshow(nextPrePayloadFrag.isFirst),
-            //     // ", nextPrePayloadFrag.isLast=", fshow(nextPrePayloadFrag.isLast),
-            //     // ", nextPrePayloadFrag.byteEn=%h", nextPrePayloadFrag.byteEn
-            // );
-            return curPayloadFrag;
-        endactionvalue
-    endfunction
-
-    rule init if (!clearAll && stateReg == ADJUST_PAYLOAD_SEGMENT_INIT);
-        let nextPrePayloadFrag <- prepareNextSGL;
-        prePayloadFragReg <= nextPrePayloadFrag;
-    endrule
-
-    rule adjustFirstOrMidPkt if (!clearAll && stateReg == ADJUST_PAYLOAD_SEGMENT_FIRST_OR_MID_PKT);
-        let isLastFrag = isOneR(pktRemainingFragNumReg);
-        let outPayloadFrag = prePayloadFragReg;
-
-        if (!sglHasOnlyFragOnlyPktReg) begin
-            let curPayloadFrag  = sglAllPayloadPipeIn.first;
-            let nextPayloadFrag = curPayloadFrag;
-
-            let mergedFrag = mergeFragData(
-                prePayloadFragReg, curPayloadFrag,
-                firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg
+        let outPayloadFrag = prePayloadFrag;
+        if (shouldShiftPayloadFrag) begin
+            outPayloadFrag = leftShiftMergeFragData(
+                prePayloadFrag, curPayloadFrag,
+                firstPktLastFragValidByteNum, firstPktLastFragValidBitNum
             );
-
-            if (!isFirstPktReg) begin
-                outPayloadFrag = mergedFrag;
-            end
-
-            if (!(isFirstPktReg && isLastFrag)) begin
-                sglAllPayloadPipeIn.deq;
-            end
-            else begin
-                // Do not dequeue when the last fragment of the first packet,
-                // Since the queue head is the first fragment of the next packet,
-                // So keep the last fragment of the first packet in prePayloadFragReg.
-                nextPayloadFrag = prePayloadFragReg;
-            end
-            nextPayloadFrag.isFirst = isLastFrag;
-            prePayloadFragReg <= nextPayloadFrag;
         end
 
-        if (isLastFrag) begin
-            if (isFirstPktReg) begin
-                outPayloadFrag.byteEn = firstPktLastFragByteEnReg;
-                isFirstPktReg <= False;
-            end
-
-            sglRemainingPktNumReg <= sglRemainingPktNumReg - 1;
-
-            if (isTwoR(sglRemainingPktNumReg)) begin
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_LAST_OR_ONLY_PKT;
-            end
-            else begin
-                pktRemainingFragNumReg <= pmtuFragNumReg;
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_FIRST_OR_MID_PKT;
-            end
-        end
-        else begin
-            pktRemainingFragNumReg <= pktRemainingFragNumReg - 1;
-        end
-
-        outPayloadFrag.isLast = isLastFrag;
-        pktPayloadOutQ.enq(outPayloadFrag);
-        // $display(
-        //     "time=%0t: adjustFirstOrMidPkt", $time,
-        //     ", sglHasOnlyFragOnlyPktReg=", fshow(sglHasOnlyFragOnlyPktReg),
-        //     // ", isFirstFragReg=", fshow(isFirstFragReg),
-        //     ", hasExtraFragReg=", fshow(hasExtraFragReg),
-        //     ", isLastFrag=", fshow(isLastFrag),
-        //     ", pktRemainingFragNumReg=%0d", pktRemainingFragNumReg,
-        //     ", sglRemainingPktNumReg=%0d", sglRemainingPktNumReg,
-        //     ", firstPktLastFragValidByteNumReg=%0d", firstPktLastFragValidByteNumReg,
-        //     ", firstPktLastFragValidBitNumReg=%0d", firstPktLastFragValidBitNumReg,
-        //     ", prePayloadFragReg.isFirst=", fshow(prePayloadFragReg.isFirst),
-        //     ", prePayloadFragReg.isLast=", fshow(prePayloadFragReg.isLast),
-        //     ", prePayloadFragReg.byteEn=%h", prePayloadFragReg.byteEn,
-        //     // ", curPayloadFrag.isFirst=", fshow(curPayloadFrag.isFirst),
-        //     // ", curPayloadFrag.isLast=", fshow(curPayloadFrag.isLast),
-        //     // ", curPayloadFrag.byteEn=%h", curPayloadFrag.byteEn,
-        //     // ", mergedFrag.isFirst=", fshow(mergedFrag.isFirst),
-        //     // ", mergedFrag.isLast=", fshow(mergedFrag.isLast),
-        //     // ", mergedFrag.byteEn=%h", mergedFrag.byteEn,
-        //     ", outPayloadFrag.isFirst=", fshow(outPayloadFrag.isFirst),
-        //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
-        //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
-        // );
-    endrule
-
-    rule adjustLastOrOnlyPkt if (!clearAll && stateReg == ADJUST_PAYLOAD_SEGMENT_LAST_OR_ONLY_PKT);
-        let nextPayloadFrag = genEmptyDataStream;
-
-        let isLastFrag = prePayloadFragReg.isLast;
-        if (prePayloadFragReg.isLast) begin
-            if (adjustedTotalPayloadMetaDataPipeIn.notEmpty && sglAllPayloadPipeIn.notEmpty) begin
-                nextPayloadFrag <- prepareNextSGL;
-            end
-            else begin
-                // Wait for a packet of next SGE, if no next SGE packet metadata or payload
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_INIT;
-            end
-        end
-        else begin
-            nextPayloadFrag = sglAllPayloadPipeIn.first;
-            sglAllPayloadPipeIn.deq;
-
-            nextPayloadFrag.isFirst = False;
-            if (!sglHasOnlyPktReg && !hasExtraFragReg && nextPayloadFrag.isLast) begin
-                // No extra fragment
-                stateReg <= ADJUST_PAYLOAD_SEGMENT_INIT;
-                isLastFrag = True;
-            end
-        end
-
-        let mergedFrag = mergeFragData(
-            prePayloadFragReg, nextPayloadFrag,
-            firstPktLastFragValidByteNumReg, firstPktLastFragValidBitNumReg
-        );
-        prePayloadFragReg <= nextPayloadFrag;
-
-        immAssert(
-            isOne(sglRemainingPktNumReg),
-            "sglRemainingPktNumReg assertion @ mkAdjustPayloadSegment",
-            $format(
-                "sglRemainingPktNumReg=%0d", fshow(sglRemainingPktNumReg),
-                " should be one when stateReg=", fshow(stateReg)
-            )
-        );
-
-        let outPayloadFrag = prePayloadFragReg;
-        if (!sglHasOnlyPktReg) begin
-            outPayloadFrag = mergedFrag;
-            outPayloadFrag.isLast  = isLastFrag;
+        if (shouldChangeByteEn) begin
+            outPayloadFrag.byteEn = firstPktLastFragByteEn;
         end
         pktPayloadOutQ.enq(outPayloadFrag);
-        // $display(
-        //     "time=%0t: adjustLastOrOnlyPkt", $time,
-        //     ", sglHasOnlyPktReg=", fshow(sglHasOnlyPktReg),
-        //     ", hasExtraFragReg=", fshow(hasExtraFragReg),
-        //     ", prePayloadFragReg.isFirst=", fshow(prePayloadFragReg.isFirst),
-        //     ", prePayloadFragReg.isLast=", fshow(prePayloadFragReg.isLast),
-        //     ", prePayloadFragReg.byteEn=%h", prePayloadFragReg.byteEn,
-        //     ", nextPayloadFrag.isFirst=", fshow(nextPayloadFrag.isFirst),
-        //     ", nextPayloadFrag.isLast=", fshow(nextPayloadFrag.isLast),
-        //     ", nextPayloadFrag.byteEn=%h", nextPayloadFrag.byteEn,
-        //     ", outPayloadFrag.isFirst=", fshow(outPayloadFrag.isFirst),
-        //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
-        //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
-        // );
     endrule
 
     return toPipeOut(pktPayloadOutQ);
 endmodule
-*/
+
 interface BramPipe#(type anytype);
     interface PipeOut#(anytype) pipeOut;
     method Action clear();
@@ -2583,7 +2345,6 @@ typedef struct {
     ADDR   secondRemoteAddr;
     Length totalLen;
     PktNum totalPktNum;
-    PktNum origPktNum;
     PktLen firstPktLen;
     PktLen lastPktLen;
     PktLen pmtuLen;
@@ -2726,13 +2487,15 @@ module mkPayloadGenerator#(
         adjustReqPktLenQ.enq(tuple2(payloadGenReq, tmpPayloadGenMetaData));
         // $display(
         //     "time=%0t: mkPayloadGenerator recvReq", $time,
-        //     ", payloadGenReq=", fshow(payloadGenReq)
+        //     // ", payloadGenReq=", fshow(payloadGenReq),
+        //     ", isZeroPayloadLen=", fshow(isZeroPayloadLen)
         // );
     endrule
 
     rule recvDmaReadCntrlResp if (!clearAll);
         let dmaReadCntrlResp <- dmaReadCntrl.srvPort.response.get;
         sgePayloadOutQ.enq(dmaReadCntrlResp.dmaReadResp.dataStream);
+        // $display("time=%0t: recvDmaReadCntrlResp", $time);
     endrule
 
     rule issueDmaReqAndAdjustFirstAndLastPktLen if (!clearAll);
@@ -2771,17 +2534,11 @@ module mkPayloadGenerator#(
             truncatedPktNum, pmtuAlignedStartAddr, payloadGenReq.pmtu
         );
 
-        let { origTruncatedPktNum, origResidue } = truncateLenByPMTU(
-            payloadGenReq.totalLen, payloadGenReq.pmtu
-        );
-        let origPktNum = origTruncatedPktNum + (isZeroR(origResidue) ? 0 : 1);
-
         let adjustMetaData = TmpAdjustMetaData {
             firstRemoteAddr : payloadGenReq.raddr,
             secondRemoteAddr: secondChunkStartAddr,
             totalLen        : payloadGenReq.totalLen,
             totalPktNum     : totalPktNum,
-            origPktNum      : origPktNum,
             firstPktLen     : firstPktLen,
             lastPktLen      : lastPktLen,
             pmtuLen         : pmtuLen,
@@ -2791,7 +2548,8 @@ module mkPayloadGenerator#(
         adjustedFirstAndLastPktLenQ.enq(adjustMetaData);
         // $display(
         //     "time=%0t: mkPayloadGenerator issueDmaReqAndAdjustFirstAndLastPktLen", $time,
-        //     ", payloadGenReq=", fshow(payloadGenReq)
+        //     // ", payloadGenReq=", fshow(payloadGenReq),
+        //     ", isZeroPayloadLen=", fshow(isZeroPayloadLen)
         // );
     endrule
 
@@ -2803,7 +2561,6 @@ module mkPayloadGenerator#(
         let secondRemoteAddr = adjustMetaData.secondRemoteAddr;
         let totalLen         = adjustMetaData.totalLen;
         let totalPktNum      = adjustMetaData.totalPktNum;
-        let origPktNum       = adjustMetaData.origPktNum;
         let firstPktLen      = adjustMetaData.firstPktLen;
         let lastPktLen       = adjustMetaData.lastPktLen;
         let pmtuLen          = adjustMetaData.pmtuLen;
@@ -2825,7 +2582,6 @@ module mkPayloadGenerator#(
             firstPktLastFragValidByteNum : firstPktLastFragValidByteNum,
             origLastFragValidByteNum     : origLastFragValidByteNum,
             adjustedPktNum               : totalPktNum,
-            origPktNum                   : origPktNum,
             pmtu                         : pmtu
         };
         if (!isZeroPayloadLen) begin
@@ -2858,7 +2614,8 @@ module mkPayloadGenerator#(
         totalMetaDataOutQ.enq(totalMetaData);
         // $display(
         //     "time=%0t: mkPayloadGenerator calcAdjustedTotalPayloadMetaData", $time,
-        //     ", adjustedTotalPayloadMetaData=", fshow(adjustedTotalPayloadMetaData)
+        //     // ", adjustedTotalPayloadMetaData=", fshow(adjustedTotalPayloadMetaData),
+        //     ", isZeroPayloadLen=", fshow(isZeroPayloadLen)
         // );
     endrule
 
@@ -2993,7 +2750,7 @@ module mkPayloadGenerator#(
             // );
         end
         // $display(
-        //     "time=%0t: PayloadGenerator genRespAndAddPadding", $time,
+        //     "time=%0t: mkPayloadGenerator genRespAndAddPadding", $time,
         //     ", isZeroPayloadLen=", fshow(isZeroPayloadLen),
         //     ", isFirstPkt=", fshow(isFirstPkt),
         //     ", isLastPkt=", fshow(isLastPkt),
