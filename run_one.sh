@@ -9,7 +9,7 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-TEST_LOG=test.log
+TEST_LOG=run.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
@@ -22,7 +22,7 @@ for FILE in $FILES; do
     done
 done
 
-###########################################################
+###########################################################################
 
 FAIL_KEYWORKS='Error\|ImmAssert'
 grep -w $FAIL_KEYWORKS $TEST_LOG | cat

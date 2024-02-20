@@ -1345,6 +1345,17 @@ typedef enum {
     MERGE_SGL_PAYLOAD_LAST_OR_ONLY_SGE
 } MergePayloadStateAllSGE deriving(Bits, Eq, FShow);
 
+typedef struct {
+    ByteEnBitNum lastFragInvalidByteNum;
+    BusBitNum    lastFragInvalidBitNum;
+    ByteEnBitNum curInvalidByteNum;
+    BusBitNum    curInvalidBitNum;
+    Bool         isOnlySGE;
+    Bool         sgeIsFirst;
+    Bool         sgeIsLast;
+    Bool         hasLessFrag;
+} TmpMergedMetaDataSGE deriving(Bits);
+
 module mkMergePayloadAllSGE#(
     Bool clearAll,
     PipeOut#(MergedMetaDataSGE) sgeMergedMetaDataPipeIn,
@@ -1353,23 +1364,21 @@ module mkMergePayloadAllSGE#(
     FIFOF#(DataStream) pktPayloadOutQ <- mkFIFOF;
 
     // Pipeline FIFO
-    FIFOF#(Tuple8#(
-        ByteEnBitNum, BusBitNum, ByteEnBitNum, BusBitNum, Bool, Bool, Bool, Bool
-    )) metaDataQ4EachSGE <- mkFIFOF;
-    // Reg#(ByteEnBitNum)   preValidByteNumReg <- mkRegU;
+    FIFOF#(TmpMergedMetaDataSGE) mergedMetaDataQ4EachSGE <- mkFIFOF;
+    FIFOF#(Tuple4#(DataStream, DataStream, ByteEnBitNum, BusBitNum)) payloadFragShiftQ <- mkFIFOF;
+
     Reg#(ByteEnBitNum) preInvalidByteNumReg <- mkRegU;
     Reg#(BusBitNum)     preInvalidBitNumReg <- mkRegU;
 
-    // Reg#(ByteEnBitNum)    curValidByteNumReg <- mkRegU;
+    Reg#(ByteEnBitNum) lastFragInvalidByteNumReg <- mkRegU;
+    Reg#(BusBitNum)     lastFragInvalidBitNumReg <- mkRegU;
+
     Reg#(ByteEnBitNum)  curInvalidByteNumReg <- mkRegU;
     Reg#(BusBitNum)      curInvalidBitNumReg <- mkRegU;
-    // Reg#(ByteEnBitNum)   nextValidByteNumReg <- mkRegU;
-    Reg#(ByteEnBitNum) nextInvalidByteNumReg <- mkRegU;
-    Reg#(BusBitNum)     nextInvalidBitNumReg <- mkRegU;
 
     Reg#(Bool) isFirstFragReg <- mkRegU;
-    Reg#(Bool) sgeIsOnlyReg <- mkRegU;
-    Reg#(Bool) sgeIsLastReg <- mkRegU;
+    Reg#(Bool) sgeIsOnlyReg   <- mkRegU;
+    Reg#(Bool) sgeIsLastReg   <- mkRegU;
     Reg#(Bool) hasLessFragReg <- mkRegU;
     Reg#(DataStream) prePayloadFragReg <- mkRegU;
     Reg#(MergePayloadStateAllSGE) stateReg <- mkReg(MERGE_SGL_PAYLOAD_INIT);
@@ -1379,14 +1388,20 @@ module mkMergePayloadAllSGE#(
 
     function ActionValue#(DataStream) preprocessNextSGL();
         actionvalue
-            let {
-                curInvalidByteNum, curInvalidBitNum, nextInvalidByteNum, nextInvalidBitNum,
-                isOnlySGE, sgeIsFirst, sgeIsLast, hasLessFrag
-            } = metaDataQ4EachSGE.first;
-            metaDataQ4EachSGE.deq;
+            let tmpMergedMetaDataSGE = mergedMetaDataQ4EachSGE.first;
+            mergedMetaDataQ4EachSGE.deq;
 
-            sgeIsOnlyReg <= isOnlySGE;
-            sgeIsLastReg <= sgeIsLast;
+            let lastFragInvalidByteNum = tmpMergedMetaDataSGE.lastFragInvalidByteNum;
+            let lastFragInvalidBitNum  = tmpMergedMetaDataSGE.lastFragInvalidBitNum;
+            let curInvalidByteNum      = tmpMergedMetaDataSGE.curInvalidByteNum;
+            let curInvalidBitNum       = tmpMergedMetaDataSGE.curInvalidBitNum;
+            let isOnlySGE              = tmpMergedMetaDataSGE.isOnlySGE;
+            let sgeIsFirst             = tmpMergedMetaDataSGE.sgeIsFirst;
+            let sgeIsLast              = tmpMergedMetaDataSGE.sgeIsLast;
+            let hasLessFrag            = tmpMergedMetaDataSGE.hasLessFrag;
+
+            sgeIsOnlyReg   <= isOnlySGE;
+            sgeIsLastReg   <= sgeIsLast;
             isFirstFragReg <= True;
 
             let curPayloadFrag = sgeMergedPayloadPipeIn.first;
@@ -1405,12 +1420,11 @@ module mkMergePayloadAllSGE#(
             end
             hasLessFragReg <= nextHasLessFrag;
 
-            // curValidByteNumReg    <= nextHasLessFrag ? 0 : fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
+            lastFragInvalidByteNumReg <= lastFragInvalidByteNum;
+            lastFragInvalidBitNumReg  <= lastFragInvalidBitNum;
+
             curInvalidByteNumReg  <= nextHasLessFrag ? fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)) : 0;
             curInvalidBitNumReg   <= nextHasLessFrag ? fromInteger(valueOf(DATA_BUS_WIDTH)) : 0;
-            // nextValidByteNumReg   <= nextValidByteNum;
-            nextInvalidByteNumReg <= nextInvalidByteNum;
-            nextInvalidBitNumReg  <= nextInvalidBitNum;
 
             let nextState = case ({ pack(sgeIsFirst), pack(sgeIsLast) })
                 2'b11, 2'b01: MERGE_SGL_PAYLOAD_LAST_OR_ONLY_SGE;
@@ -1447,22 +1461,26 @@ module mkMergePayloadAllSGE#(
 
     function Action preprocessNextSGE();
         action
-            let {
-                curInvalidByteNum, curInvalidBitNum, nextInvalidByteNum, nextInvalidBitNum,
-                isOnlySGE, sgeIsFirst, sgeIsLast, hasLessFrag
-            } = metaDataQ4EachSGE.first;
-            metaDataQ4EachSGE.deq;
+            let tmpMergedMetaDataSGE = mergedMetaDataQ4EachSGE.first;
+            mergedMetaDataQ4EachSGE.deq;
 
-            sgeIsLastReg <= sgeIsLast;
+            let lastFragInvalidByteNum = tmpMergedMetaDataSGE.lastFragInvalidByteNum;
+            let lastFragInvalidBitNum  = tmpMergedMetaDataSGE.lastFragInvalidBitNum;
+            let curInvalidByteNum      = tmpMergedMetaDataSGE.curInvalidByteNum;
+            let curInvalidBitNum       = tmpMergedMetaDataSGE.curInvalidBitNum;
+            let isOnlySGE              = tmpMergedMetaDataSGE.isOnlySGE;
+            let sgeIsFirst             = tmpMergedMetaDataSGE.sgeIsFirst;
+            let sgeIsLast              = tmpMergedMetaDataSGE.sgeIsLast;
+            let hasLessFrag            = tmpMergedMetaDataSGE.hasLessFrag;
+
+            sgeIsLastReg   <= sgeIsLast;
             hasLessFragReg <= hasLessFrag;
 
-            // curValidByteNumReg   <= curValidByteNum;
+            lastFragInvalidByteNumReg <= lastFragInvalidByteNum;
+            lastFragInvalidBitNumReg  <= lastFragInvalidBitNum;
+
             curInvalidByteNumReg <= curInvalidByteNum;
             curInvalidBitNumReg  <= curInvalidBitNum;
-
-            // nextValidByteNumReg   <= nextValidByteNum;
-            nextInvalidByteNumReg <= nextInvalidByteNum;
-            nextInvalidBitNumReg  <= nextInvalidBitNum;
 
             let nextState = case ({ pack(sgeIsFirst), pack(sgeIsLast) })
                 2'b11, 2'b01: MERGE_SGL_PAYLOAD_LAST_OR_ONLY_SGE;
@@ -1494,7 +1512,9 @@ module mkMergePayloadAllSGE#(
     rule resetAndClear if (clearAll);
         pktPayloadOutQ.clear;
 
-        metaDataQ4EachSGE.clear;
+        mergedMetaDataQ4EachSGE.clear;
+        payloadFragShiftQ.clear;
+
         stateReg <= MERGE_SGL_PAYLOAD_INIT;
     endrule
 
@@ -1511,12 +1531,10 @@ module mkMergePayloadAllSGE#(
             lastFragValidBitNum, lastFragInvalidByteNum, lastFragInvalidBitNum
         } = calcFragBitNumAndByteNum(lastFragValidByteNum);
 
-        // let curValidByteNum    = 0; // fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
-        let curInvalidByteNum  = fromInteger(valueOf(DATA_BUS_BYTE_WIDTH)); // 0;
-        let curInvalidBitNum   = fromInteger(valueOf(DATA_BUS_WIDTH)); // 0;
-        // let nextValidByteNum   = lastFragValidByteNum;
-        let nextInvalidByteNum = lastFragInvalidByteNum;
-        let nextInvalidBitNum  = lastFragInvalidBitNum;
+        let curInvalidByteNum  =  0;
+        let curInvalidBitNum   =  0;
+        let preInvalidByteNum = lastFragInvalidByteNum;
+        let preInvalidBitNum  = lastFragInvalidBitNum;
 
         let hasLessFrag = lastFragValidByteNum < fromInteger(valueOf(DATA_BUS_BYTE_WIDTH));
         if (!sgeIsFirst) begin
@@ -1530,19 +1548,25 @@ module mkMergePayloadAllSGE#(
             curInvalidByteNum = preInvalidByteNumReg;
             curInvalidBitNum  = preInvalidBitNumReg;
 
-            // nextValidByteNum   = sumValidByteNum   & zeroExtend(busByteNumMask);
-            nextInvalidByteNum = sumInvalidByteNum & zeroExtend(busByteNumMask);
-            nextInvalidBitNum  = sumInvalidBitNum  & zeroExtend(busBitNumMask);
+            // preValidByteNum   = sumValidByteNum   & zeroExtend(busByteNumMask);
+            preInvalidByteNum = sumInvalidByteNum & zeroExtend(busByteNumMask);
+            preInvalidBitNum  = sumInvalidBitNum  & zeroExtend(busBitNumMask);
         end
 
-        // preValidByteNumReg   <= nextValidByteNum;
-        preInvalidByteNumReg <= nextInvalidByteNum;
-        preInvalidBitNumReg  <= nextInvalidBitNum;
+        preInvalidByteNumReg <= preInvalidByteNum;
+        preInvalidBitNumReg  <= preInvalidBitNum;
 
-        metaDataQ4EachSGE.enq(tuple8(
-            curInvalidByteNum, curInvalidBitNum, nextInvalidByteNum, nextInvalidBitNum,
-            isOnlySGE, sgeIsFirst, sgeIsLast, hasLessFrag
-        ));
+        let tmpMergedMetaDataSGE = TmpMergedMetaDataSGE {
+            lastFragInvalidByteNum: lastFragInvalidByteNum,
+            lastFragInvalidBitNum : lastFragInvalidBitNum,
+            curInvalidByteNum     : curInvalidByteNum,
+            curInvalidBitNum      : curInvalidBitNum,
+            isOnlySGE             : isOnlySGE,
+            sgeIsFirst            : sgeIsFirst,
+            sgeIsLast             : sgeIsLast,
+            hasLessFrag           : hasLessFrag
+        };
+        mergedMetaDataQ4EachSGE.enq(tmpMergedMetaDataSGE);
     endrule
 
     rule mergePayloadInit if (!clearAll && stateReg == MERGE_SGL_PAYLOAD_INIT);
@@ -1554,33 +1578,32 @@ module mkMergePayloadAllSGE#(
         let curPayloadFrag = sgeMergedPayloadPipeIn.first;
         sgeMergedPayloadPipeIn.deq;
 
-        let mergedFrag = mergeFragData(
-            prePayloadFragReg, curPayloadFrag,
-            curInvalidByteNumReg, curInvalidBitNumReg
-        );
-        // In case prePayloadFragReg is emptyDataStream,
-        // then it should set mergeFrag.isFirst as true.
-        mergedFrag.isFirst = isFirstFragReg;
-
         let shouldOutput = True;
-        let nextPrePayloadFrag = mergedFrag;
+        let nextPrePayloadFrag = curPayloadFrag;
         if (curPayloadFrag.isLast) begin
             preprocessNextSGE;
 
-            if (hasLessFragReg) begin
-                shouldOutput = False;
-                nextPrePayloadFrag.byteEn = mergedFrag.byteEn >> nextInvalidByteNumReg;
-                nextPrePayloadFrag.data   = mergedFrag.data   >> nextInvalidBitNumReg;
-            end
+            nextPrePayloadFrag.isLast = False;
+            nextPrePayloadFrag.byteEn = truncate({ prePayloadFragReg.byteEn, curPayloadFrag.byteEn } >> lastFragInvalidByteNumReg);
+            nextPrePayloadFrag.data   = truncate({ prePayloadFragReg.data,   curPayloadFrag.data   } >> lastFragInvalidBitNumReg);
+
+            shouldOutput = !hasLessFragReg;
         end
         prePayloadFragReg <= nextPrePayloadFrag;
 
-        let outPayloadFrag = mergedFrag;
-        outPayloadFrag.isLast = False;
         if (shouldOutput) begin
             isFirstFragReg <= False;
 
-            pktPayloadOutQ.enq(outPayloadFrag);
+            let prePayloadFrag = prePayloadFragReg;
+            // In case prePayloadFragReg is emptyDataStream,
+            // then it should set mergeFrag.isFirst as true.
+            prePayloadFrag.isFirst = isFirstFragReg;
+            prePayloadFrag.isLast = False;
+
+            payloadFragShiftQ.enq(tuple4(
+                prePayloadFrag, curPayloadFrag,
+                curInvalidByteNumReg, curInvalidBitNumReg
+            ));
         end
         // $display(
         //     "time=%0t: mergeFirstOrMidSGE", $time,
@@ -1609,7 +1632,7 @@ module mkMergePayloadAllSGE#(
 
         let isLastFrag = prePayloadFragReg.isLast;
         if (prePayloadFragReg.isLast) begin
-            if (metaDataQ4EachSGE.notEmpty && sgeMergedPayloadPipeIn.notEmpty) begin
+            if (mergedMetaDataQ4EachSGE.notEmpty && sgeMergedPayloadPipeIn.notEmpty) begin
                 nextPayloadFrag <- preprocessNextSGL;
             end
             else begin
@@ -1630,12 +1653,12 @@ module mkMergePayloadAllSGE#(
         end
         prePayloadFragReg <= nextPayloadFrag;
 
-        outPayloadFrag = mergeFragData(
-            prePayloadFragReg, nextPayloadFrag,
+        let prePayloadFrag = prePayloadFragReg;
+        prePayloadFrag.isLast = isLastFrag;
+        payloadFragShiftQ.enq(tuple4(
+            prePayloadFrag, nextPayloadFrag,
             curInvalidByteNumReg, curInvalidBitNumReg
-        );
-        outPayloadFrag.isLast = isLastFrag;
-        pktPayloadOutQ.enq(outPayloadFrag);
+        ));
         // $display(
         //     "time=%0t: mergeLastOrOnlySGE", $time,
         //     ", sgeIsOnlyReg=", fshow(sgeIsOnlyReg),
@@ -1650,6 +1673,21 @@ module mkMergePayloadAllSGE#(
         //     ", outPayloadFrag.isLast=", fshow(outPayloadFrag.isLast),
         //     ", outPayloadFrag.byteEn=%h", outPayloadFrag.byteEn
         // );
+    endrule
+
+    rule shiftPayloadFrag if (!clearAll);
+        let {
+            prePayloadFrag, curPayloadFrag,
+            curInvalidByteNumReg, curInvalidBitNumReg
+        } = payloadFragShiftQ.first;
+        payloadFragShiftQ.deq;
+
+        let outPayloadFrag = prePayloadFrag;
+        outPayloadFrag = mergeFragData(
+            prePayloadFrag, curPayloadFrag,
+            curInvalidByteNumReg, curInvalidBitNumReg
+        );
+        pktPayloadOutQ.enq(outPayloadFrag);
     endrule
 
     return toPipeOut(pktPayloadOutQ);
