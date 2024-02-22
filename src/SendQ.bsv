@@ -631,6 +631,7 @@ module mkSendQ#(
         reqQ.deq;
 
         let qpType = wqe.qpType;
+        let shouldAddPadding = qpType != IBV_QPT_RAW_PACKET;
         immAssert(
             qpType == IBV_QPT_RC       ||
             qpType == IBV_QPT_XRC_RECV ||
@@ -730,12 +731,13 @@ module mkSendQ#(
         end
         if (shouldGenPayload) begin
             let payloadGenReq = PayloadGenReqSG {
-                wrID    : wqe.id,
-                sqpn    : wqe.sqpn,
-                sgl     : wqe.sgl,
-                totalLen: wqe.totalLen,
-                raddr   : remoteAddr,
-                pmtu    : wqe.pmtu
+                wrID      : wqe.id,
+                sqpn      : wqe.sqpn,
+                sgl       : wqe.sgl,
+                totalLen  : wqe.totalLen,
+                raddr     : remoteAddr,
+                pmtu      : wqe.pmtu,
+                addPadding: shouldAddPadding
             };
             payloadGenerator.srvPort.request.put(payloadGenReq);
         end
@@ -1056,22 +1058,30 @@ endmodule
 interface SQ;
     interface DmaReadClt dmaReadClt;
     interface SendQ sendQ;
+    method Action clearAll();
 endinterface
 
 (* synthesize *)
-module mkSQ#(Bool clearAll)(SQ);
+module mkSQ(SQ);
     FIFOF#(DmaReadReq)   dmaReadReqQ <- mkFIFOF;
     FIFOF#(DmaReadResp) dmaReadRespQ <- mkFIFOF;
 
+    Reg#(Bool) clearReg <- mkReg(False);
+
     let dmaReadSrv = toGPServer(dmaReadReqQ, dmaReadRespQ);
-    let dmaReadCntrl <- mkDmaReadCntrl(clearAll, dmaReadSrv);
+    let dmaReadCntrl <- mkDmaReadCntrl(clearReg, dmaReadSrv);
 
-    // TODO: add shouldAddPadding to PayloadGenReqSG
-    let shouldAddPadding = True;
-    let payloadGenerator <- mkPayloadGenerator(clearAll, shouldAddPadding, dmaReadCntrl);
+    let payloadGenerator <- mkPayloadGenerator(clearReg, dmaReadCntrl);
+    let sq <- mkSendQ(clearReg, payloadGenerator);
 
-    let sq <- mkSendQ(clearAll, payloadGenerator);
+    rule resetAndClear if (clearReg);
+        clearReg <= False;
+    endrule
 
     interface dmaReadClt = toGPClient(dmaReadReqQ, dmaReadRespQ);
     interface sendQ = sq;
+
+    method Action clearAll if (!clearReg);
+        clearReg <= True;
+    endmethod
 endmodule

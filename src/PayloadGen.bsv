@@ -2414,6 +2414,7 @@ typedef struct {
     Length            totalLen;
     ADDR              raddr;
     PMTU              pmtu;
+    Bool              addPadding;
 } PayloadGenReqSG deriving(Bits, FShow);
 
 typedef struct {
@@ -2443,6 +2444,7 @@ typedef struct {
     PktNum truncatedPktNum;
     ADDR   pmtuAlignedStartAddr;
     Bool   isZeroPayloadLen;
+    // Bool   shouldAddPadding;
 } TmpPayloadGenMetaData deriving(Bits);
 
 typedef struct {
@@ -2455,6 +2457,7 @@ typedef struct {
     PktLen pmtuLen;
     PMTU   pmtu;
     Bool   isZeroPayloadLen;
+    Bool   shouldAddPadding;
 } TmpAdjustMetaData deriving(Bits);
 
 typedef struct {
@@ -2471,6 +2474,7 @@ typedef struct {
     PMTU         pmtu;
     Bool         isOnlyPkt;
     Bool         isZeroPayloadLen;
+    Bool         shouldAddPadding;
 } TmpPayloadGenRespData deriving(Bits);
 
 typedef struct {
@@ -2479,6 +2483,7 @@ typedef struct {
     ByteEnBitNum lastPktLastFragValidByteNum;
     PAD          lastPktPadCnt;
     Bool         isZeroPayloadLen;
+    Bool         shouldAddPadding;
 } TmpPaddingData deriving(Bits);
 
 interface PayloadGenerator;
@@ -2489,7 +2494,7 @@ interface PayloadGenerator;
 endinterface
 
 module mkPayloadGenerator#(
-    Bool clearAll, Bool shouldAddPadding, DmaReadCntrl dmaReadCntrl
+    Bool clearAll, DmaReadCntrl dmaReadCntrl
 )(PayloadGenerator);
     FIFOF#(PayloadGenReqSG)            payloadGenReqQ <- mkFIFOF;
     FIFOF#(PayloadGenRespSG)          payloadGenRespQ <- mkFIFOF;
@@ -2598,6 +2603,7 @@ module mkPayloadGenerator#(
             truncatedPktNum     : truncatedPktNum,
             pmtuAlignedStartAddr: pmtuAlignedStartAddr,
             isZeroPayloadLen    : isZeroPayloadLen
+            // shouldAddPadding    : payloadGenReq.addPadding
         };
         adjustReqPktLenQ.enq(tuple2(payloadGenReq, tmpPayloadGenMetaData));
         // $display(
@@ -2658,7 +2664,8 @@ module mkPayloadGenerator#(
             lastPktLen      : lastPktLen,
             pmtuLen         : pmtuLen,
             pmtu            : payloadGenReq.pmtu,
-            isZeroPayloadLen: isZeroPayloadLen
+            isZeroPayloadLen: isZeroPayloadLen,
+            shouldAddPadding: payloadGenReq.addPadding
         };
         adjustedFirstAndLastPktLenQ.enq(adjustMetaData);
         // $display(
@@ -2681,6 +2688,7 @@ module mkPayloadGenerator#(
         let pmtuLen          = adjustMetaData.pmtuLen;
         let pmtu             = adjustMetaData.pmtu;
         let isZeroPayloadLen = adjustMetaData.isZeroPayloadLen;
+        let shouldAddPadding = adjustMetaData.shouldAddPadding;
 
         let origLastFragValidByteNum     = calcLastFragValidByteNum(totalLen);
         let firstPktLastFragValidByteNum = calcLastFragValidByteNum(firstPktLen);
@@ -2716,7 +2724,8 @@ module mkPayloadGenerator#(
             totalPktNum                 : totalPktNum,
             pmtu                        : pmtu,
             isOnlyPkt                   : isOnlyPkt,
-            isZeroPayloadLen            : isZeroPayloadLen
+            isZeroPayloadLen            : isZeroPayloadLen,
+            shouldAddPadding            : shouldAddPadding
         };
         genPayloadRespQ.enq(tmpPayloadGenRespData);
 
@@ -2750,6 +2759,7 @@ module mkPayloadGenerator#(
         let pmtu                         = tmpPayloadGenRespData.pmtu;
         let isOnlyPkt                    = tmpPayloadGenRespData.isOnlyPkt;
         let isZeroPayloadLen             = tmpPayloadGenRespData.isZeroPayloadLen;
+        let shouldAddPadding             = tmpPayloadGenRespData.shouldAddPadding;
 
         let oneAsPSN   = 1;
         let remoteAddr = firstRemoteAddr;
@@ -2790,7 +2800,8 @@ module mkPayloadGenerator#(
             firstPktPadCnt              : firstPktPadCnt,
             lastPktLastFragValidByteNum : lastPktLastFragValidByteNum,
             lastPktPadCnt               : lastPktPadCnt,
-            isZeroPayloadLen            : isZeroPayloadLen
+            isZeroPayloadLen            : isZeroPayloadLen,
+            shouldAddPadding            : shouldAddPadding
         };
         addPaddingDataQ.enq(tuple2(payloadGenResp, tmpPaddingData));
 
@@ -2832,6 +2843,7 @@ module mkPayloadGenerator#(
         let lastPktLastFragValidByteNum  = tmpPaddingData.lastPktLastFragValidByteNum;
         let lastPktPadCnt                = tmpPaddingData.lastPktPadCnt;
         let isZeroPayloadLen             = tmpPaddingData.isZeroPayloadLen;
+        let shouldAddPadding             = tmpPaddingData.shouldAddPadding;
 
         let firstPktLastFragValidByteNumWithPadding = firstPktLastFragValidByteNum + zeroExtend(firstPktPadCnt);
         let lastPktLastFragValidByteNumWithPadding  = lastPktLastFragValidByteNum  + zeroExtend(lastPktPadCnt);

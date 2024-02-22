@@ -257,8 +257,7 @@ module mkTestSendQueueRawPktCase(Empty);
     let dataStreamPipeOut4Ref <- mkBufferN(getMaxFragBufSize, simDmaReadSrv.dataStream);
 
     let dmaReadCntrl <- mkDmaReadCntrl(clearReg, simDmaReadSrv.dmaReadSrv);
-    let shouldAddPadding = False;
-    let payloadGenerator <- mkPayloadGenerator(clearReg, shouldAddPadding, dmaReadCntrl);
+    let payloadGenerator <- mkPayloadGenerator(clearReg, dmaReadCntrl);
 
     let dut <- mkSendQ(clearReg, payloadGenerator);
     mkConnection(dut.srvPort.request, toGet(wqeQ));
@@ -451,8 +450,7 @@ module mkTestSendQueueNormalAndNoPayloadCase#(
 
     let simDmaReadSrv <- mkSimDmaReadSrv;
     let dmaReadCntrl <- mkDmaReadCntrl(clearReg, simDmaReadSrv);
-    let shouldAddPadding = True;
-    let payloadGenerator <- mkPayloadGenerator(clearReg, shouldAddPadding, dmaReadCntrl);
+    let payloadGenerator <- mkPayloadGenerator(clearReg, dmaReadCntrl);
 
     let dut <- mkSendQ(clearReg, payloadGenerator);
     mkConnection(dut.srvPort.request, toGet(wqePipeOutVec[0]));

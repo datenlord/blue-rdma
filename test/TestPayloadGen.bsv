@@ -1730,8 +1730,7 @@ module mkTestNormalOrSmallPayloadGen#(
     let simDmaReadSrv <- mkSimDmaReadSrv;
     let dmaReadCntrl <- mkDmaReadCntrl(clearReg, simDmaReadSrv);
 
-    let shouldAddPadding = False;
-    let dut <- mkPayloadGenerator(clearReg, shouldAddPadding, dmaReadCntrl);
+    let dut <- mkPayloadGenerator(clearReg, dmaReadCntrl);
 
     Reg#(Bool)                 isFirstPktReg <- mkRegU;
     Reg#(Bool)                isFirstFragReg <- mkRegU;
@@ -1817,12 +1816,13 @@ module mkTestNormalOrSmallPayloadGen#(
         remoteAddrPipeOut.deq;
 
         let payloadGenReq = PayloadGenReqSG {
-            wrID    : dontCareValue,
-            sqpn    : getDefaultQPN,
-            sgl     : sgl,
-            totalLen: totalLenReg,
-            raddr   : remoteAddr,
-            pmtu    : pmtu
+            wrID      : dontCareValue,
+            sqpn      : getDefaultQPN,
+            sgl       : sgl,
+            totalLen  : totalLenReg,
+            raddr     : remoteAddr,
+            pmtu      : pmtu,
+            addPadding: False
         };
         dut.srvPort.request.put(payloadGenReq);
 
