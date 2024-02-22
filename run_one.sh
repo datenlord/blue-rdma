@@ -9,7 +9,7 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-TEST_LOG=test.log
+TEST_LOG=run.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
@@ -21,6 +21,7 @@ for FILE in $FILES; do
     for TESTCASE in $TESTCASES; do
         make -j8 TESTFILE=$FILE TOPMODULE=$TESTCASE 2>&1 | tee -a $TEST_LOG
     done
+###########################################################################
 done
 ###########################################################################
 
