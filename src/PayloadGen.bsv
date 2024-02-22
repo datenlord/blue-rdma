@@ -240,6 +240,44 @@ function Tuple7#(PktLen, PktLen, PktLen, PktLen, PktLen, PktNum, ADDR) stepOneCa
     );
 endfunction
 
+typedef Bit#(TWO) PktNumAddOn;
+
+function Tuple6#(ADDR, PktLen, PktNumAddOn, Bool, Bool, Bool) stepTwo2CalcPktNumAndPktLenByAddrAndPMTU(
+    ADDR pmtuAlignedStartAddr, PMTU pmtu, PktLen pmtuMask,
+    PktLen addrAndLenLowPartSum, PktNum truncatedPktNum
+);
+    let oneAsPSN = 1;
+    let secondChunkStartAddr = addrAddPsnMultiplyPMTU(pmtuAlignedStartAddr, oneAsPSN, pmtu);
+
+    ResiduePMTU residue  = truncateByPMTU(addrAndLenLowPartSum, pmtu);
+    PktLen tmpLastPktLen = zeroExtend(residue);
+
+    let pmtuInvMask = ~pmtuMask;
+    let noResidue   = isZeroR(pmtuMask & addrAndLenLowPartSum);
+    let noExtraPkt  = isZeroR(pmtuInvMask & addrAndLenLowPartSum);
+    let hasResidue  = !noResidue;
+    let hasExtraPkt = !noExtraPkt;
+    let notFullPkt  = isZeroR(truncatedPktNum);
+    PktNumAddOn residuePktNum = zeroExtend(pack(hasResidue));
+    PktNumAddOn extraPktNum   = zeroExtend(pack(hasExtraPkt));
+
+    let pktNumAddOne = residuePktNum + extraPktNum;
+    return tuple6(secondChunkStartAddr, tmpLastPktLen, pktNumAddOne, notFullPkt, hasExtraPkt, hasResidue);
+endfunction
+
+function Tuple3#(PktLen, PktLen, PktNum) stepThreeCalcPktNumAndPktLenByAddrAndPMTU(
+    PktNum truncatedPktNum, PktNumAddOn pktNumAddOne, PktLen lenLowPart,
+    PktLen maxFirstPktLen, PktLen tmpLastPktLen, PktLen pmtuLen,
+    Bool notFullPkt, Bool hasExtraPkt, Bool hasResidue
+);
+    let totalPktNum = truncatedPktNum + zeroExtend(pktNumAddOne);
+    let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
+    let lastPktLen  = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
+    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
+
+    return tuple3(firstPktLen, lastPktLen, totalPktNum);
+endfunction
+
 function Tuple4#(PktLen, PktLen, PktNum, ADDR) stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
     PktLen pmtuMask, PktLen addrAndLenLowPartSum, PktLen pmtuLen, PktLen lenLowPart,
     PktLen maxFirstPktLen, PktNum truncatedPktNum, ADDR pmtuAlignedStartAddr, PMTU pmtu
@@ -352,7 +390,24 @@ interface AddrChunkSrv;
 endinterface
 
 typedef struct {
-    PktNum remainingPktNum;
+    PktNumAddOn pktNumAddOne;
+    PktNum      truncatedPktNum;
+    PktLen      lenLowPart;
+    PktLen      maxFirstPktLen;
+    PktLen      tmpLastPktLen;
+    PktLen      pmtuLen;
+    PMTU        pmtu;
+    ADDR        startAddr;
+    ADDR        nextAddr;
+    Bool        notFullPkt;
+    Bool        hasExtraPkt;
+    Bool        hasResidue;
+    Bool        isOrigFirst;
+    Bool        isOrigLast;
+} TmpPktMetaDataSGE deriving(Bits);
+
+typedef struct {
+    PktNum sgePktNum;
     PktLen firstPktLen;
     PktLen pmtuLen;
     PktLen lastPktLen;
@@ -361,7 +416,7 @@ typedef struct {
     ADDR   nextAddr;
     Bool   isOrigFirst;
     Bool   isOrigLast;
-} ChunkMetaData deriving(Bits);
+} TmpChunkRespData deriving(Bits);
 
 module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     FIFOF#(AddrChunkReq)   reqQ <- mkSizedFIFOF(valueOf(MAX_SGE));
@@ -371,8 +426,9 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     // Pipeline FIFOF
     FIFOF#(Tuple8#(
         PktLen, PktLen, PktLen, PktLen, PktLen, PktNum, ADDR, AddrChunkReq
-    )) calcMetaDataQ <- mkFIFOF;
-    FIFOF#(ChunkMetaData) chunkMetaDataQ <- mkFIFOF;
+    )) calcChunkMetaDataQ <- mkFIFOF;
+    FIFOF#(TmpPktMetaDataSGE) calcPktMetaDataQ4SGE <- mkFIFOF;
+    FIFOF#(TmpChunkRespData) calcAddrChunkRespQ <- mkFIFOF;
 
     Reg#(PktNum) remainingPktNumReg <- mkRegU;
     Reg#(ADDR)     nextChunkAddrReg <- mkRegU;
@@ -383,8 +439,9 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         respQ.clear;
         sgePktMetaDataOutQ.clear;
 
-        calcMetaDataQ.clear;
-        chunkMetaDataQ.clear;
+        calcChunkMetaDataQ.clear;
+        calcPktMetaDataQ4SGE.clear;
+        calcAddrChunkRespQ.clear;
 
         isFirstChunkReg <= True;
     endrule
@@ -408,46 +465,44 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             addrChunkReq.startAddr, addrChunkReq.len, addrChunkReq.pmtu
         );
 
-        calcMetaDataQ.enq(tuple8(
+        calcChunkMetaDataQ.enq(tuple8(
             pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
             truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq
         ));
     endrule
 
-    rule genChunkMetaData if (!clearAll);
+    rule calcChunkMetaData if (!clearAll);
         let {
             pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
             truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq
-        } = calcMetaDataQ.first;
-        calcMetaDataQ.deq;
+        } = calcChunkMetaDataQ.first;
+        calcChunkMetaDataQ.deq;
 
         let {
-            firstPktLen, lastPktLen, sgePktNum, secondChunkStartAddr
-        } = stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
-            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart, maxFirstPktLen,
-            truncatedPktNum, pmtuAlignedStartAddr, addrChunkReq.pmtu
+            secondChunkStartAddr, tmpLastPktLen, pktNumAddOne,
+            notFullPkt, hasExtraPkt, hasResidue
+        } = stepTwo2CalcPktNumAndPktLenByAddrAndPMTU(
+            pmtuAlignedStartAddr, addrChunkReq.pmtu, pmtuMask,
+            addrAndLenLowPartSum, truncatedPktNum
         );
 
-        let chunkMetaData = ChunkMetaData {
-            remainingPktNum: sgePktNum - 1,
-            firstPktLen    : firstPktLen,
+        let tmpPktMetaDataSGE = TmpPktMetaDataSGE {
+            pktNumAddOne   : pktNumAddOne,
+            truncatedPktNum: truncatedPktNum,
+            lenLowPart     : lenLowPart,
+            maxFirstPktLen : maxFirstPktLen,
+            tmpLastPktLen  : tmpLastPktLen,
             pmtuLen        : pmtuLen,
-            lastPktLen     : lastPktLen,
             pmtu           : addrChunkReq.pmtu,
             startAddr      : addrChunkReq.startAddr,
             nextAddr       : secondChunkStartAddr,
+            notFullPkt     : notFullPkt,
+            hasExtraPkt    : hasExtraPkt,
+            hasResidue     : hasResidue,
             isOrigFirst    : addrChunkReq.isFirst,
             isOrigLast     : addrChunkReq.isLast
         };
-        chunkMetaDataQ.enq(chunkMetaData);
-
-        let sgePktMetaData = PktMetaDataSGE {
-            firstPktLen: firstPktLen,
-            lastPktLen : lastPktLen,
-            sgePktNum  : sgePktNum,
-            pmtu       : addrChunkReq.pmtu
-        };
-        sgePktMetaDataOutQ.enq(sgePktMetaData);
+        calcPktMetaDataQ4SGE.enq(tmpPktMetaDataSGE);
 
         // $display(
         //     "time=%0t: mkAddrChunkSrv recvReq", $time,
@@ -458,29 +513,77 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         // );
     endrule
 
-    rule genResp if (!clearAll);
-        let chunkMetaData = chunkMetaDataQ.first;
+    rule genPktMetaDataSGE if (!clearAll);
+        let tmpPktMetaDataSGE = calcPktMetaDataQ4SGE.first;
+        calcPktMetaDataQ4SGE.deq;
 
-        let firstPktLen = chunkMetaData.firstPktLen;
-        let pmtuLen     = chunkMetaData.pmtuLen;
-        let lastPktLen  = chunkMetaData.lastPktLen;
-        let pmtu        = chunkMetaData.pmtu;
-        let startAddr   = chunkMetaData.startAddr;
-        let nextAddr    = chunkMetaData.nextAddr;
-        let isOrigFirst = chunkMetaData.isOrigFirst;
-        let isOrigLast  = chunkMetaData.isOrigLast;
+        let pktNumAddOne    = tmpPktMetaDataSGE.pktNumAddOne;
+        let truncatedPktNum = tmpPktMetaDataSGE.truncatedPktNum;
+        let lenLowPart      = tmpPktMetaDataSGE.lenLowPart;
+        let maxFirstPktLen  = tmpPktMetaDataSGE.maxFirstPktLen;
+        let tmpLastPktLen   = tmpPktMetaDataSGE.tmpLastPktLen;
+        let pmtuLen         = tmpPktMetaDataSGE.pmtuLen;
+        let pmtu            = tmpPktMetaDataSGE.pmtu;
+        let startAddr       = tmpPktMetaDataSGE.startAddr;
+        let nextAddr        = tmpPktMetaDataSGE.nextAddr;
+        let notFullPkt      = tmpPktMetaDataSGE.notFullPkt;
+        let hasExtraPkt     = tmpPktMetaDataSGE.hasExtraPkt;
+        let hasResidue      = tmpPktMetaDataSGE.hasResidue;
+        let isOrigFirst     = tmpPktMetaDataSGE.isOrigFirst;
+        let isOrigLast      = tmpPktMetaDataSGE.isOrigLast;
+
+        let {
+            firstPktLen, lastPktLen, sgePktNum
+        } = stepThreeCalcPktNumAndPktLenByAddrAndPMTU(
+            truncatedPktNum, pktNumAddOne, lenLowPart, maxFirstPktLen,
+            tmpLastPktLen, pmtuLen, notFullPkt, hasExtraPkt, hasResidue
+        );
+        let sgePktMetaData = PktMetaDataSGE {
+            firstPktLen: firstPktLen,
+            lastPktLen : lastPktLen,
+            sgePktNum  : sgePktNum,
+            pmtu       : pmtu
+        };
+        sgePktMetaDataOutQ.enq(sgePktMetaData);
+
+        let tmpChunkRespData = TmpChunkRespData {
+            sgePktNum  : sgePktNum,
+            firstPktLen: firstPktLen,
+            pmtuLen    : pmtuLen,
+            lastPktLen : lastPktLen,
+            pmtu       : pmtu,
+            startAddr  : startAddr,
+            nextAddr   : nextAddr,
+            isOrigFirst: isOrigFirst,
+            isOrigLast : isOrigLast
+        };
+        calcAddrChunkRespQ.enq(tmpChunkRespData);
+    endrule
+
+    rule genResp if (!clearAll);
+        let tmpChunkRespData = calcAddrChunkRespQ.first;
+
+        let sgePktNum   = tmpChunkRespData.sgePktNum;
+        let firstPktLen = tmpChunkRespData.firstPktLen;
+        let pmtuLen     = tmpChunkRespData.pmtuLen;
+        let lastPktLen  = tmpChunkRespData.lastPktLen;
+        let pmtu        = tmpChunkRespData.pmtu;
+        let startAddr   = tmpChunkRespData.startAddr;
+        let nextAddr    = tmpChunkRespData.nextAddr;
+        let isOrigFirst = tmpChunkRespData.isOrigFirst;
+        let isOrigLast  = tmpChunkRespData.isOrigLast;
 
         let oneAsPSN = 1;
         let nextChunkAddr   = addrAddPsnMultiplyPMTU(nextChunkAddrReg, oneAsPSN, pmtu);
         let remainingPktNum = remainingPktNumReg;
         if (isFirstChunkReg) begin
             nextChunkAddr   = nextAddr;
-            remainingPktNum = chunkMetaData.remainingPktNum;
+            remainingPktNum = sgePktNum;
         end
 
-        let isLastChunk = isZeroR(remainingPktNum);
+        let isLastChunk = isOneR(remainingPktNum);
         if (isLastChunk) begin
-            chunkMetaDataQ.deq;
+            calcAddrChunkRespQ.deq;
         end
         else begin
             remainingPktNumReg <= remainingPktNum - 1;
@@ -512,9 +615,11 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     interface srvPort = toGPServer(reqQ, respQ);
     interface sgePktMetaDataPipeOut = toPipeOut(sgePktMetaDataOutQ);
     method Bool isIdle() = !(
-        reqQ.notEmpty           ||
-        respQ.notEmpty          ||
-        chunkMetaDataQ.notEmpty ||
+        reqQ.notEmpty                 ||
+        respQ.notEmpty                ||
+        calcChunkMetaDataQ.notEmpty   ||
+        calcPktMetaDataQ4SGE.notEmpty ||
+        calcAddrChunkRespQ.notEmpty   ||
         sgePktMetaDataOutQ.notEmpty
     );
 endmodule
