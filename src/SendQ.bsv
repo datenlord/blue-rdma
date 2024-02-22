@@ -605,7 +605,6 @@ module mkSendQ#(
         payloadGenerator.payloadDataStreamPipeOut
     );
 
-    (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (clearAll);
         reqQ.clear;
         respQ.clear;
