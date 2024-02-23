@@ -81,7 +81,7 @@ module mkTestReqGenNormalAndZeroLenCase#(
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaReqPipeOut
     );
-    // Convert header DataStream to RdmaHeader
+    // Convert header DataStream to HeaderRDMA
     let rdmaHeaderPipeOut <- mkDataStream2Header(
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData

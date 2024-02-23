@@ -113,7 +113,7 @@ function Maybe#(RdmaOpCode) genMiddleOrLastRdmaOpCode(WorkReqOpCode wrOpCode, Bo
     endcase;
 endfunction
 
-function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
+function Maybe#(HeaderRDMA) genFirstOrOnlyRespHeader(
     PendingWorkReq pendingWR, CntrlStatus cntrlStatus, PSN psn, Bool isReadWR, Bool isOnlyRespPkt, MSN msn
 );
     let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);
@@ -156,21 +156,21 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
 
         return case (pendingWR.wr.opcode)
             IBV_WR_RDMA_WRITE, IBV_WR_RDMA_WRITE_WITH_IMM, IBV_WR_SEND, IBV_WR_SEND_WITH_IMM, IBV_WR_SEND_WITH_INV: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     False // Non-read responses have no payload
                 );
             end
             IBV_WR_RDMA_READ: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     !isZeroLenWR // Read responses might have payload
                 );
             end
             IBV_WR_ATOMIC_CMP_AND_SWP, IBV_WR_ATOMIC_FETCH_AND_ADD: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth), pack(atomicAckEth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH) + valueOf(ATOMIC_ACK_ETH_BYTE_WIDTH)),
                     False // Atomic responses have no payload
@@ -184,7 +184,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
     end
 endfunction
 
-function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
+function Maybe#(HeaderRDMA) genMiddleOrLastRespHeader(
     PendingWorkReq pendingWR, CntrlStatus cntrlStatus, PSN psn, Bool isLastRespPkt, MSN msn
 );
     let maybeTrans  = qpType2TransType(cntrlStatus.getTypeQP);
@@ -224,7 +224,7 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
 
         return case (pendingWR.wr.opcode)
             IBV_WR_RDMA_READ: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     isLastRespPkt ?
                         zeroExtendLSB({ pack(bth), pack(aeth) }) :
                         zeroExtendLSB( pack(bth) ), // Middle read responses have no AETH
@@ -275,7 +275,7 @@ function DataStream buildCNP(CntrlStatus statusSQ) provisos(
 endfunction
 
 interface RdmaRespHeaderAndDataStreamPipeOut;
-    interface PipeOut#(RdmaHeader) respHeader;
+    interface PipeOut#(HeaderRDMA) respHeader;
     interface DataStreamPipeOut rdmaResp;
 endinterface
 
@@ -284,10 +284,10 @@ module mkSimGenRdmaRespHeaderAndDataStream#(
     DmaReadSrv dmaReadSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
 )(RdmaRespHeaderAndDataStreamPipeOut);
-    FIFOF#(Tuple3#(PendingWorkReq, RdmaHeader, PSN)) pendingReqHeaderQ <- mkFIFOF;
-    FIFOF#(RdmaHeader)     respHeaderOutQ <- mkFIFOF;
+    FIFOF#(Tuple3#(PendingWorkReq, HeaderRDMA, PSN)) pendingReqHeaderQ <- mkFIFOF;
+    FIFOF#(HeaderRDMA)     respHeaderOutQ <- mkFIFOF;
     FIFOF#(PSN)               psnRespOutQ <- mkFIFOF;
-    FIFOF#(RdmaHeader) respHeaderOutQ4Ref <- mkFIFOF;
+    FIFOF#(HeaderRDMA) respHeaderOutQ4Ref <- mkFIFOF;
     FIFOF#(PayloadGenReq)  payloadGenReqQ <- mkFIFOF;
 
     Reg#(PendingWorkReq) curPendingWorkReqReg <- mkRegU;
@@ -478,7 +478,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
     RdmaRespAckGenType genAckType,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn
 )(DataStreamPipeOut);
-    FIFOF#(RdmaHeader) headerQ <- mkFIFOF;
+    FIFOF#(HeaderRDMA) headerQ <- mkFIFOF;
 
     let headerDataStreamAndMetaDataPipeOut <- mkHeader2DataStream(
         cntrlStatus.comm.isReset,
@@ -569,7 +569,7 @@ module mkGenNormalOrErrOrRetryRdmaRespAck#(
                 msn  : dontCareValue
             };
         endcase;
-        let respHeader = genRdmaHeader(
+        let respHeader = genHeaderRDMA(
             zeroExtendLSB({ pack(bth), pack(aeth) }),
             fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
             False // Error or retry responses have no payload
@@ -655,7 +655,7 @@ module mkTestSimGenRdmaResp(Empty);
         cntrl.contextRQ.statusRQ, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
     let rdmaRespHeaderPipeOut4Ref <- mkBufferN(2, rdmaRespAndHeaderPipeOut.respHeader);
-    Vector#(2, PipeOut#(RdmaHeader)) rdmaRespHeaderPipeOut4RefVec <-
+    Vector#(2, PipeOut#(HeaderRDMA)) rdmaRespHeaderPipeOut4RefVec <-
         mkForkVector(rdmaRespHeaderPipeOut4Ref);
     let rdmaRespHeaderPipeOut4HeaderCmpRef = rdmaRespHeaderPipeOut4RefVec[0];
     let rdmaRespHeaderPipeOut4WorkReqCmpRef = rdmaRespHeaderPipeOut4RefVec[1];
@@ -664,7 +664,7 @@ module mkTestSimGenRdmaResp(Empty);
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         rdmaRespAndHeaderPipeOut.rdmaResp
     );
-    // Convert header DataStream to RdmaHeader
+    // Convert header DataStream to HeaderRDMA
     let rdmaHeaderPipeOut <- mkDataStream2Header(
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData

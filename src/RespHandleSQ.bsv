@@ -210,10 +210,10 @@ module mkRespHandleSQ#(
         preStageStateReg == SQ_PRE_BUILD_STAGE && inNormalState
     ); // This rule will not run at retry or error state
         let curPktMetaData = pktMetaDataPipeIn.first;
-        let curRdmaHeader  = curPktMetaData.pktHeader;
+        let curHeaderRDMA  = curPktMetaData.pktHeader;
 
-        let bth  = extractBTH(curRdmaHeader.headerData);
-        let aeth = extractAETH(curRdmaHeader.headerData);
+        let bth  = extractBTH(curHeaderRDMA.headerData);
+        let aeth = extractAETH(curHeaderRDMA.headerData);
         immAssert(
             isRdmaRespOpCode(bth.opcode),
             "isRdmaRespOpCode assertion @ mkRespHandleSQ",

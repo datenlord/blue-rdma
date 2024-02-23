@@ -209,7 +209,7 @@ typedef struct {
     PAD         padCnt; // TODO: remove this field
     PSN         psn;    // TODO: remove this field
     QPN         dqpn;   // TODO: remvoe this field
-    RdmaHeader  rdmaHeader;
+    HeaderRDMA  rdmaHeader;
     HandlerPD   pdHandler;
     PktFragNum  pktFragNum;
     PktLen      pktLen;
@@ -240,17 +240,17 @@ module mkInputRdmaPktBufAndHeaderValidation#(
     Vector#(MAX_QP, FIFOF#(RdmaPktMetaData)) respPktMetaDataOutVec <- replicateM(mkFIFOF);
 
     // Pipeline buffers
-    FIFOF#(Tuple5#(RdmaHeader, BTH, Bool, Bool, Bool))                     rdmaHeaderRecvQ <- mkFIFOF;
+    FIFOF#(Tuple5#(HeaderRDMA, BTH, Bool, Bool, Bool))                     rdmaHeaderRecvQ <- mkFIFOF;
     FIFOF#(DataStream)                                                        payloadRecvQ <- mkFIFOF;
-    FIFOF#(Tuple2#(RdmaHeader, BTH))                                   rdmaHeaderPreCheckQ <- mkFIFOF;
+    FIFOF#(Tuple2#(HeaderRDMA, BTH))                                   rdmaHeaderPreCheckQ <- mkFIFOF;
     FIFOF#(DataStream)                                                    payloadPreCheckQ <- mkFIFOF;
-    FIFOF#(Tuple3#(RdmaHeader, BTH, HeaderValidateInfo))             rdmaHeaderValidationQ <- mkFIFOF;
+    FIFOF#(Tuple3#(HeaderRDMA, BTH, HeaderValidateInfo))             rdmaHeaderValidationQ <- mkFIFOF;
     FIFOF#(DataStream)                                                  payloadValidationQ <- mkFIFOF;
-    FIFOF#(Tuple3#(RdmaHeader, BTH, ValidHeaderInfo))                    rdmaHeaderFilterQ <- mkFIFOF;
+    FIFOF#(Tuple3#(HeaderRDMA, BTH, ValidHeaderInfo))                    rdmaHeaderFilterQ <- mkFIFOF;
     FIFOF#(DataStream)                                                      payloadFilterQ <- mkFIFOF;
-    FIFOF#(Tuple3#(RdmaHeader, BTH, ValidHeaderInfo))               rdmaHeaderFragLenCalcQ <- mkFIFOF;
+    FIFOF#(Tuple3#(HeaderRDMA, BTH, ValidHeaderInfo))               rdmaHeaderFragLenCalcQ <- mkFIFOF;
     FIFOF#(DataStream)                                                 payloadFragLenCalcQ <- mkFIFOF;
-    FIFOF#(Tuple3#(RdmaHeader, BTH, ValidHeaderInfo))                rdmaHeaderPktLenCalcQ <- mkFIFOF;
+    FIFOF#(Tuple3#(HeaderRDMA, BTH, ValidHeaderInfo))                rdmaHeaderPktLenCalcQ <- mkFIFOF;
     FIFOF#(Tuple5#(DataStream, ByteEnBitNum, ByteEnBitNum, Bool, Bool)) payloadPktLenCalcQ <- mkFIFOF;
     FIFOF#(PktLenCheckInfo)                                      rdmaHeaderPktLenPreCheckQ <- mkFIFOF;
     FIFOF#(Tuple3#(DataStream, IndexQP, Bool))                      payloadPktLenPreCheckQ <- mkFIFOF;

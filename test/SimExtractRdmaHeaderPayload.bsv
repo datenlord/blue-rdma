@@ -20,7 +20,7 @@ module mkSimExtractNormalHeaderPayload#(DataStreamPipeOut rdmaPktPipeIn)(
     FIFOF#(RdmaPktMetaData) pktMetaDataOutQ <- mkFIFOF;
     FIFOF#(DataStream)          payloadOutQ <- mkFIFOF;
 
-    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(HeaderRDMA) rdmaHeaderReg <- mkRegU;
     Reg#(PktFragNum) pktFragNumReg <- mkRegU;
     Reg#(PktLen)         pktLenReg <- mkRegU;
     Reg#(Bool)         pktValidReg <- mkRegU;

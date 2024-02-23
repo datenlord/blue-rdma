@@ -590,7 +590,7 @@ module mkSendQ#(
     FIFOF#(Tuple7#(WorkQueueElem, Length, PktNum, Bool, Bool, Bool, Bool)) psnUpdateQ <- mkFIFOF;
     FIFOF#(Tuple2#(WorkQueueElem, HeaderGenInfo)) headerPrepareQ <- mkFIFOF;
     FIFOF#(Tuple6#(MAC, IP, Maybe#(PktHeaderInfo), PktLen, Bool, Bool)) pendingHeaderQ <- mkFIFOF;
-    FIFOF#(RdmaHeader) pktHeaderQ <- mkFIFOF;
+    FIFOF#(HeaderRDMA) pktHeaderQ <- mkFIFOF;
 
     Reg#(PSN)       curPsnReg <- mkRegU;
     Reg#(Bool) wqeFirstPktReg <- mkRegU;
@@ -1008,8 +1008,8 @@ module mkSendQ#(
             let headerLen  = pktHeaderInfo.headerLen;
             let hasPayload = pktHeaderInfo.hasPayload;
             let pktHeader  = qpRawPkt ?
-                genEmptyRdmaHeader(hasPayload) :
-                genRdmaHeader(headerData, headerLen, hasPayload);
+                genEmptyHeaderRDMA(hasPayload) :
+                genHeaderRDMA(headerData, headerLen, hasPayload);
 
             let udpPktInfo = PktInfo4UDP {
                 macAddr: macAddr,

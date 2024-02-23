@@ -316,21 +316,21 @@ function HeaderMetaData genHeaderMetaData(
     return headerMetaData;
 endfunction
 
-function RdmaHeader genRdmaHeader(
+function HeaderRDMA genHeaderRDMA(
     HeaderData headerData,
     HeaderByteNum headerLen,
     Bool hasPayload
 );
     let headerByteEn = genHeaderByteEn(headerLen);
     let headerMetaData = genHeaderMetaData(headerLen, hasPayload);
-    return RdmaHeader {
+    return HeaderRDMA {
         headerData    : headerData,
         headerByteEn  : headerByteEn,
         headerMetaData: headerMetaData
     };
 endfunction
 
-function RdmaHeader genEmptyRdmaHeader(Bool hasPayload);
+function HeaderRDMA genEmptyHeaderRDMA(Bool hasPayload);
     let emptyHeaderMetaData = HeaderMetaData {
         headerLen           : 0,
         headerFragNum       : 0,
@@ -338,7 +338,7 @@ function RdmaHeader genEmptyRdmaHeader(Bool hasPayload);
         hasPayload          : hasPayload,
         isEmptyHeader       : True
     };
-    return RdmaHeader {
+    return HeaderRDMA {
         headerData    : dontCareValue,
         headerByteEn  : 0,
         headerMetaData: emptyHeaderMetaData
