@@ -209,7 +209,7 @@ typedef struct {
     HeaderData     headerData;
     HeaderByteEn   headerByteEn;
     HeaderMetaData headerMetaData;
-} RdmaHeader deriving(Bits, Bounded, FShow);
+} HeaderRDMA deriving(Bits, Bounded, FShow);
 
 typedef enum {
     PKT_ST_VALID,
@@ -222,7 +222,7 @@ typedef struct {
     PktLen pktPayloadLen;
     PktFragNum pktFragNum;
     Bool isZeroPayloadLen;
-    RdmaHeader pktHeader;
+    HeaderRDMA pktHeader;
     HandlerPD pdHandler;
     Bool pktValid;
     PktVeriStatus pktStatus;

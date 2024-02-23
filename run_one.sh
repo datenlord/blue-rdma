@@ -9,11 +9,11 @@ if [ -f "$BASH_PROFILE" ]; then
     source $BASH_PROFILE
 fi
 
-TEST_LOG=run.log
+TEST_LOG=test.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
-FILES=`ls TestSendQ.bsv`
+FILES=`ls TestPayloadGen.bsv`
 ###########################################################################
 for FILE in $FILES; do
     # echo $FILE

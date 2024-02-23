@@ -50,7 +50,7 @@ set PLACE_PHASE place
 set ROUTE_PHASE route
 set ALL_PHASE all
 
-set EN_PHYS_OPT 0
+set EN_PHYS_OPT 1
 set NUM_PHYS_OPT_ITERS 1
 set RQA_DIR rqa
 set RQS_DIR rqs
@@ -178,7 +178,8 @@ should_start_gui $run_to $SYNTH_PHASE
 place_design; # -directive Explore
 # Optionally run optimization if there are timing violations after placement
 if {$EN_PHYS_OPT} {
-    if {should_run_phys_opt} {
+    set run_phys_opt [should_run_phys_opt]
+    if {$run_phys_opt} {
         # phys_opt_design can run multiple times:
         # phys_opt_design -force_replication_on_nets
         # phys_opt_design -directive
@@ -219,7 +220,8 @@ route_design; # -directive Explore
 proc run_ppo {{output_dir} {num_iters 1} {enable_phys_opt 1}} {
     if {$enable_phys_opt} {
         for {set idx 0} {$idx < $num_iters} {incr idx} {
-            if {should_run_phys_opt} {
+            set run_phys_opt [should_run_phys_opt]
+            if {$run_phys_opt} {
                 place_design -post_place_opt; # Better to run after route
                 phys_opt_design; # -directive AggressiveFanoutOpt
                 route_design; # -directive Explore

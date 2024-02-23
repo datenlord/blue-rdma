@@ -460,7 +460,7 @@ module mkTestSendQueueNormalAndNoPayloadCase#(
     let headerAndMetaDataAndPayloadPipeOut <- mkExtractHeaderFromRdmaPktPipeOut(
         dut.rdmaDataStreamPipeOut
     );
-    // Convert header DataStream to RdmaHeader
+    // Convert header DataStream to HeaderRDMA
     let rdmaHeaderPipeOut <- mkDataStream2Header(
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerDataStream,
         headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData

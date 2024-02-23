@@ -499,9 +499,9 @@ module mkReqGenSQ#(
         PendingWorkReq, WorkReqInfo, Maybe#(Tuple3#(HeaderData, HeaderByteNum, Bool)), PSN
     )) pendingReqHeaderQ <- mkFIFOF;
     FIFOF#(Tuple4#(
-        PendingWorkReq, Maybe#(RdmaHeader), Maybe#(PayloadGenResp), PSN
+        PendingWorkReq, Maybe#(HeaderRDMA), Maybe#(PayloadGenResp), PSN
     )) reqHeaderGenQ <- mkFIFOF;
-    FIFOF#(RdmaHeader)  reqHeaderOutQ <- mkFIFOF;
+    FIFOF#(HeaderRDMA)  reqHeaderOutQ <- mkFIFOF;
     FIFOF#(PSN)            psnReqOutQ <- mkFIFOF;
 
     let cntrlStatus = contextSQ.statusSQ;
@@ -1064,7 +1064,7 @@ module mkReqGenSQ#(
         let maybePayloadGenResp = tagged Invalid;
         if (maybeReqHeaderGenInfo matches tagged Valid .reqHeaderGenInfo) begin
             let { headerData, headerLen, hasPayload } = reqHeaderGenInfo;
-            let reqHeader = genRdmaHeader(headerData, headerLen, hasPayload);
+            let reqHeader = genHeaderRDMA(headerData, headerLen, hasPayload);
             maybeReqHeader = tagged Valid reqHeader;
 
             if (workReqInfo.needDmaRead) begin

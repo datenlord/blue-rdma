@@ -185,7 +185,7 @@ function Maybe#(AETH) genAethByReqStatus(RdmaReqStatus reqStatus, CntrlStatus cn
     endcase;
 endfunction
 
-function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
+function Maybe#(HeaderRDMA) genFirstOrOnlyRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus,
     Length payloadLen, Maybe#(Long) atomicOrigData,
     CntrlStatus cntrlStatus, PSN psn, MSN msn, Bool isOnlyReadRespPkt
@@ -225,14 +225,14 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
 
         return case (opcode)
             ACKNOWLEDGE: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     False // hasPayload
                 );
             end
             ATOMIC_ACKNOWLEDGE: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth), pack(unwrapMaybe(maybeAtomicAckEth)) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH) + valueOf(ATOMIC_ACK_ETH_BYTE_WIDTH)),
                     False // hasPayload
@@ -241,7 +241,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
             RDMA_READ_RESPONSE_FIRST,
             RDMA_READ_RESPONSE_ONLY : begin
                 let hasPayload = !isZero(payloadLen);
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     hasPayload
@@ -255,7 +255,7 @@ function Maybe#(RdmaHeader) genFirstOrOnlyRespHeader(
     end
 endfunction
 
-function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
+function Maybe#(HeaderRDMA) genMiddleOrLastRespHeader(
     RdmaOpCode reqOpCode, RdmaReqStatus reqStatus, Length payloadLen,
     CntrlStatus cntrlStatus, PSN psn, MSN msn, Bool isLastRespPkt
 );
@@ -290,21 +290,21 @@ function Maybe#(RdmaHeader) genMiddleOrLastRespHeader(
         let hasPayload = True;
         return case (opcode)
             ACKNOWLEDGE: begin // Error response to middle or last read responses
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     False // hasPayload
                 );
             end
             RDMA_READ_RESPONSE_LAST: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB({ pack(bth), pack(aeth) }),
                     fromInteger(valueOf(BTH_BYTE_WIDTH) + valueOf(AETH_BYTE_WIDTH)),
                     hasPayload
                 );
             end
             RDMA_READ_RESPONSE_MIDDLE: begin
-                tagged Valid genRdmaHeader(
+                tagged Valid genHeaderRDMA(
                     zeroExtendLSB(pack(bth)),
                     fromInteger(valueOf(BTH_BYTE_WIDTH)),
                     hasPayload
@@ -440,7 +440,7 @@ module mkReqHandleRQ#(
     // FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
     // FIFOF#(PayloadGenReq)     payloadGenReqOutQ <- mkFIFOF;
     FIFOF#(WorkCompGenReqRQ) workCompGenReqOutQ <- mkFIFOF;
-    FIFOF#(RdmaHeader)           respHeaderOutQ <- mkFIFOF;
+    FIFOF#(HeaderRDMA)           respHeaderOutQ <- mkFIFOF;
     FIFOF#(PSN)                     psnRespOutQ <- mkFIFOF;
 
     // Pipeline FIFO
@@ -477,7 +477,7 @@ module mkReqHandleRQ#(
     FIFOF#(Tuple7#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo, AtomicEth)) dupAtomicReqPermQueryQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo)) dupAtomicReqPermCheckQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo)) respHeaderGenQ <- mkFIFOF;
-    FIFOF#(Tuple7#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo, Maybe#(RdmaHeader))) pendingRespQ <- mkFIFOF;
+    FIFOF#(Tuple7#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo, Maybe#(HeaderRDMA))) pendingRespQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaData, RdmaReqStatus, PermCheckReq, RdmaReqPktInfo, RespPktGenInfo, RespPktHeaderInfo)) workCompReqQ <- mkFIFOF;
 
     Reg#(Bool)      preStageIsZeroPmtuResidueReg <- mkRegU;
@@ -597,10 +597,10 @@ module mkReqHandleRQ#(
         !hasErrHappened
     );
         let curPktMetaData = pktMetaDataPipeIn.first;
-        let curRdmaHeader  = curPktMetaData.pktHeader;
+        let curHeaderRDMA  = curPktMetaData.pktHeader;
 
-        let bth   = extractBTH(curRdmaHeader.headerData);
-        let reth  = extractRETH(curRdmaHeader.headerData, bth.trans);
+        let bth   = extractBTH(curHeaderRDMA.headerData);
+        let reth  = extractRETH(curHeaderRDMA.headerData, bth.trans);
         let epoch = getEpoch;
 
         let isSendReq        = isSendReqRdmaOpCode(bth.opcode);
@@ -695,7 +695,7 @@ module mkReqHandleRQ#(
         !hasErrHappened
     );
         let curPktMetaData = preStagePktMetaDataReg;
-        let curRdmaHeader  = curPktMetaData.pktHeader;
+        let curHeaderRDMA  = curPktMetaData.pktHeader;
         let reqPktInfo     = preStageReqPktInfoReg;
 
         let bth         = reqPktInfo.bth;
@@ -827,7 +827,7 @@ module mkReqHandleRQ#(
         let reqPktInfo = preStageReqPktInfoReg;
 
         let curPktMetaData = preStagePktMetaDataReg;
-        let curRdmaHeader  = curPktMetaData.pktHeader;
+        let curHeaderRDMA  = curPktMetaData.pktHeader;
         pktMetaDataPipeIn.deq;
 
         let bth            = reqPktInfo.bth;
@@ -3552,8 +3552,8 @@ module mkReqHandleRQ#(
         pktMetaDataPipeIn.deq;
 
         let maybeRecvReq  = tagged Invalid;
-        let curRdmaHeader = curPktMetaData.pktHeader;
-        let bth           = extractBTH(curRdmaHeader.headerData);
+        let curHeaderRDMA = curPktMetaData.pktHeader;
+        let bth           = extractBTH(curHeaderRDMA.headerData);
         let reqStatus     = RDMA_REQ_ST_DISCARD;
 
         let reqPktInfo = RdmaReqPktInfo {

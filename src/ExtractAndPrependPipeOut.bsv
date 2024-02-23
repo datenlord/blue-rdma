@@ -19,12 +19,12 @@ endinterface
 // and no headerDataStream
 module mkHeader2DataStream#(
     Bool clearAll,
-    PipeOut#(RdmaHeader) headerPipeIn
+    PipeOut#(HeaderRDMA) headerPipeIn
 )(HeaderDataStreamAndMetaDataPipeOut);
     FIFOF#(DataStream)   headerDataStreamOutQ <- mkFIFOF;
     FIFOF#(HeaderMetaData) headerMetaDataOutQ <- mkFIFOF;
 
-    Reg#(RdmaHeader) rdmaHeaderReg <- mkRegU;
+    Reg#(HeaderRDMA) rdmaHeaderReg <- mkRegU;
     Reg#(Bool)      headerValidReg <- mkReg(False);
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -58,27 +58,26 @@ module mkHeader2DataStream#(
         HeaderByteEn leftShiftHeaderByteEn =
             truncate(curHeader.headerByteEn << valueOf(DATA_BUS_BYTE_WIDTH));
 
+        let nextHeaderRDMA = HeaderRDMA {
+            headerData    : leftShiftHeaderData,
+            headerByteEn  : leftShiftHeaderByteEn,
+            headerMetaData: HeaderMetaData {
+                headerLen           : remainingHeaderLen,
+                headerFragNum       : remainingHeaderFragNum,
+                lastFragValidByteNum: curHeader.headerMetaData.lastFragValidByteNum,
+                hasPayload          : curHeader.headerMetaData.hasPayload,
+                isEmptyHeader       : curHeader.headerMetaData.isEmptyHeader
+            }
+        };
+
         Bool isFirst = !headerValidReg;
-        Bool isLast = False;
-        if (curHeader.headerMetaData.isEmptyHeader || isZero(remainingHeaderFragNum)) begin
+        Bool isLast  = curHeader.headerMetaData.isEmptyHeader || isZero(remainingHeaderFragNum);
+        headerValidReg <= !isLast;
+        if (isLast) begin
             headerPipeIn.deq;
-            headerValidReg <= False;
-            isLast = True;
         end
         else begin
-            headerValidReg <= True;
-
-            rdmaHeaderReg <= RdmaHeader {
-                headerData    : leftShiftHeaderData,
-                headerByteEn  : leftShiftHeaderByteEn,
-                headerMetaData: HeaderMetaData {
-                    headerLen           : remainingHeaderLen,
-                    headerFragNum       : remainingHeaderFragNum,
-                    lastFragValidByteNum: curHeader.headerMetaData.lastFragValidByteNum,
-                    hasPayload          : curHeader.headerMetaData.hasPayload,
-                    isEmptyHeader       : curHeader.headerMetaData.isEmptyHeader
-                }
-            };
+            rdmaHeaderReg <= nextHeaderRDMA;
         end
 
         let dataStream = DataStream {
@@ -96,7 +95,7 @@ module mkHeader2DataStream#(
             headerDataStreamOutQ.enq(dataStream);
         end
 
-        let bth = extractBTH(curHeader.headerData);
+        // let bth = extractBTH(curHeader.headerData);
         // $display(
         //     "time=%0t: mkHeader2DataStream outputHeader", $time,
         //     ", start output packet, isEmptyHeader=", fshow(curHeader.headerMetaData.isEmptyHeader),
@@ -113,9 +112,9 @@ endmodule
 // dataPipeIn must have multi-fragment data no more than HeaderByteNum
 module mkDataStream2Header#(
     DataStreamPipeOut dataPipeIn, PipeOut#(HeaderMetaData) headerMetaDataPipeIn
-)(PipeOut#(RdmaHeader));
-    FIFOF#(RdmaHeader)                   headerOutQ <- mkFIFOF;
-    Reg#(RdmaHeader)                  rdmaHeaderReg <- mkRegU;
+)(PipeOut#(HeaderRDMA));
+    FIFOF#(HeaderRDMA)                   headerOutQ <- mkFIFOF;
+    Reg#(HeaderRDMA)                  rdmaHeaderReg <- mkRegU;
     Reg#(HeaderMetaData)          headerMetaDataReg <- mkRegU;
     Reg#(HeaderByteNum) headerInvalidFragByteNumReg <- mkRegU;
     Reg#(HeaderBitNum)   headerInvalidFragBitNumReg <- mkRegU;
@@ -663,7 +662,7 @@ endmodule
 module mkCombineHeaderAndPayload#(
     // Bool clearAll,
     CntrlStatus cntrlStatus,
-    PipeOut#(RdmaHeader) headerPipeIn,
+    PipeOut#(HeaderRDMA) headerPipeIn,
     PipeOut#(PSN) psnPipeIn,
     DataStreamPipeOut payloadPipeIn
 )(DataStreamPipeOut);
