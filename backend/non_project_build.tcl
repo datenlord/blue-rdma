@@ -111,7 +111,7 @@ foreach ip [get_ips *] {
 set_property TOP $top_module [current_fileset]
 synth_design -top $top_module -mode $SYNTH_MODE; # -directive AlternateRoutability -retiming -control_set_opt_threshold 16
 opt_design; # -hier_fanout_limit 512 -directive ExploreWithRemap -remap -control_set_merge -merge_equivalent_drivers
-power_opt_design
+# power_opt_design
 
 if {$ooc_synth} {
     config_timing_analysis -ignore_io_paths true

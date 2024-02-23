@@ -13,7 +13,7 @@ TEST_LOG=run.log
 TEST_DIR=test
 cd $TEST_DIR
 truncate -s 0 $TEST_LOG
-FILES=`ls TestPayloadGen.bsv`
+FILES=`ls TestSendQ.bsv`
 ###########################################################################
 for FILE in $FILES; do
     # echo $FILE
