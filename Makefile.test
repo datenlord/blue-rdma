@@ -105,7 +105,8 @@ TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \
                                     mkTestWorkCompGenNormalCaseSQ \
                                     mkTestWorkCompGenErrFlushCaseSQ
 
-TestPayloadGen.bsv               = mkTestAddrChunkSrv \
+TestPayloadGen.bsv               = mkTestCalcPktNumAndPktLenByAddrAndPMTU \
+                                    mkTestAddrChunkSrv \
                                     mkTestDmaReadCntrlScatterGatherListCase \
                                     mkTestDmaReadCntrlNormalCase \
                                     mkTestDmaReadCntrlCancelCase \
