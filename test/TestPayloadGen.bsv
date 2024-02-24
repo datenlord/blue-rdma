@@ -77,11 +77,85 @@ function Tuple5#(PktLen, PktLen, PktLen, PktNum, ADDR) calcPktNumAndPktLenByAddr
 
     let totalPktNum = truncatedPktNum + zeroExtend(residuePktNum) + zeroExtend(extraPktNum);
     let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
-    let lastPktLen = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
-    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
+    let lastPktLen  = hasResidue ? tmpLastPktLen : (notFullPkt ? lenLowPart : pmtuLen);
 
     return tuple5(pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
 endfunction
+
+(* doc = "testcase" *)
+module mkTestCalcPktNumAndPktLenByAddrAndPMTU(Empty);
+    // TODO: add more corner cases
+    let countDown <- mkCountDown(1);
+
+    rule check;
+        ADDR startAddr = zeroExtend(16'h9FFA);
+        Length payloadLen = 6;
+        PMTU pmtu = IBV_MTU_4096;
+
+        PktNum expectedTotalPktNum = 1;
+        PktLen expectedFirstPktLen = 6;
+        PktLen expectedLastPktLen  = 6;
+        ADDR expectedSecondChunkStartAddr = zeroExtend(16'hA000);
+
+        let {
+            pmtuMask, addrAndLenLowPartSum, pmtuLen, lenLowPart,
+            maxFirstPktLen, truncatedPktNum, pmtuAlignedStartAddr
+        } = stepOneCalcPktNumAndPktLenByAddrAndPMTU(startAddr, payloadLen, pmtu);
+
+        let {
+            secondChunkStartAddr, tmpLastPktLen, pktNumAddOne,
+            notFullPkt, hasExtraPkt, hasResidue
+        } = stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
+            pmtuAlignedStartAddr, pmtu, pmtuMask,
+            addrAndLenLowPartSum, truncatedPktNum
+        );
+
+        let {
+            firstPktLen, lastPktLen, totalPktNum
+        } = stepThreeCalcPktNumAndPktLenByAddrAndPMTU(
+            truncatedPktNum, pktNumAddOne, lenLowPart, maxFirstPktLen,
+            tmpLastPktLen, pmtuLen, notFullPkt, hasExtraPkt, hasResidue
+        );
+
+        immAssert(
+            secondChunkStartAddr == expectedSecondChunkStartAddr &&
+            totalPktNum == expectedTotalPktNum &&
+            firstPktLen == expectedFirstPktLen &&
+            lastPktLen == expectedLastPktLen,
+            "check calcPktNumAndPktLenByAddrAndPMTU assertion @ mkTestCalcPktNumAndPktLenByAddrAndPMTU",
+            $format(
+                "secondChunkStartAddr=%h", secondChunkStartAddr,
+                " should == expectedSecondChunkStartAddr=%h", expectedSecondChunkStartAddr,
+                ", totalPktNum=%0d", totalPktNum,
+                " should == expectedTotalPktNum=%0d", expectedTotalPktNum,
+                ", firstPktLen=%0d", firstPktLen,
+                " should == expectedFirstPktLen=%0d", expectedFirstPktLen,
+                ", lastPktLen=%0d", lastPktLen,
+                " should == expectedLastPktLen=%0d", expectedLastPktLen
+            )
+        );
+        countDown.decr;
+        // $display(
+        //     "time=%0t: check", $time,
+        //     ", startAddr=%h", startAddr,
+        //     ", secondChunkStartAddr=%h", secondChunkStartAddr,
+        //     ", pmtuAlignedStartAddr=%h", pmtuAlignedStartAddr,
+        //     ", addrAndLenLowPartSum=%h", addrAndLenLowPartSum,
+        //     ", payloadLen=%0d", payloadLen,
+        //     ", truncatedPktNum=%0d", truncatedPktNum,
+        //     ", pktNumAddOne=%0d", pktNumAddOne,
+        //     ", tmpLastPktLen=%0d", tmpLastPktLen,
+        //     ", totalPktNum=%0d", totalPktNum,
+        //     ", firstPktLen=%0d", firstPktLen,
+        //     ", lastPktLen=%0d", lastPktLen,
+        //     ", pmtuLen=%0d", pmtuLen,
+        //     ", pmtu=", fshow(pmtu),
+        //     ", notFullPkt=", fshow(notFullPkt),
+        //     ", hasExtraPkt=", fshow(hasExtraPkt),
+        //     ", hasResidue=", fshow(hasResidue)
+        // );
+    endrule
+endmodule
 
 (* doc = "testcase" *)
 module mkTestAddrChunkSrv(Empty);
@@ -139,29 +213,16 @@ module mkTestAddrChunkSrv(Empty);
         let { isOrigFirst, isOrigLast } = firstLastPipeOut.first;
         firstLastPipeOut.deq;
 
-        let pmtuLen = calcPmtuLen(pmtu);
-        let alignedAddr = alignAddrByPMTU(startAddr, pmtu);
-        let invalidLen = startAddr - alignedAddr;
-        let tmpFirstPktLen = pmtuLen - truncate(invalidLen);
-        let totalLen = payloadLen + truncate(invalidLen);
-
-        let totalPktNum = calcPktNumByLenOnly(totalLen, pmtu);
-        let { tmpPktNum, pmtuResidue } = truncateLenByPMTU(
-            totalLen, pmtu
-        );
-        let isOnlyPkt     = isLessOrEqOne(totalPktNum);
-        let isZeroResidue = isZero(pmtuResidue);
-        let firstPktLen = isOnlyPkt ? truncate(payloadLen) : tmpFirstPktLen;
-        let lastPktLen  = isOnlyPkt ? truncate(payloadLen) : (
-            isZeroResidue ? pmtuLen : zeroExtend(pmtuResidue)
-        );
+        let {
+            pmtuLen, firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr
+        } = calcPktNumAndPktLenByAddrAndPMTU(startAddr, payloadLen, pmtu);
 
         pktNumReg <= totalPktNum;
         pmtuReg <= pmtu;
         pmtuLenReg <= pmtuLen;
         firstPktLenReg <= firstPktLen;
         lastPktLenReg <= lastPktLen;
-        nextAddrReg <= alignedAddr;
+        nextAddrReg <= secondChunkStartAddr;
         isFirstReg <= True;
         busyReg <= True;
 
@@ -175,13 +236,13 @@ module mkTestAddrChunkSrv(Empty);
         dut.srvPort.request.put(addrChunkReq);
         reqQ.enq(addrChunkReq);
 
-        let sgePktMetaData = PktMetaDataSGE {
+        let sgePktMetaDataRef = PktMetaDataSGE {
             firstPktLen: firstPktLen,
             lastPktLen : lastPktLen,
             sgePktNum  : totalPktNum,
             pmtu       : addrChunkReq.pmtu
         };
-        sgePktMetaDataRefQ.enq(sgePktMetaData);
+        sgePktMetaDataRefQ.enq(sgePktMetaDataRef);
 
         countDown.decr;
         // $display(
@@ -204,9 +265,11 @@ module mkTestAddrChunkSrv(Empty);
     rule expectedRespGen if (busyReg);
         let req = reqQ.first;
 
-        isFirstReg  <= False;
-        pktNumReg   <= pktNumReg - 1;
-        nextAddrReg <= addrAddPsnMultiplyPMTU(nextAddrReg, oneAsPSN, pmtuReg);
+        isFirstReg <= False;
+        pktNumReg  <= pktNumReg - 1;
+        if (!isFirstReg) begin
+            nextAddrReg <= addrAddPsnMultiplyPMTU(nextAddrReg, oneAsPSN, pmtuReg);
+        end
 
         let isLast  = isLessOrEqOne(pktNumReg);
         if (isLast) begin

@@ -272,8 +272,8 @@ function Tuple3#(PktLen, PktLen, PktNum) stepThreeCalcPktNumAndPktLenByAddrAndPM
 );
     let totalPktNum = truncatedPktNum + zeroExtend(pktNumAddOne);
     let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
-    let lastPktLen  = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
-    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
+    let lastPktLen  = hasResidue ? tmpLastPktLen : (notFullPkt ? lenLowPart : pmtuLen);
+    // let lastPktLen  = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
 
     return tuple3(firstPktLen, lastPktLen, totalPktNum);
 endfunction
@@ -396,6 +396,7 @@ typedef struct {
     PktLen      maxFirstPktLen;
     PktLen      tmpLastPktLen;
     PktLen      pmtuLen;
+    // Length      totalLen;
     PMTU        pmtu;
     ADDR        startAddr;
     ADDR        nextAddr;
@@ -493,6 +494,7 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             maxFirstPktLen : maxFirstPktLen,
             tmpLastPktLen  : tmpLastPktLen,
             pmtuLen        : pmtuLen,
+            // totalLen       : addrChunkReq.len,
             pmtu           : addrChunkReq.pmtu,
             startAddr      : addrChunkReq.startAddr,
             nextAddr       : secondChunkStartAddr,
@@ -523,6 +525,7 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
         let maxFirstPktLen  = tmpPktMetaDataSGE.maxFirstPktLen;
         let tmpLastPktLen   = tmpPktMetaDataSGE.tmpLastPktLen;
         let pmtuLen         = tmpPktMetaDataSGE.pmtuLen;
+        // let totalLen        = tmpPktMetaDataSGE.totalLen;
         let pmtu            = tmpPktMetaDataSGE.pmtu;
         let startAddr       = tmpPktMetaDataSGE.startAddr;
         let nextAddr        = tmpPktMetaDataSGE.nextAddr;
@@ -538,6 +541,24 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
             truncatedPktNum, pktNumAddOne, lenLowPart, maxFirstPktLen,
             tmpLastPktLen, pmtuLen, notFullPkt, hasExtraPkt, hasResidue
         );
+        immAssert(
+            !isZero(firstPktLen) && !isZero(lastPktLen),
+            "firstPktLen lastPktLen assertion @ mkAddrChunkSrv",
+            $format(
+                "firstPktLen=%0d", firstPktLen,
+                " and lastPktLen=%0d", lastPktLen,
+                // " should not be zero, when totalLen=%0d", totalLen,
+                " should not be zero, when lenLowPart=%0d", lenLowPart,
+                ", maxFirstPktLen=%0d", maxFirstPktLen,
+                ", tmpLastPktLen=%0d", tmpLastPktLen,
+                ", startAddr=%h", startAddr,
+                ", pmtu=", fshow(pmtu),
+                ", notFullPkt=", fshow(notFullPkt),
+                ", hasExtraPkt=", fshow(hasExtraPkt),
+                ", hasResidue=", fshow(hasResidue)
+            )
+        );
+
         let sgePktMetaData = PktMetaDataSGE {
             firstPktLen: firstPktLen,
             lastPktLen : lastPktLen,
@@ -712,6 +733,16 @@ module mkDmaReadCntrl#(
 
         let mergedLastPktLastFragValidByteNum =
             calcLastFragValidByteNum(sge.len);
+        immAssert(
+            !isZero(mergedLastPktLastFragValidByteNum),
+            "mergedLastPktLastFragValidByteNum assertion @ mkDmaReadCntrl",
+            $format(
+                "mergedLastPktLastFragValidByteNum=%0d", mergedLastPktLastFragValidByteNum,
+                " should not be zero when sge.len=%0d", sge.len,
+                " and sglIdxReg=%0d", sglIdxReg
+            )
+        );
+
         let sgeMergedMetaData = MergedMetaDataSGE {
             lastFragValidByteNum: mergedLastPktLastFragValidByteNum,
             isFirst             : sge.isFirst,
@@ -2233,6 +2264,25 @@ module mkPayloadGenerator#(
             truncatedPktNum, pktNumAddOne, lenLowPart, maxFirstPktLen,
             tmpLastPktLen, pmtuLen, notFullPkt, hasExtraPkt, hasResidue
         );
+        if (!isZeroPayloadLen) begin
+            immAssert(
+                !isZero(firstPktLen) && !isZero(lastPktLen),
+                "firstPktLen lastPktLen assertion @ mkPayloadGenerator",
+                $format(
+                    "firstPktLen=%0d", firstPktLen,
+                    " and lastPktLen=%0d", lastPktLen,
+                    " should not be zero, when totalLen=%0d", totalLen,
+                    ", lenLowPart=%0d", lenLowPart,
+                    ", maxFirstPktLen=%0d", maxFirstPktLen,
+                    ", tmpLastPktLen=%0d", tmpLastPktLen,
+                    ", origRemoteAddr=%h", origRemoteAddr,
+                    ", pmtu=", fshow(pmtu),
+                    ", notFullPkt=", fshow(notFullPkt),
+                    ", hasExtraPkt=", fshow(hasExtraPkt),
+                    ", hasResidue=", fshow(hasResidue)
+                )
+            );
+        end
 
         let adjustTotalPayloadMetaData = TmpAdjustTotalPayloadMetaData {
             firstRemoteAddr : origRemoteAddr,
@@ -2304,6 +2354,21 @@ module mkPayloadGenerator#(
         };
         if (!isZeroPayloadLen) begin
             adjustedTotalPayloadMetaDataQ.enq(adjustedTotalPayloadMetaData);
+
+            immAssert(
+                !isZero(origLastFragValidByteNum)     &&
+                !isZero(firstPktLastFragValidByteNum) &&
+                !isZero(lastPktLastFragValidByteNum),
+                "lastFragValidByteNum assertion @ mkPayloadGenerator",
+                $format(
+                    "origLastFragValidByteNum=%0d", origLastFragValidByteNum,
+                    ", firstPktLastFragValidByteNum=%0d", firstPktLastFragValidByteNum,
+                    ", and lastPktLastFragValidByteNum=%0d", lastPktLastFragValidByteNum,
+                    " should not be zero, when totalLen=%0d", totalLen,
+                    ", firstPktLen=%0d", firstPktLen,
+                    " and lastPktLen=%0d", lastPktLen
+                )
+            );
         end
 
         let tmpPayloadGenRespData = TmpPayloadGenRespData {

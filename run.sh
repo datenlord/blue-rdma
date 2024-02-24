@@ -116,6 +116,7 @@ mkdir -p $LOG_DIR
 # make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenNormalCaseSQ 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=TestWorkCompGen.bsv TOPMODULE=mkTestWorkCompGenErrFlushCaseSQ 2>&1 | tee -a $ALL_LOG
 
+# make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestCalcPktNumAndPktLenByAddrAndPMTU
 # make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestAddrChunkSrv
 # make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestDmaReadCntrlScatterGatherListCase
 # make -j8 TESTFILE=TestPayloadGen.bsv TOPMODULE=mkTestDmaReadCntrlNormalCase
