@@ -74,7 +74,7 @@ proc should_run_phys_opt {} {
         puts "WNS=$worst_slack, running physical optimization"
         return 1
     } else {
-        puts "WNS=$worst_slack, not to run physical optimization"
+        puts "WNS=$worst_slack, not run physical optimization"
         return 0
     }
 }
