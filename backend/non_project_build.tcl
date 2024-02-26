@@ -156,7 +156,7 @@ report_methodology -file $out_dir/post_synth_methodology.rpt
 report_timing -max $MAX_NET_PATH_NUM -slack_lesser_than 0 -file $out_dir/post_synth_timing.rpt
 
 report_compile_order -constraints -file $out_dir/post_synth_constraints.rpt; # Verify IP constraints included
-report_utilization -file $out_dir/post_synth_util.rpt; # -cells -pblocks
+report_utilization -file $out_dir/post_synth_util.rpt; # -cells
 report_cdc -file $out_dir/post_synth_cdc.rpt
 report_clocks -file $out_dir/post_synth_clocks.rpt; # Verify clock settings
 
@@ -194,7 +194,9 @@ report_timing_summary -report_unconstrained -warn_on_violation -file $out_dir/po
 report_methodology -file $out_dir/post_place_methodology.rpt
 report_timing -max $MAX_NET_PATH_NUM -slack_lesser_than 0 -file $out_dir/post_place_timing.rpt
 report_clock_utilization -file $out_dir/post_place_clock_util.rpt
-report_utilization -file $out_dir/post_place_util.rpt; # -cells -pblocks -slr
+report_utilization -file $out_dir/post_place_util.rpt; # -cells
+report_utilization -slr -file $out_dir/post_place_util_slr.rpt
+report_utilization -pblocks [get_pblocks] -file $out_dir/post_place_util_pblocks.rpt
 report_high_fanout_nets -timing -load_type -max_nets $MAX_NET_PATH_NUM -file $out_dir/post_place_fanout.rpt
 
 # xilinx::designutils::timing_report_to_verilog -of_objects [get_timing_paths -max_paths $MAX_NET_PATH_NUM]
@@ -255,6 +257,7 @@ report_power -file $out_dir/post_route_power.rpt
 report_power_opt -file $out_dir/post_route_power_opt.rpt
 report_utilization -file $out_dir/post_route_util.rpt
 report_utilization -slr -file $out_dir/post_route_util_slr.rpt
+report_utilization -pblocks [get_pblocks] -file $out_dir/post_place_util_pblocks.rpt
 report_ram_utilization -file $out_dir/post_route_ram_utils.rpt
 # Check fanout < 25K
 report_high_fanout_nets -timing -load_type -max_nets $MAX_NET_PATH_NUM -file $out_dir/post_route_fanout.rpt
