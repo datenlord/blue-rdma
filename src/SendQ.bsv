@@ -16,6 +16,7 @@ typedef struct {
     MAC    macAddr;
     IP     ipAddr;
     PktLen pktLen;
+    Bool   isRawPkt;
 } PktInfo4UDP deriving(Bits, FShow);
 
 typedef struct {
@@ -563,7 +564,7 @@ typedef struct {
     Bool   isFirstPkt;
     Bool   isLastPkt;
     Bool   isOnlyPkt;
-    Bool   qpRawPkt;
+    Bool   isRawPkt;
 } HeaderGenInfo deriving(Bits, FShow);
 
 typedef struct {
@@ -720,12 +721,12 @@ module mkSendQ#(
             // TODO: check immDtOrInvRKey is RKey
         end
 
-        let qpRawPkt = isRawPktTypeQP(wqe.qpType);
+        let isRawPkt = isRawPktTypeQP(wqe.qpType);
         let isSendWR = isSendWorkReq(wqe.opcode);
-        let shouldGenPayload = qpRawPkt || workReqNeedPayloadGen(wqe.opcode);
+        let shouldGenPayload = isRawPkt || workReqNeedPayloadGen(wqe.opcode);
 
         let remoteAddr = wqe.raddr;
-        if (qpRawPkt || isSendWR) begin
+        if (isRawPkt || isSendWR) begin
             remoteAddr = 0;
         end
         if (shouldGenPayload) begin
@@ -740,7 +741,7 @@ module mkSendQ#(
             };
             payloadGenerator.srvPort.request.put(payloadGenReq);
         end
-        totalMetaDataQ.enq(tuple3(wqe, qpRawPkt, shouldGenPayload));
+        totalMetaDataQ.enq(tuple3(wqe, isRawPkt, shouldGenPayload));
         // TODO: handle pending read/atomic request number limit
 
         // $display(
@@ -754,7 +755,7 @@ module mkSendQ#(
     endrule
 
     rule recvTotalMetaData if (!clearAll);
-        let { wqe, qpRawPkt, shouldGenPayload } = totalMetaDataQ.first;
+        let { wqe, isRawPkt, shouldGenPayload } = totalMetaDataQ.first;
         totalMetaDataQ.deq;
 
         let sglZeroIdx  = 0;
@@ -800,7 +801,7 @@ module mkSendQ#(
             totalPktNum =  payloadTotalMetaData.totalPktNum;
         end
         psnUpdateQ.enq(tuple7(
-            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, qpRawPkt
+            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, isRawPkt
         ));
         // $display(
         //     "time=%0t: mkSendQ 2nd stage recvTotalMetaData", $time,
@@ -809,7 +810,7 @@ module mkSendQ#(
         //     ", psn=%h", wqe.psn,
         //     ", totalLen=%0d", totalLen,
         //     ", totalPktNum=%0d", totalPktNum,
-        //     ", qpRawPkt=", fshow(qpRawPkt),
+        //     ", isRawPkt=", fshow(isRawPkt),
         //     ", hasPayload=", fshow(hasPayload),
         //     ", isOnlyPkt=", fshow(isOnlyPkt),
         //     ", shouldGenPayload=", fshow(shouldGenPayload)
@@ -818,7 +819,7 @@ module mkSendQ#(
 
     rule updatePSN if (!clearAll);
         let {
-            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, qpRawPkt
+            wqe, totalLen, totalPktNum, shouldGenPayload, hasPayload, isOnlyPkt, isRawPkt
         } = psnUpdateQ.first;
 
         let curPSN = curPsnReg;
@@ -869,14 +870,14 @@ module mkSendQ#(
             );
         end
 
-        if (qpRawPkt) begin
+        if (isRawPkt) begin
             immAssert(
                 hasPayload && isZero(padCnt),
-                "qpRawPkt assertion @ mkSendQ",
+                "isRawPkt assertion @ mkSendQ",
                 $format(
                     "hasPayload=", fshow(hasPayload),
                     " should be true, and pacCnt=%0d", padCnt,
-                    " should be zero when qpRawPkt=", fshow(qpRawPkt),
+                    " should be zero when isRawPkt=", fshow(isRawPkt),
                     " and wqe.qpType=", fshow(wqe.qpType)
                 )
             );
@@ -896,7 +897,7 @@ module mkSendQ#(
             isFirstPkt: isFirstPkt,
             isLastPkt : isLastPkt,
             isOnlyPkt : isOnlyPkt,
-            qpRawPkt  : qpRawPkt
+            isRawPkt  : isRawPkt
         };
         headerPrepareQ.enq(tuple2(wqe, headerGenInfo));
         // $display(
@@ -928,10 +929,10 @@ module mkSendQ#(
         let isFirstPkt    = headerGenInfo.isFirstPkt;
         let isLastPkt     = headerGenInfo.isLastPkt;
         let isOnlyPkt     = headerGenInfo.isOnlyPkt;
-        let qpRawPkt      = headerGenInfo.qpRawPkt;
+        let isRawPkt      = headerGenInfo.isRawPkt;
 
         let maybePktHeaderInfo = dontCareValue;
-        if (qpRawPkt) begin
+        if (isRawPkt) begin
             maybePktHeaderInfo = tagged Valid genEmptyPktHeaderInfo(hasPayload);
         end
         else if (isFirstPkt) begin
@@ -982,7 +983,7 @@ module mkSendQ#(
 
         let isSendDone = isOnlyPkt || isLastPkt;
         pendingHeaderQ.enq(tuple6(
-            wqe.macAddr, wqe.dqpIP, maybePktHeaderInfo, pktLenWithPadCnt, qpRawPkt, isSendDone
+            wqe.macAddr, wqe.dqpIP, maybePktHeaderInfo, pktLenWithPadCnt, isRawPkt, isSendDone
         ));
         // $display(
         //     "time=%0t: mkSendQ 4th stage prepareHeader", $time,
@@ -999,7 +1000,7 @@ module mkSendQ#(
 
     rule genPktHeader if (!clearAll);
         let {
-            macAddr, ipAddr, maybePktHeaderInfo, pktLenWithPadCnt, qpRawPkt, isSendDone
+            macAddr, ipAddr, maybePktHeaderInfo, pktLenWithPadCnt, isRawPkt, isSendDone
         } = pendingHeaderQ.first;
         pendingHeaderQ.deq;
 
@@ -1007,14 +1008,15 @@ module mkSendQ#(
             let headerData = pktHeaderInfo.headerData;
             let headerLen  = pktHeaderInfo.headerLen;
             let hasPayload = pktHeaderInfo.hasPayload;
-            let pktHeader  = qpRawPkt ?
+            let pktHeader  = isRawPkt ?
                 genEmptyHeaderRDMA(hasPayload) :
                 genHeaderRDMA(headerData, headerLen, hasPayload);
 
             let udpPktInfo = PktInfo4UDP {
-                macAddr: macAddr,
-                ipAddr : ipAddr,
-                pktLen : pktLenWithPadCnt + zeroExtend(headerLen)
+                macAddr : macAddr,
+                ipAddr  : ipAddr,
+                pktLen  : pktLenWithPadCnt + zeroExtend(headerLen),
+                isRawPkt: isRawPkt
             };
 
             pktHeaderQ.enq(pktHeader);
