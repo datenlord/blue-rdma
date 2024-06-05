@@ -6,6 +6,7 @@ import Vector :: *;
 import Ringbuf :: *;
 import ClientServer :: *;
 
+import PrimUtils :: *;
 import UserLogicTypes :: *;
 import UserLogicSettings :: *;
 
@@ -103,6 +104,7 @@ module mkRegisterBlock(
                 CsrRingbufRegsAddress regAddr = unpack(truncate(pack(writeReqQ.first.addr)>>2));
                 case (regAddr.regIndex)
                     CsrGroupOffsetForRingbufBaseAddrLow: begin
+                        immAssertAddressAlign(data, AddressAlignAssertionMask4KB, "Ringbuf Buffer Address CSR Write");
                         if (regAddr.isH2c) begin
                             h2cMetas[regAddr.queueIndex].addr[31:0] <= unpack(data);
                         end 

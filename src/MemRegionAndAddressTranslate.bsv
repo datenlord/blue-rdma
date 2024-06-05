@@ -307,6 +307,7 @@ module mkMrAndPgtManager(MrAndPgtManager);
             end
             CmdQueueOpcodeUpdatePGT: begin
                 CmdQueueReqDescUpdatePGT desc = unpack(descRaw);
+                immAssertAddressAlign(desc.dmaAddr, AddressAlignAssertionMask4KB, "PGT table update dma request");
                 dmaReadReqQ.enq(UserLogicDmaH2cReq{
                     addr: desc.dmaAddr,
                     len: truncate(desc.dmaReadLength)

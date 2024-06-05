@@ -171,6 +171,26 @@ function Action immFail(String assertName, Fmt assertFmtMsg);
     endaction
 endfunction
 
+typedef enum {
+    AddressAlignAssertionMask4KB = 'hFFF,
+    AddressAlignAssertionMask2MB = 'h1FFFFF
+} AddressAlignAssertionMask deriving (Bits, Eq);
+
+function Action immAssertAddressAlign(tAddr addr, AddressAlignAssertionMask alignMask, String name) provisos (
+    Bits#(tAddr, szAddr),
+    Bits#(AddressAlignAssertionMask, szMask),
+    Add#(anySize, szMask, szAddr)
+);
+    action
+        tAddr maskedAddr = unpack(zeroExtend(pack(alignMask)) & pack(addr));
+        immAssert(
+            pack(maskedAddr) == 0,
+            "address not aligned @ immAssertAddressAlign",
+            $format("name=%s, addr=%x, maskedLowerBIts=%x", name, addr, maskedAddr)
+        );
+    endaction
+endfunction
+
 // PipeOut related
 
 function PipeOut#(anytype) toPipeOut(FIFOF#(anytype) queue);
