@@ -31,9 +31,9 @@ def test_case(host_mem):
 
     # first, modify an register
     mock_nic.write_csr_blocking(
-        CSR_ADDR_CMD_REQ_QUEUE_ADDR_LOW, 200)
+        CSR_ADDR_CMD_REQ_QUEUE_ADDR_LOW, 4096)
     readback = mock_nic.read_csr_blocking(CSR_ADDR_CMD_REQ_QUEUE_ADDR_LOW)
-    if readback != 200:
+    if readback != 4096:
         print("Error: Error at read back, expected=200, got ", readback)
         raise SystemExit
 
