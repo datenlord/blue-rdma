@@ -990,9 +990,9 @@ function FakeXdmaBeatByteNum calcFragByteNumFromByteEnWide(ByteEnWide fragByteEn
 endfunction
 
 module mkFakeXdma(Integer id, Clock cmacRxTxClk, Reset cmacRxTxRst, FakeXdma ifc);
-    FIFOF#(UserLogicDmaH2cReq) xdmaH2cReqQ <- mkFIFOF;
+    FIFOF#(UserLogicDmaH2cReq) xdmaH2cReqQ <- makeDelayQueue(20);
     FIFOF#(UserLogicDmaH2cWideResp) xdmaH2cRespQ <- mkFIFOF;
-    FIFOF#(UserLogicDmaC2hWideReq) xdmaC2hReqQ <- mkFIFOF;
+    FIFOF#(UserLogicDmaC2hWideReq) xdmaC2hReqQ <- makeDelayQueue(20);
     FIFOF#(UserLogicDmaC2hResp) xdmaC2hRespQ <- mkFIFOF;
 
     BRAM_Configure cfg = defaultValue;
@@ -1310,3 +1310,28 @@ endmodule
 
 
 
+module makeDelayQueue#(Integer delayCyclesInt)(FIFOF#(tData)) provisos(Bits#(tData, szData));
+
+    FIFOF#(tData) firstFifo <- mkFIFOF;
+    FIFOF#(tData) lastFifo <- mkFIFOF;
+
+    FIFOF#(tData) prevFifo = firstFifo;
+
+    for (Integer idx = 0; idx < delayCyclesInt-2; idx = idx + 1) begin
+        FIFOF#(tData) midFifo <- mkFIFOF;
+        mkConnection(toGet(prevFifo), toPut(midFifo));
+        prevFifo = midFifo;
+    end
+
+    mkConnection(toGet(prevFifo), toPut(lastFifo));
+
+
+    method notFull = firstFifo.notFull;
+    method enq = firstFifo.enq;
+    
+    method notEmpty = lastFifo.notEmpty;
+    method first = lastFifo.first;
+    method deq = lastFifo.deq;
+
+    method clear = firstFifo.clear;
+endmodule

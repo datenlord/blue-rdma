@@ -54,6 +54,12 @@ typedef 0 MAX_INLINE_DATA; // No inline data
 
 typedef TExp#(17)   MAX_PTE_ENTRY_CNT; // Max cover 256GB
 
+// The following two param set the inflight queue size. 
+// Greater value means it can handle longer PCIe latency without bubles in pipeline,
+// but will take more area as buffer.
+typedef 30 DMA_READ_INFLIGHT_QUEUE_LENGTH;
+typedef 25 DMA_WRITE_INFLIGHT_QUEUE_LENGTH;
+
 /*
 struct ibv_device_attr {
     char                fw_ver[64];

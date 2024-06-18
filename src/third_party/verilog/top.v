@@ -105,14 +105,14 @@ module top#(
     // AXI streaming ports
     wire [C_DATA_WIDTH-1:0]	m_axis_h2c_tdata_0;
     wire 			m_axis_h2c_tlast_0;
-    wire 			m_axis_h2c_tvalid_0;
-    wire 			m_axis_h2c_tready_0;
+    (*mark_debug, mark_debug_clock="user_clk_250" *) wire 			m_axis_h2c_tvalid_0;
+    (*mark_debug, mark_debug_clock="user_clk_250" *) wire 			m_axis_h2c_tready_0;
     wire [C_DATA_WIDTH/8-1:0]	m_axis_h2c_tkeep_0;
     
     wire [C_DATA_WIDTH-1:0] s_axis_c2h_tdata_0; 
     wire s_axis_c2h_tlast_0;
-    wire s_axis_c2h_tvalid_0;
-    wire s_axis_c2h_tready_0;
+    (*mark_debug, mark_debug_clock="user_clk_250" *) wire s_axis_c2h_tvalid_0;
+    (*mark_debug, mark_debug_clock="user_clk_250" *) wire s_axis_c2h_tready_0;
     wire [C_DATA_WIDTH/8-1:0] s_axis_c2h_tkeep_0; 
 
     wire [7:0] c2h_sts_0;
@@ -132,18 +132,18 @@ module top#(
   );
 
 // Descriptor Bypass Control Logic
-  wire c2h_dsc_byp_ready_0;
+  (*mark_debug, mark_debug_clock="user_clk_250" *) wire c2h_dsc_byp_ready_0;
   wire [63 : 0] c2h_dsc_byp_src_addr_0;
   wire [63 : 0] c2h_dsc_byp_dst_addr_0;
   wire [27 : 0] c2h_dsc_byp_len_0;
   wire [4 : 0] c2h_dsc_byp_ctl_0;
-  wire c2h_dsc_byp_load_0;
-  wire h2c_dsc_byp_ready_0;
+  (*mark_debug, mark_debug_clock="user_clk_250" *) wire c2h_dsc_byp_load_0;
+  (*mark_debug, mark_debug_clock="user_clk_250" *) wire h2c_dsc_byp_ready_0;
   wire [63 : 0] h2c_dsc_byp_src_addr_0;
   wire [63 : 0] h2c_dsc_byp_dst_addr_0;
   wire [27 : 0] h2c_dsc_byp_len_0;
   wire [4 : 0] h2c_dsc_byp_ctl_0;
-  wire h2c_dsc_byp_load_0;
+  (*mark_debug, mark_debug_clock="user_clk_250" *) wire h2c_dsc_byp_load_0;
 
   //  (*mark_debug, mark_debug_clock="user_clk_250" *)
 

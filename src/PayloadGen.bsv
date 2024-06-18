@@ -679,7 +679,7 @@ module mkDmaReadCntrl#(
     // Pipeline FIFO
     FIFOF#(Tuple2#(ScatterGatherElem, PMTU)) pendingScatterGatherElemQ <- mkSizedFIFOF(valueOf(MAX_SGE));
     FIFOF#(LKEY) pendingLKeyQ <- mkSizedFIFOF(5);
-    FIFOF#(Tuple2#(Bool, Bool))     pendingDmaReadReqQ <-  mkSizedFIFOF(10);
+    FIFOF#(Tuple2#(Bool, Bool))     pendingDmaReadReqQ <-  mkSizedFIFOF(valueOf(DMA_READ_INFLIGHT_QUEUE_LENGTH));
 
 
     // rule debug;

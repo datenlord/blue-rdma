@@ -6,6 +6,7 @@ import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
 
+import Settings :: *;
 import DataTypes :: *;
 import Headers :: *;
 import PrimUtils :: *;
@@ -71,7 +72,7 @@ module mkPayloadConsumer(PayloadConsumer);
     // Pipeline FIFO
     FIFOF#(Tuple3#(PayloadConReq, Bool, Bool))                    countReqFragQ <- mkFIFOF;
     FIFOF#(Tuple4#(PayloadConReq, Bool, Bool, Bool))             pendingConReqQ <- mkFIFOF;
-    FIFOF#(PayloadConReq)                                           genConRespQ <- mkSizedFIFOF(5);
+    FIFOF#(PayloadConReq)                                           genConRespQ <- mkSizedFIFOF(valueOf(DMA_WRITE_INFLIGHT_QUEUE_LENGTH));
     FIFOF#(Tuple2#(PayloadConReq, DataStreamFragMetaData))       pendingDmaReqQ <- mkSizedFIFOF(6);
 
 
