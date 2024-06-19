@@ -51,7 +51,7 @@ gen_udp_crc_tab:
 			$(DIR_BSV_GENERATED)
 compile:
 	mkdir -p $(BUILDDIR)
-	bsc -elab -sim -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(TOPMODULE) $(TARGETFILE)
+	bsc -elab -verilog -verbose $(BLUESIMFLAGS) $(DEBUGFLAGS) $(DIRFLAGS) $(MISCFLAGS) $(RECOMPILEFLAGS) $(RUNTIMEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -g $(TOPMODULE) $(TARGETFILE)
 
 verilog: gen_udp_crc_tab compile 
 	mkdir -p $(DIR_BSV_GENERATED)
