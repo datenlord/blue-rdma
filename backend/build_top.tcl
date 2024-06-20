@@ -347,24 +347,26 @@ if {$argc == 0} {
     set synth 1
     set prw 1
     set directive ExtraNetDelay_high
+    set redirect 0
 } elseif {$argc > 0} {
-    if {[lindex $argv 0] == synth} {
+    set op [lindex $argv 0]
+
+    if {$op eq "synth"} {
         set synth 1
         set prw 0
-    } elseif {[lindex $argv 0] == prw} {
+    } elseif {$op eq "prw"} {
         set synth 0
         set prw 1
         if {$argc == 1} {
             set directive ExtraNetDelay_high
             set redirect 0
-        } else {$argc == 2} {
+        } elseif {$argc == 2} {
             set directive [lindex $argv 1]
             set redirect 1
         }
     }
 }
-
-if {synth} {
+if {$synth} {
     # runGenerateIP -open_checkpoint false
     # runSynthIP -open_checkpoint false
     # runSynthOOC
@@ -373,11 +375,11 @@ if {synth} {
     # runPostSynthReport -open_checkpoint false
 }
 
-if {prw} {
-    if {!synth} {
+if {$prw} {
+    if {!$synth} {
         read_checkpoint $dir_output/post_synth_design.dcp
     }
-    if {redirect} {
+    if {$redirect} {
         set dir_output "$dir_output/$directive"
     }
     runPlacement -open_checkpoint false -directive $directive
