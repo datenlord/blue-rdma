@@ -343,24 +343,48 @@ proc runProgramDevice {args} {
     program_hw_devices [get_hw_devices xcvu13p_0]
 }
 
-# runGenerateIP -open_checkpoint false
-# runSynthIP -open_checkpoint false
-# runSynthOOC
-addExtFiles -open_checkpoint false
-runSynthDesign -open_checkpoint false
-# runPostSynthReport -open_checkpoint false
-# runPlacement -open_checkpoint true -directive ExtraNetDelay_high
-# runPlacement -open_checkpoint true -directive WLDrivenBlockPlacement
-# runPlacement -open_checkpoint true -directive Explore
-# runPlacement -open_checkpoint true -directive Auto_1
-# runPlacement -open_checkpoint true -directive EarlyBlockPlacement
+if {$argc == 0} {
+    set synth 1
+    set prw 1
+    set directive ExtraNetDelay_high
+} elseif {$argc > 0} {
+    if {[lindex $argv 0] == synth} {
+        set synth 1
+        set prw 0
+    } elseif {[lindex $argv 0] == prw} {
+        set synth 0
+        set prw 1
+        if {$argc == 1} {
+            set directive ExtraNetDelay_high
+            set redirect 0
+        } else {$argc == 2} {
+            set directive [lindex $argv 1]
+            set redirect 1
+        }
+    }
+}
 
-# runPlacement -open_checkpoint true -directive WLDrivenBlockPlacement
+if {synth} {
+    # runGenerateIP -open_checkpoint false
+    # runSynthIP -open_checkpoint false
+    # runSynthOOC
+    addExtFiles -open_checkpoint false
+    runSynthDesign -open_checkpoint false
+    # runPostSynthReport -open_checkpoint false
+}
 
-runPlacement -open_checkpoint false -directive ExtraNetDelay_high
+if {prw} {
+    if {!synth} {
+        read_checkpoint $dir_output/post_synth_design.dcp
+    }
+    if {redirect} {
+        set dir_output "$dir_output/$directive"
+    }
+    runPlacement -open_checkpoint false -directive $directive
 
-# runPostPlacementReport -open_checkpoint false
-runRoute -open_checkpoint false
-# runPostRouteReport -open_checkpoint false
-runWriteBitStream -open_checkpoint false
-# runProgramDevice -open_checkpoint false
+    # runPostPlacementReport -open_checkpoint false
+    runRoute -open_checkpoint false
+    # runPostRouteReport -open_checkpoint false
+    runWriteBitStream -open_checkpoint false
+    # runProgramDevice -open_checkpoint false
+}
