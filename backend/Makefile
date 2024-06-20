@@ -29,6 +29,7 @@ STUB_TOP_FILE = ../src/stubs.bsv
 IMPORT_VERILOG_DIR := +:../src/third_party/blue-crc/lib/primitives
 IMPORT_VERILOG_DIR := $(shell echo "$(IMPORT_VERILOG_DIR)" | tr -d ' ')
 
+
 export TOP = $(TOPMODULE)
 export DIR_RTL = $(VLOGDIR)
 export DIR_XDC = $(TCLDIR)
@@ -77,10 +78,13 @@ vivado: verilog
 vivado_ooc:
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl 2>&1 | tee $(LOGFILE)
 
-vivado_batch:
+vivado_synth:
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs synth 2>&1 | tee $(LOGFILE)
-	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw ExtraNetDelay_high 2>&1 | tee $(LOGFILE)
-	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw WLDrivenBlockPlacement 2>&1 | tee $(LOGFILE)
+
+vivado_batch: vivado_synth
+	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw ExtraNetDelay_high 2>&1 | tee ext.out &
+	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw WLDrivenBlockPlacement 2>&1 | tee wld.out &
+	wait
 
 clean:
 	rm -rf $(BUILDDIR) $(OUTPUTDIR) $(DIR_BSV_GENERATED) $(DIR_BSV_GENERATED_STUB) .Xil *.jou *.log
