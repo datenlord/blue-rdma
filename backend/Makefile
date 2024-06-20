@@ -77,7 +77,7 @@ vivado: verilog
 vivado_ooc:
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl 2>&1 | tee $(LOGFILE)
 
-vicado_night:
+vivado_multi_placement:
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs synth 2>&1 | tee $(LOGFILE)
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw ExtraNetDelay_high 2>&1 | tee $(LOGFILE)
 	vivado -mode tcl -nolog -nojournal -source ./build_top.tcl -tclargs prw WLDrivenBlockPlacement 2>&1 | tee $(LOGFILE)
