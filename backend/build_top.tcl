@@ -377,12 +377,13 @@ if {$synth} {
 
 if {$prw} {
     if {!$synth} {
-        read_checkpoint $dir_output/post_synth_design.dcp
+        read_xdc $dir_output/post_synth.xdc
+        open_checkpoint $dir_output/post_synth_design.dcp
     }
     if {$redirect} {
         set dir_output "$dir_output/$directive"
     }
-    runPlacement -open_checkpoint false -directive $directive
+    runPlacement -open_checkpoint -false -directive $directive
 
     # runPostPlacementReport -open_checkpoint false
     runRoute -open_checkpoint false
