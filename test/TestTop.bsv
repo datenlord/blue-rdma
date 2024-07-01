@@ -187,10 +187,15 @@ module mkTestTopInner(TestTopInner);
     SyncFIFOIfc#(AxiStream512) netIfcTxSyncFifo <- mkSyncFIFO(32, udpClock, udpReset, cmacRxTxClk);
     // mkConnection(toGet(topA.axiStreamTxOutUdp), toPut(netIfcTxSyncFifo));
     rule forwardUdpSendStream;
-        let txData = topA.axiStreamTxOutUdp.first;
-        topA.axiStreamTxOutUdp.deq;
-        netIfcTxSyncFifo.enq(txData);
-        $display("time=%0t: ", $time, "forward udp send data to sync FIFO of CMAC");
+        if (netIfcTxSyncFifo.notFull) begin
+            let txData = topA.axiStreamTxOutUdp.first;
+            topA.axiStreamTxOutUdp.deq;
+            netIfcTxSyncFifo.enq(txData);
+            $display("time=%0t: ", $time, "forward udp send data to sync FIFO of CMAC");
+        end
+        else begin
+            $display("time=%0t: ", $time, "!!!!!!!!!!!!!!!!!!!!!forward udp send data to sync FIFO of CMAC, but FIFO is FULL!!!!!!!!!!!!!!!");
+        end
     endrule
     mkConnection(convertSyncFifoToFifoOut(netIfcTxSyncFifo), fakeXdmaA.axiStreamTxUdp, clocked_by cmacRxTxClk, reset_by cmacRxTxRst); 
 
