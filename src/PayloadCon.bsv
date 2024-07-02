@@ -5,6 +5,7 @@ import FIFOF :: *;
 import GetPut :: *;
 import PAClib :: *;
 import Vector :: *;
+import Probe :: *;
 
 import Settings :: *;
 import DataTypes :: *;
@@ -85,6 +86,17 @@ module mkPayloadConsumer(PayloadConsumer);
     Reg#(Bool) isRemainingFragNumZeroReg <- mkReg(False);
     Reg#(Bool)      isFirstOrOnlyFragReg <- mkReg(True);
 
+    Reg#(Bit#(4)) queueFullDebugReg <- mkReg(-1);
+    Probe#(Bit#(4)) queueFullDebugProbe <- mkProbe;
+    rule debugFillQueueFullDebugReg;
+        queueFullDebugReg <= queueFullDebugReg & {
+            pack(countReqFragQ.notFull),
+            pack(pendingConReqQ.notFull),
+            pack(genConRespQ.notFull),
+            pack(pendingDmaReqQ.notFull)
+        };
+        queueFullDebugProbe <= queueFullDebugReg;
+    endrule
 
     function Action checkIsOnlyPayloadFragment(
         DataStreamFragMetaData payloadFragMeta, PayloadConInfo consumeInfo

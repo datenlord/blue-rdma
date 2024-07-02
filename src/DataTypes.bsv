@@ -962,7 +962,7 @@ typedef struct {
     Bool       isAdjacentPsnContinous;
 } ExpectedPsnCheckResp deriving(Bits, FShow);
 
-typedef 6 RECV_PACKET_SRC_MAC_IP_BUFFER_INDEX_WIDTH;
+typedef 8 RECV_PACKET_SRC_MAC_IP_BUFFER_INDEX_WIDTH;
 typedef Bit#(RECV_PACKET_SRC_MAC_IP_BUFFER_INDEX_WIDTH) RecvPacketSrcMacIpBufferIdx; 
 
 typedef struct {

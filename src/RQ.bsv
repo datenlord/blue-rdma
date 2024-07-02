@@ -1,6 +1,7 @@
 import FIFOF :: *;
 import GetPut :: *;
 import Vector :: *;
+import Probe :: *;
 
 import ClientServer :: *;
 import RdmaUtils :: *;
@@ -61,6 +62,20 @@ module mkRQ(RQ ifc);
     FIFOF#(Tuple4#(RdmaPktMetaDataAndQPC, RdmaReqStatus, Bool, Bool))                                           psnContinuityCheckPipeQ <- mkFIFOF;
     FIFOF#(Tuple6#(RdmaPktMetaDataAndQPC, RdmaReqStatus, PSN, Bool, Bool, Bool))                                waitDMARespPipeQ        <- mkFIFOF;
 
+    Reg#(Bit#(7)) queueFullDebugReg <- mkReg(-1);
+    Probe#(Bit#(7)) queueFullDebugProbe <- mkProbe;
+    rule debugFillQueueFullDebugReg;
+        queueFullDebugReg <= queueFullDebugReg & {
+            pack(reqStatusCheckStep1PipeQ.notFull),
+            pack(reqStatusCheckStep2PipeQ.notFull),
+            pack(reqStatusCheckStep3PipeQ.notFull),
+            pack(getPGTQueryRespPipeQ.notFull),
+            pack(psnContextQueryReqPipeQ.notFull),
+            pack(psnContinuityCheckPipeQ.notFull),
+            pack(waitDMARespPipeQ.notFull)
+        };
+        queueFullDebugProbe <= queueFullDebugReg;
+    endrule
 
     function FlagsType#(MemAccessTypeFlag) genAccessFlagFromReqType(Bool isSend, Bool isRead, Bool isWrite, Bool isAtomic);
         let accFlags = enum2Flag(IBV_ACCESS_LOCAL_WRITE);

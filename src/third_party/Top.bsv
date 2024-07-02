@@ -202,6 +202,12 @@ module mkRqWrapper(RqWrapper);
     mkConnection(headerAndMetaDataAndPayloadPipeOut.payloadStreamFragStorageIdxIn, recvStreamFragStorage.allocSlotIdx);
     mkConnection(headerAndMetaDataAndPayloadPipeOut.payloadStreamFragStorageDataOut, recvStreamFragStorage.saveData);
 
+    Reg#(Bit#(1)) queueFullDebugReg <- mkReg(-1);
+    Probe#(Bit#(1)) queueFullDebugProbe1 <- mkProbe;
+    rule debugFillQueueFullDebugReg;
+        queueFullDebugReg <= queueFullDebugReg & {pack(inputDataStreamQ.notFull)};
+        queueFullDebugProbe1 <= queueFullDebugReg;
+    endrule
 
     // rule debugDropData;
     //     if (headerAndMetaDataAndPayloadPipeOut.headerAndMetaData.headerMetaData.notEmpty) begin
@@ -472,7 +478,7 @@ module mkRdmaUserLogicWithoutXdmaAndCmacWrapper(
     FIFOF#(Ports::DataStream) udpTxStreamBufQ <- mkFIFOF;
     FIFOF#(UdpIpMetaData) udpTxIpMetaBufQ <- mkFIFOF;
     FIFOF#(MacMetaDataWithBypassTag) udpTxMacMetaBufQ <- mkFIFOF;
-    FIFOF#(RqDataStreamWithExtraInfo) udpRxStreamBufQ <- mkFIFOF;
+    FIFOF#(RqDataStreamWithExtraInfo) udpRxStreamBufQ <- mkSizedFIFOF(1024);
 
     FIFOF#(AutoAckGenMetaData) sendAutoAckMacIpStorageReadPipeQ <- mkFIFOF;
 
@@ -484,6 +490,13 @@ module mkRdmaUserLogicWithoutXdmaAndCmacWrapper(
     mkConnection(toGet(udpTxIpMetaBufQ), udp.netTxRxIfc.udpIpMetaDataTxIn);
     mkConnection(toGet(udpTxMacMetaBufQ), udp.netTxRxIfc.macMetaDataTxIn);
     mkConnection(toGet(udpRxStreamBufQ), rdma.rqInputDataStream);
+
+    Reg#(Bit#(1)) queueFullDebugReg <- mkReg(-1);
+    Probe#(Bit#(1)) queueFullDebugProbe <- mkProbe;
+    rule debugFillQueueFullDebugReg;
+        queueFullDebugReg <= queueFullDebugReg & {pack(udpRxStreamBufQ.notFull)};
+        queueFullDebugProbe <= queueFullDebugReg;
+    endrule
 
     // mkConnection(toGet(rdma.setNetworkParamReqOut), toPut(udp.netTxRxIfc.udpConfig));
 
