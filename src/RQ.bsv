@@ -149,11 +149,6 @@ module mkRQ(RQ ifc);
         let isReqNeedDMAWrite    = rdmaReqNeedDmaWrite(bth.opcode);
         let isRawPacket = pktMetaDataAndQpc.metadata.pktHeader.headerMetaData.isEmptyHeader;
 
-        if (isRawPacket) begin
-            // for RawPacket, Update RETH len, so we can report packet len to software driver
-            reth.dlen = zeroExtend(pktMetaDataAndQpc.metadata.pktPayloadLen);
-        end
-
         let rdmaOpCodeNeedQueryMrTable    = isRespNeedDMAWrite || isReqNeedDMAWrite;
 
         // only need to query MRTable or PGT if we need DMA access, for packet like ACK/NACK, no need to check
