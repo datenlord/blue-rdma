@@ -227,7 +227,6 @@ module mkPayloadConsumer(PayloadConsumer);
             consumeReq, isFragNumLessOrEqOne, isFirstOrOnlyFrag, isLastReqFrag
         } = pendingConReqQ.first;
         let shouldDeqConReq = True;
-        // pendingConReqQ.deq;
 
         case (consumeReq.consumeInfo) matches
             tagged DiscardPayloadInfo .discardInfo: begin

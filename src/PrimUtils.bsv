@@ -54,10 +54,6 @@ function Bool isTwoR(Bit#(nSz) bits) provisos(Add#(2, anysize, nSz));
     return isZero(bits >> 2) && unpack(bits[1]) && !unpack(lsb(bits));
 endfunction
 
-// function Bool isAllOnes(Bit#(nSz) bits);
-//     Bool ret = unpack(&bits);
-//     return ret;
-// endfunction
 
 function Bool isAllOnesR(Bit#(nSz) bits) provisos(
     NumAlias#(TDiv#(nSz, 2), halfSz)
@@ -196,25 +192,7 @@ endfunction
 function PipeOut#(anytype) toPipeOut(FIFOF#(anytype) queue);
     return f_FIFOF_to_PipeOut(queue);
 endfunction
-/*
-function PipeOut#(anytype) toPipeOutWithAction(
-    FIFOF#(anytype) queue,
-    function Action deqAction(anytype deqVal)
-);
-    return (interface PipeOut;
-        method anytype first();
-            return queue.first;
-        endmethod
-        method Action deq();
-            queue.deq;
-            deqAction(queue.first);
-        endmethod
-        method Bool notEmpty();
-            return queue.notEmpty;
-        endmethod
-    endinterface);
-endfunction
-*/
+
 // FlagsType related
 
 typedef struct {

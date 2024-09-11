@@ -246,38 +246,7 @@ function Tuple3#(PktLen, PktLen, PktNum) stepThreeCalcPktNumAndPktLenByAddrAndPM
 
     return tuple3(firstPktLen, lastPktLen, totalPktNum);
 endfunction
-/*
-function Tuple4#(PktLen, PktLen, PktNum, ADDR) stepTwoCalcPktNumAndPktLenByAddrAndPMTU(
-    PktLen pmtuMask, PktLen addrAndLenLowPartSum, PktLen pmtuLen, PktLen lenLowPart,
-    PktLen maxFirstPktLen, PktNum truncatedPktNum, ADDR pmtuAlignedStartAddr, PMTU pmtu
-);
-    let oneAsPSN = 1;
-    let secondChunkStartAddr = addrAddPsnMultiplyPMTU(pmtuAlignedStartAddr, oneAsPSN, pmtu);
 
-    ResiduePMTU residue  = truncateByPMTU(addrAndLenLowPartSum, pmtu);
-    PktLen tmpLastPktLen = zeroExtend(residue);
-
-    let pmtuInvMask   = ~pmtuMask;
-    let noResidue     = isZeroR(pmtuMask & addrAndLenLowPartSum);
-    let noExtraPkt    = isZeroR(pmtuInvMask & addrAndLenLowPartSum);
-    let hasResidue    = !noResidue;
-    let hasExtraPkt   = !noExtraPkt;
-    let residuePktNum = pack(hasResidue);
-    let extraPktNum   = pack(hasExtraPkt);
-    let notFullPkt    = isZeroR(truncatedPktNum);
-    // let residuePktNum = |(pmtuMask & addrAndLenLowPartSum);
-    // let extraPktNum = |(pmtuInvMask & addrAndLenLowPartSum);
-    // Bool hasResidue = unpack(residuePktNum);
-    // Bool hasExtraPkt = unpack(extraPktNum);
-
-    let totalPktNum = truncatedPktNum + zeroExtend(residuePktNum) + zeroExtend(extraPktNum);
-    let firstPktLen = (notFullPkt && !hasExtraPkt) ? lenLowPart : maxFirstPktLen;
-    let lastPktLen  = notFullPkt ? (hasExtraPkt ? tmpLastPktLen : lenLowPart) : (hasResidue ? tmpLastPktLen : pmtuLen);
-    // let isSinglePkt = isLessOrEqOneR(totalPktNum);
-
-    return tuple4(firstPktLen, lastPktLen, totalPktNum, secondChunkStartAddr);
-endfunction
-*/
 function PktFragNum calcFragNumByPktLen(PktLen pktLen) provisos(
     Add#(PMTU_FRAG_NUM_WIDTH, DATA_BUS_BYTE_NUM_WIDTH, PKT_LEN_WIDTH)
 );
@@ -425,8 +394,6 @@ module mkAddrChunkSrv#(Bool clearAll)(AddrChunkSrv);
     //     if (!calcAddrChunkRespQ.notFull) begin
     //         $display("time=%0t: ", $time, "FULL_QUEUE_DETECTED: mkAddrChunkSrv calcAddrChunkRespQ");
     //     end
-        
-
     // endrule
 
     rule resetAndClear if (clearAll);
@@ -703,9 +670,6 @@ module mkDmaReadCntrl#(
     //     end
     // endrule
 
-
-
-
     let addrChunkSrv <- mkAddrChunkSrv(clearAll);
 
     Reg#(Bool) gracefulStopReg[2] <- mkCReg(2, False);
@@ -720,7 +684,6 @@ module mkDmaReadCntrl#(
 `ifdef SUPPORT_SGL
         sgeMergedMetaDataOutQ.clear;
 `endif
-        // sglTotalPayloadLenMetaDataOutQ.clear;
 
         pendingScatterGatherElemQ.clear;
         pendingLKeyQ.clear;
@@ -799,17 +762,6 @@ module mkDmaReadCntrl#(
         if (sge.isLast) begin
             reqQ.deq;
             sglIdxReg <= 0;
-
-            // let sglTotalPayloadLenMetaData = TotalPayloadLenMetaDataSGL {
-            //     sqpn    : curSQPN,
-            //     pmtu    : dmaReadCntrlReq.pmtu
-            // };
-            // sglTotalPayloadLenMetaDataOutQ.enq(sglTotalPayloadLenMetaData);
-            // $display(
-            //     "time=%0t: mkDmaReadCntrl recvReq", $time,
-            //     ", sqpn=%h", curSQPN,
-            //     ", sglTotalPayloadLenMetaData=", fshow(sglTotalPayloadLenMetaData)
-            // );
         end
         else begin
             sglIdxReg <= sglIdxReg + 1;
@@ -1729,9 +1681,6 @@ module mkAdjustPayloadSegment#(
             if (noShiftFragReg || !isFirstPktAdjustedLastFrag) begin
                 sglAllPayloadPipeIn.deq;
             end
-            // if (!isFirstPktAdjustedLastFrag) begin
-            //     sglAllPayloadPipeIn.deq;
-            // end
             else begin
                 // Do not dequeue when the last fragment of the first packet,
                 // Since the queue head is the first fragment of the next packet,
@@ -2072,10 +2021,6 @@ module mkPayloadGenerator#(
     FIFOF#(AdjustedTotalPayloadMetaData) adjustedTotalPayloadMetaDataQ <- mkFIFOF;
     FIFOF#(DataStream) bramQueueTimingFixStageQ <- mkFIFOF;
 
-
-
-
-
 `ifdef SUPPORT_SGL
     let sgeMergedPayloadPipeOut <- mkMergePayloadEachSGE(
         clearAll, dmaReadCntrl.sgePktMetaDataPipeOut, toPipeOut(sgePayloadOutQ)
@@ -2094,8 +2039,6 @@ module mkPayloadGenerator#(
         clearAll, toPipeOut(adjustedTotalPayloadMetaDataQ), sgeMergedPayloadPipeOut
     );
 `endif
-
-
 
     // TODO: check payloadOutQ buffer size is enough for DMA read delay?
     FIFOF#(DataStream) payloadBufQ <- mkSizedBRAMFIFOF(valueOf(DATA_STREAM_FRAG_BUF_SIZE));

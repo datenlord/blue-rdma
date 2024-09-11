@@ -53,8 +53,6 @@ module mkQPContext(QPContext);
         let key = keyPipeQ.first;
         keyPipeQ.deq;
 
-        $display("respMaybe=", fshow(respMaybe));
-
         if (respMaybe matches tagged Valid .resp &&& resp.qpnKeyPart == key) begin
             readCommonSrvInst.putResp(tagged Valid resp);
         end 

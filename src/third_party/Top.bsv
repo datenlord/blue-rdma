@@ -438,8 +438,6 @@ typedef enum {
 } UdpReceivingChannelSelectState deriving(Bits, Eq);
 
 
-
-
 interface RdmaUserLogicWithoutXdmaAndCmacWrapper;
     interface AxiStream512FifoOut axiStreamTxOutUdp;
     interface Put#(AxiStream512)   axiStreamRxInUdp;
@@ -469,8 +467,6 @@ module mkRdmaUserLogicWithoutXdmaAndCmacWrapper(
     let rdma <- mkRdmaUserLogicWithoutXdmaAndUdpCmacWrapper(dmacClock, dmacReset);
     let udp <- mkUdpWrapper;
 
-    // let udpGearbox <- mkUdpGearbox(rdmaClock, rdmaReset, udpClock, udpReset);
-
     Reg#(UdpReceivingChannelSelectState)  isReceivingRawPacketReg <- mkReg(UdpReceivingChannelSelectStateNotInit);
 
     RingbufStorage#(RecvPacketSrcMacIpBufferEntry, RecvPacketSrcMacIpBufferIdx) recvMacIpStorage <- mkRingbufStorage("recvMacIpStorage", False);
@@ -498,8 +494,6 @@ module mkRdmaUserLogicWithoutXdmaAndCmacWrapper(
         queueFullDebugProbe <= queueFullDebugReg;
     endrule
 
-    // mkConnection(toGet(rdma.setNetworkParamReqOut), toPut(udp.netTxRxIfc.udpConfig));
-
 
     // rule debug;
     //     // if (!udpTxStreamBufQ.notFull) begin
@@ -525,12 +519,6 @@ module mkRdmaUserLogicWithoutXdmaAndCmacWrapper(
     rule initAndForwardUdpConfig;
         let cfg <- rdma.setNetworkParamReqOut.get;
         udp.netTxRxIfc.udpConfig.put(cfg);
-        // udp.netTxRxIfc.udpConfig.put(UdpConfig{
-        //     macAddr: 'hAABBCCDDEEFF,
-        //     ipAddr:     'h7F000003,
-        //     netMask:  'h0,
-        //     gateWay:  'h0
-        // } );
         udpConfigInitedReg <= True;
     endrule
 

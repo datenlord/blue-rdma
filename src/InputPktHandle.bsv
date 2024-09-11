@@ -324,10 +324,6 @@ module mkInputRdmaPktBufAndHeaderValidation(InputRdmaPktBuf);
     endrule
 
 
-
-
-
-
     (* conflict_free = "recvPktFrag, \
                         preCheckHeader, \
                         prepareValidation, \

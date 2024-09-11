@@ -820,20 +820,6 @@ typedef struct {
     EntryCommonQPC                  qpc;
 } RdmaPktMetaDataAndQPC deriving(Bits, FShow);
 
-// typedef struct {
-//     QPN  qpn;
-// } ReadReqRqQPC;
-
-// typedef struct {
-//     QPN  qpn;
-//     EntryRqQPC ent;
-// } WriteReqRqQPC;
-
-// typedef struct {
-
-// } EntryRqQpc;
-
-
 typedef struct {
     // Fields from BTH  // total 60 bits
     TransType trans;    // 3

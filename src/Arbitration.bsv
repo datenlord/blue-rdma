@@ -11,11 +11,6 @@ import RdmaUtils :: *;
 
 import Arbiter :: * ;
 
-
-
-
-
-
 module mkTwoWayFixedPriorityStreamMux#(
     String name,
     Bool enableDebug,
@@ -28,7 +23,6 @@ module mkTwoWayFixedPriorityStreamMux#(
 
     Reg#(Bool) isIdleReg <- mkReg(True);
     Reg#(Bool) isForwardingCh0Reg <- mkReg(False);
-
 
     FIFOF#(Tuple2#(Bool, reqType))   reqQ <- mkFIFOF;
 
@@ -76,9 +70,6 @@ module mkTwoWayFixedPriorityStreamMux#(
 endmodule
 
 
-
-
-
 module mkClientArbiter#(
     String name,
     Bool enableDebug,
@@ -93,10 +84,9 @@ module mkClientArbiter#(
     Add#(1, anysize, portSz)
 );
 
-    Arbiter_IFC#(portSz) arbiter <- mkArbiter(False);
-    Reg#(Bool) canSubmitArbitReqReg <- mkReg(True);
-
-    Vector#(portSz, FIFOF#(reqType)) clientReqFifoVec <- replicateM(mkFIFOF);
+    Arbiter_IFC#(portSz)                arbiter                 <- mkArbiter(False);
+    Reg#(Bool)                          canSubmitArbitReqReg    <- mkReg(True);
+    Vector#(portSz, FIFOF#(reqType))    clientReqFifoVec        <- replicateM(mkFIFOF);
     // Vector#(portSz, FIFOF#(respType)) clientRespFifoVec <- replicateM(mkFIFOF);
 
     // A trick here. This fifo's size must be small, and it should be smaller than portSz, or it will
@@ -114,8 +104,6 @@ module mkClientArbiter#(
         mkConnection(clientVec[idx].request, toPut(clientReqFifoVec[idx]));
     end
 
-
-
     rule forwardRequest if (!canSubmitArbitReqReg);
         let idx = grantReqKeepOrderQ.first;
         let req = clientReqFifoVec[idx].first;
@@ -128,7 +116,6 @@ module mkClientArbiter#(
             grantReqKeepOrderQ.deq;
         end
         
-
         if (enableDebug) begin
             $display(
                 "time=%0t: ", $time,
@@ -137,8 +124,6 @@ module mkClientArbiter#(
                 ", reqFinished=", fshow(reqFinished)
             );
         end
-        
-        
     endrule
 
     for (Integer idx=0; idx < valueOf(portSz); idx=idx+1) begin

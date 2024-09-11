@@ -98,10 +98,31 @@ proc addExtFiles {args} {
 proc runSynthDesign {args} {
     global dir_output top_module max_net_path_num
 
+
+    # set debug_nets [list \
+    #     [get_nets -hierarchical  fakeWriteCheckHasErrorReg*] \
+    #     [get_nets -hierarchical  packetCounterReg*] \
+    #     [get_nets -hierarchical  timCounterSnapshotReg*] \
+    #     [get_nets -hierarchical  udpCore_udpIpEthBypassRx_udpIpEthRx_macMetaAndUdpIpStream_macCheckErrorCounter*] \
+    #     [get_nets -hierarchical  udpCore_udpIpEthBypassRx_udpIpEthRx_udpIpMetaAndDataStream_crcCheckErrorCounter*] \
+    #     [get_nets -hierarchical  udpCore_udpIpEthBypassRx_udpIpEthRx_udpIpMetaAndDataStream_udpIpMetaAndDataStream_ipCheckErrorCounter*] \
+    #     [get_nets -hierarchical  rawUdpIpEthBypassRx_udpIpEthBypassRx_udpIpEthRx_udpIpMetaAndDataStream_dataStreamOutBuf_FULL_N*] \
+    #     [get_nets -hierarchical  iCrcCheckStateReg*] \
+    #     [get_nets -hierarchical  mkAdjustPayloadSegmentCheckCntReg*] \
+    #     [get_nets -hierarchical  forwardTxStreamCntReg*] \
+    #     [get_nets -hierarchical  genHeaderCntReg*] \
+    #     [get_nets -hierarchical  -regexp  ".*sq/sq_curPsnReg_reg\[[0-9]+\]"] \
+    #     [get_nets -hierarchical  udpCore_udpIpEthBypassRx_udpIpEthRx_macMetaAndUdpIpStream_macMetaDataOutBuf_EMPTY_N*] \
+    #     [get_nets -hierarchical  udpCore_udpIpEthBypassRx_udpIpEthRx_macMetaAndUdpIpStream_macMetaDataOutBuf_FULL_N*] \
+    # ]
+    # set_property -dict [list MARK_DEBUG true MARK_DEBUG_CLOCK user_clk_250] $debug_nets
+
+
+
     synth_design -top $top_module -flatten_hierarchy none
 
     source batch_insert_ila.tcl
-    batch_insert_ila 1024
+    batch_insert_ila 256
 
     write_checkpoint -force $dir_output/post_synth_design.dcp
     write_xdc -force -exclude_physical $dir_output/post_synth.xdc

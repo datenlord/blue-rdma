@@ -19,7 +19,7 @@ mkdir -p $LOG_DIR
 
 # make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestFixedPktLenDataStreamPipeOut 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=SimDma.bsv TOPMODULE=mkTestDmaReadAndWriteSrv 2>&1 | tee -a $ALL_LOG
-# make -j8 TESTFILE=SimExtractRdmaHeaderPayload.bsv TOPMODULE=mkTestSimExtractNormalHeaderPayload 2>&1 | tee -a $ALL_LOG
+# make -j8 TESTFILE=SimExtractHeaderRDMAPayload.bsv TOPMODULE=mkTestSimExtractNormalHeaderPayload 2>&1 | tee -a $ALL_LOG
 # make -j8 TESTFILE=SimGenRdmaReqResp.bsv TOPMODULE=mkTestSimGenRdmaResp 2>&1 | tee -a $ALL_LOG
 
 # make -j8 TESTFILE=TestArbitration.bsv TOPMODULE=mkTestPipeOutArbiter 2>&1 | tee -a $ALL_LOG

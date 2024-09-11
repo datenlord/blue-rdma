@@ -43,25 +43,9 @@ module mkBramCache(BramCache#(addrType, dataType, splitCntExp)) provisos(
     cfg.outFIFODepth = 4;
 
     Vector#(TExp#(splitCntExp), BRAM2Port#(subAddrType, dataType)) subBramVec <- replicateM(mkBRAM2Server(cfg));
-    // Vector#(TExp#(splitCntExp), FIFOF#(BRAMRequest#(subAddrType, dataType))) subReqFifoVecPortA <- replicateM(mkFIFOF);
-    // Vector#(TExp#(splitCntExp), FIFOF#(BRAMRequest#(subAddrType, dataType))) subReqFifoVecPortB <- replicateM(mkFIFOF);
 
     FIFOF#(subBlockIdxType) orderKeepQueuePortA <- mkSizedFIFOF(6);
     FIFOF#(subBlockIdxType) orderKeepQueuePortB <- mkSizedFIFOF(6);
-
-    // for (Integer idx = 0; idx < valueOf(TExp#(splitCntExp)); idx = idx + 1) begin
-    //     rule forwardPortAReq;
-    //         let req = subReqFifoVecPortA[idx].first;
-    //         subReqFifoVecPortA[idx].deq;
-    //         subBramVec[idx].portA.request.put(req);
-    //     endrule
-
-    //     rule forwardPortBReq;
-    //         let req = subReqFifoVecPortB[idx].first;
-    //         subReqFifoVecPortB[idx].deq;
-    //         subBramVec[idx].portB.request.put(req);
-    //     endrule
-    // end
 
     BRAM2Port#(addrType, dataType) bram2Port <- mkBRAM2Server(cfg);
 
@@ -83,7 +67,6 @@ module mkBramCache(BramCache#(addrType, dataType, splitCntExp)) provisos(
             datain: dontCareValue
         };
         subBlockIdxType subIdx = truncateLSB(pack(cacheAddr));
-        // subReqFifoVecPortA[subIdx].enq(req);
         subBramVec[subIdx].portA.request.put(req);
         orderKeepQueuePortA.enq(subIdx);
         // $display("send BRAM read req to sub block =", fshow(subIdx), "addr=", fshow(addr));
@@ -110,7 +93,6 @@ module mkBramCache(BramCache#(addrType, dataType, splitCntExp)) provisos(
             datain: writeData
         };
         subBlockIdxType subIdx = truncateLSB(pack(cacheAddr));
-        // subReqFifoVecPortB[subIdx].enq(req);
         subBramVec[subIdx].portB.request.put(req);
         orderKeepQueuePortB.enq(subIdx);
         // $display("send BRAM write req to sub block =", fshow(subIdx), "addr=", fshow(addr));
@@ -429,8 +411,6 @@ module mkDmaReadReqAddrTranslator(DmaReqAddrTranslator);
     //     if (!readRespOutQ.notEmpty) begin
     //         $display("time=%0t: ", $time, "EMPTY_QUEUE_DETECTED: mkDmaReadReqAddrTranslator readRespOutQ");
     //     end
-
-
     // endrule
 
 

@@ -268,7 +268,6 @@ module mkRingbufH2cController(RingbufNumber qIdx, H2CRingBufFifoCntrlIfc#(t_elem
 endmodule
 
 
-
 interface RingbufC2hMetadata;
     interface Reg#(ADDR) addr;
     interface Reg#(Fix4kBRingBufPointer) head;
@@ -296,10 +295,8 @@ module mkRingbufC2hController(RingbufNumber qIdx, PipeOut#(t_elem) fifoCntrl, Ri
     FIFOF#(UserLogicDmaC2hReq) dmaReqQ <- mkFIFOF;
     FIFOF#(UserLogicDmaC2hResp) dmaRespQ <- mkFIFOF;
 
-
     Reg#(RingbufReadBlockInnerOffset) headPosInReadBlockReg <- mkReg(0);
 
-    
     rule sendDmaReq;
 
         if (isRingbufNotFull(headShadowReg, tailReg[0]) && fifoCntrl.notEmpty) begin
@@ -324,8 +321,6 @@ module mkRingbufC2hController(RingbufNumber qIdx, PipeOut#(t_elem) fifoCntrl, Ri
                     len: fromInteger(valueOf(USER_LOGIC_DESCRIPTOR_BYTE_WIDTH)),
                     dataStream: dataStream2DataStreamEnRightAlign(ds)
             });
-
-            $display("33333333====, ds=", fshow(ds), ", dataStream2DataStreamEnRightAlign(ds)=", fshow(dataStream2DataStreamEnRightAlign(ds)));
 
             headShadowReg <= headShadowReg + 1;
         end

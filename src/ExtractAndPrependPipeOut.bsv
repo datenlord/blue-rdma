@@ -100,10 +100,6 @@ module mkHeader2DataStream#(
         // if it is an empty header, also output a beat of header stream to make downstream pipeline easy without blocking.
         headerDataStreamOutQ.enq(dataStream);
 
-        // if (!curHeader.headerMetaData.isEmptyHeader) begin
-        //     headerDataStreamOutQ.enq(dataStream);
-        // end
-
         let bth = extractBTH(curHeader.headerData);
         $display(
             "time=%0t: mkHeader2DataStream outputHeader", $time,
@@ -522,14 +518,10 @@ module mkPrependHeader2PipeOut#(
             };
             dataPipeIn.deq;
 
-            $display("time=%0t: mkPrependHeader2PipeOut outputMixed 11111111111111111111111", $time);
-
             if (firstDataStreamFrag.isLast) begin
-                $display("time=%0t: mkPrependHeader2PipeOut outputMixed 22222222222222", $time);
                 isMixOutputHeaderOutputStageReg <= True;
                 fragToOutput.isLast = noExtraLastFragReg;
                 if (noExtraLastFragReg) begin
-                    $display("time=%0t: mkPrependHeader2PipeOut outputMixed 3333333333333333333", $time);
                     dispatchNextRule;
                 end
                 else begin

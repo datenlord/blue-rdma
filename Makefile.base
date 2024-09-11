@@ -34,9 +34,9 @@ BSV_C_EXT_FILES += \
 DIRFLAGS = $(BSVSRCDIR) $(OUTDIR) $(WORKDIR)
 MISCFLAGS = -print-flags -show-timestamps -show-version -steps 6000000 \
 	-D IS_SUPPORT_RDMA=True \
-	-D IS_250MHZ_512BITS=True 
-	
-	#-D DO_BANDWIDTH_TEST=True 
+	-D IS_250MHZ_512BITS=True
+	# -D IS_DEBUG \
+	# -D DO_BANDWIDTH_TEST=True 
 RUNTIMEFLAGS = +RTS -K4095M -RTS
 
 BLUE_CRC_DIR ?= ../src/third_party/blue-crc

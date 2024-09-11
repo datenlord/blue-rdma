@@ -97,8 +97,6 @@ module mkRQ(RQ ifc);
         return accFlags;
     endfunction
 
-
-
     rule debug;
         if (!rdmaPktMetaDataInQ.notFull) begin
             $display("time=%0t: ", $time, "FULL_QUEUE_DETECTED: rdmaPktMetaDataInQ");
@@ -135,9 +133,6 @@ module mkRQ(RQ ifc);
         end                        
     endrule
 
-
-
-
     rule queryMemoryRegionTable;
         let pktMetaDataAndQpc = rdmaPktMetaDataInQ.first;
         rdmaPktMetaDataInQ.deq;
@@ -167,11 +162,9 @@ module mkRQ(RQ ifc);
                  ", reth=",  fshow(reth),
                  ", pktMetaDataAndQpc=",  fshow(pktMetaDataAndQpc)
         );
-        
     endrule
 
     rule reqStatusCheckStep1;
-
         let {pktMetaDataAndQpc, rdmaOpCodeNeedQueryMrTable} = reqStatusCheckStep1PipeQ.first;
         reqStatusCheckStep1PipeQ.deq;
 
@@ -187,19 +180,15 @@ module mkRQ(RQ ifc);
         let isWriteReq           = isWriteReqRdmaOpCode(bth.opcode);
         let isWriteImmReq        = isWriteImmReqRdmaOpCode(bth.opcode);
         let isReadReq            = isReadReqRdmaOpCode(bth.opcode);
-        let isReadResp            = isReadRespRdmaOpCode(bth.opcode);
+        let isReadResp           = isReadRespRdmaOpCode(bth.opcode);
         let isAtomicReq          = isAtomicReqRdmaOpCode(bth.opcode);
         let isFirstOrOnlyPkt     = isFirstOrOnlyRdmaOpCode(bth.opcode);
         let isLastOrOnlyPkt      = isLastOrOnlyRdmaOpCode(bth.opcode);
         let isSupportedReqOpCode = isSupportedReqOpCodeRQ(qpc.qpType, bth.opcode); 
         let isRawPacket          = rdmaHeader.headerMetaData.isEmptyHeader;
 
-
-        let reqStatus        = RDMA_REQ_ST_NORMAL;
-        
-        
-        
-        let isAccCheckPass = False;
+        let reqStatus            = RDMA_REQ_ST_NORMAL;
+        let isAccCheckPass       = False;
         
         // for ACK/NACK, no need to check
         if (rdmaOpCodeNeedQueryMrTable) begin
@@ -229,7 +218,6 @@ module mkRQ(RQ ifc);
                     );
                 end
             endcase
-        
         end
         else begin
             isAccCheckPass = True;
@@ -268,10 +256,6 @@ module mkRQ(RQ ifc);
         let isAccTypeMatch          = False;
 
         if (rdmaOpCodeNeedQueryMrTable) begin
-        
-
-            
-        
             let mrMaybe <- mrTableQueryCltInst.getResp;
             $display("mrMaybe=", fshow(mrMaybe));
 
@@ -282,7 +266,6 @@ module mkRQ(RQ ifc);
                 
                 isAccTypeMatch  = compareAccessTypeFlags(mr.accFlags, reqAccFlags);
 
-                
                 lowerAddrBoundOk = reth.va >= mr.baseVA;
 
                 mrUpperAddrBound = mr.baseVA + zeroExtend(mr.len);
@@ -302,8 +285,6 @@ module mkRQ(RQ ifc);
             end
         end
 
-        
-
         let reqStatusCheckStep3PipeInfo = ReqStatusCheckStep3PipeInfo {
             pktMetaDataAndQpc           :   pktMetaDataAndQpc,
             reqStatus                   :   reqStatus,
@@ -318,7 +299,6 @@ module mkRQ(RQ ifc);
         };
 
         reqStatusCheckStep3PipeQ.enq(reqStatusCheckStep3PipeInfo);
-
     endrule
 
 
@@ -364,7 +344,6 @@ module mkRQ(RQ ifc);
         getPGTQueryRespPipeQ.enq(tuple4(pktMetaDataAndQpc, reqStatus, needWaitForPGTResponse, rdmaOpCodeNeedQueryMrTable));
 
         $display("time=%0t: ", $time, "getMRQueryRespAndReqStatusCheckStep2 pktMetaDataAndQpc=",  fshow(pktMetaDataAndQpc));
-
     endrule
 
     rule recvAddrTransRespAndIssueDMA;
@@ -445,7 +424,6 @@ module mkRQ(RQ ifc);
         end
         
         psnContinuityCheckPipeQ.enq(tuple4(pktMetaDataAndQpc, reqStatus, needIssueDMARequest, needCheckExpectedPSN));
-
     endrule
 
     rule checkPsnContinuityAndDecideIfNeedReportPacketMeta;
@@ -490,13 +468,10 @@ module mkRQ(RQ ifc);
             end
         end
 
-
         // For Debug Use
         // needReportPacketMeta = True;
 
-
         waitDMARespPipeQ.enq(tuple6(pktMetaDataAndQpc, reqStatus, expectedPsn, needIssueDMARequest, needReportPacketMeta, canAutoAck));
-        
     endrule
 
     rule waitDMAFinishAndWriteMetaToHost;
@@ -505,7 +480,6 @@ module mkRQ(RQ ifc);
 
         let pktMetaData = pktMetaDataAndQpc.metadata;
         let rdmaHeader  = pktMetaData.pktHeader;
-        
 
         let bth             = extractBTH(rdmaHeader.headerData);
         let reth            = extractPriRETH(rdmaHeader.headerData, bth.trans);
@@ -516,7 +490,6 @@ module mkRQ(RQ ifc);
         $display("nreth=", fshow(nreth));
         let isAckPkt        = isAckRdmaOpCode(bth.opcode);
         let isRawPacket     = rdmaHeader.headerMetaData.isEmptyHeader;
-
 
         if (needIssueDMARequest) begin
             let _ <- payloadConsumerControlClt.getResp;
@@ -758,12 +731,6 @@ module mkRQReportEntryToRingbufDesc(RQReportEntryToRingbufDesc);
         end
     endrule
 
-
-
-
-
-
     interface pktReportEntryPipeIn  = toPut(pktReportEntryPipeInQ);
     interface ringbufDescPipeOut    = toPipeOut(ringbufDescPipeOutQ);
-
 endmodule
